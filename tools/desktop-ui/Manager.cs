@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Claude MCP 连接管理")]
 [assembly: System.Reflection.AssemblyProduct("Claude MCP Portable Manager")]
-[assembly: System.Reflection.AssemblyVersion("4.0.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.0.1.0")]
+[assembly: System.Reflection.AssemblyVersion("4.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.1.0.0")]
 
 namespace ClaudeMcp {
     internal sealed class Target {
@@ -181,6 +181,7 @@ namespace ClaudeMcp {
                     string page=args.Length>5?args[5]:"expanded";
                     if(page=="editor")form.OpenEditor(first.Target.Name);
                     else if(page=="add")form.OpenAdd();
+                    else if(page=="settings"||page=="settings-en"||page=="about"){if(page=="settings-en"){var options=form.Options.Copy();options.language="en";form.ChangeSettings(options);}form.OpenSettings();if(page=="about")form.Settings.ShowAbout();}
                     else if(page=="progress"){first.BusyConnect=true;first.Target.State="waiting-login";first.Target.Detail="[4/5] 等待网页登录 · 请在打开的云电脑网页中输入密码，可随时停止。";first.RefreshTarget(first.Target);first.SetExpanded(true,false);first.TestHover(true);}
                     else {first.SetExpanded(page=="expanded",false);foreach(var card in form.Cards.Values)card.ClearPointer();if(page!="idle")first.TestHover(true);}
                     Application.DoEvents();
@@ -192,14 +193,24 @@ namespace ClaudeMcp {
                 using (var form = new ShortcutPrompt()) { form.Show(); Application.DoEvents(); using (var bmp = new Bitmap(form.Width,form.Height)) { form.DrawToBitmap(bmp,new Rectangle(Point.Empty,bmp.Size)); bmp.Save(Path.GetFullPath(args[1]),System.Drawing.Imaging.ImageFormat.Png); } }
                 return 0;
             }
-            if (args.Length != 0) return 64;
-            BackendRestart.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app"));
+            bool startup=args.Length==1&&args[0]=="--startup";
+            bool updated=args.Length==2&&args[0]=="--updated";
+            Guid transactionId;if(updated&&!Guid.TryParseExact(args[1],"N",out transactionId))return 64;
+            if (args.Length != 0&&!startup&&!updated) return 64;
+            if(startup&&!AppSettings.Load(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp")).autoStart)return 0;
+            bool healthy=BackendRestart.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app"));
             string account = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string key; using (var hash = SHA256.Create()) key = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(account.ToLowerInvariant()))).Replace("-", "").Substring(0, 20);
             bool created;
             using (var mutex = new Mutex(true, "Local\\ClaudeMcpManager-" + key, out created)) {
-                if (!created) return 0;
-                try { ShortcutPrompt.AskBeforeManager(); Application.Run(new Manager(false)); return 0; }
+                if (!created) {if(!startup)ManagerSignal.Restore();return 0;}
+                try {
+                    L.Set(AppSettings.Load(Path.Combine(account,"ClaudeLocalMcp")).language);if(!startup&&!updated)ShortcutPrompt.AskBeforeManager();
+                    using(var form=new Manager(false)){
+                        form.Shown+=delegate{if(startup)form.BeginInvoke(new Action(form.HideToTray));if(updated)UpdateController.Acknowledge(args[1],healthy);};
+                        Application.Run(form);
+                    }return 0;
+                }
                 catch { MessageBox.Show("界面无法打开，请确认便携包完整。原有 BAT 入口仍可使用。", "Claude MCP", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
                 finally { mutex.ReleaseMutex(); }
             }
@@ -253,6 +264,7 @@ namespace ClaudeMcp {
                 using (var form = new Manager(true)) { form.Show(); Application.DoEvents(); check(form.Visible && form.Controls.Count > 0, "real WinForms preview starts with no connector"); }
                 DashboardTests.Run(temp, check);
                 BackendRestart.Test(temp,check);
+                SettingsTests.Run(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }
             finally {

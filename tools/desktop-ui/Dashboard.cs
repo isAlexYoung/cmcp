@@ -17,6 +17,13 @@ namespace ClaudeMcp {
         readonly Label status = new Label(), count = new Label(), empty = new Label();
         readonly Panel content = new Panel();
         internal TargetEditorPage Editor;
+        internal SettingsPage Settings;
+        internal AppSettings Options;
+        readonly bool isolated;
+        NotifyIcon tray;
+        internal bool TrayVisible;
+        bool exiting,updateNotice;
+        UpdateController updates;
         internal Action<string> Trace;
         void Mark(string message){if(Trace!=null)Trace(message);}
         int editorScroll;
@@ -33,7 +40,8 @@ namespace ClaudeMcp {
         internal Manager(bool demo, string stateOverride = null, string kitOverride = null) {
             if (stateOverride != null) stateDirectory = stateOverride;
             if (kitOverride != null) kit = kitOverride;
-            preview = demo; Preferences = demo ? new UiPreferences() : UiPreferences.Load(stateDirectory);
+            preview = demo;isolated=demo||stateOverride!=null; Preferences = demo ? new UiPreferences() : UiPreferences.Load(stateDirectory);
+            Options=demo?new AppSettings():AppSettings.Load(stateDirectory,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
             Icon=System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             Font=new Font("Microsoft YaHei UI",11F);AutoScaleMode=AutoScaleMode.Dpi;
@@ -47,16 +55,21 @@ namespace ClaudeMcp {
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有云电脑\r\n点击右上角「添加云电脑」，保存地址后即可连接。";empty.Margin=new Padding(0,30,0,0);
             content.Controls.Add(list);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
             toolbar.Add.Click+=delegate{OpenAdd();};toolbar.Theme.Click+=delegate{SetTheme(!Preferences.dark);};
+            toolbar.Settings.Click+=delegate{OpenSettings();};
+            updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();});
+            toolbar.UpdateButton.MouseEnter+=delegate{updates.Check(false);};toolbar.UpdateButton.Click+=delegate{RunUpdate();};
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
-            FormClosed+=delegate{timer.Stop();timer.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();
+            FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&Options.closeToTray&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;HideToTray();}};
+            FormClosed+=delegate{timer.Stop();timer.Dispose();updates.Dispose();if(tray!=null)tray.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();
         }
         void ApplyTheme(){
             BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);
             status.ForeColor=colors.Muted;count.ForeColor=empty.ForeColor=colors.Text;
             foreach(var card in Cards.Values){card.Selected=card.Target.Name==selected;card.Apply(colors);}
             if(Editor!=null)Editor.Apply(colors);
+            if(Settings!=null)Settings.Apply(colors);
             if(IsHandleCreated)NativeFrame.Apply(Handle,colors);
             Invalidate(true);
         }
@@ -65,13 +78,36 @@ namespace ClaudeMcp {
             if(keys==Keys.Tab||keys==(Keys.Shift|Keys.Tab))foreach(var card in Cards.Values)card.BeginKeyboardNavigation();
             return base.ProcessCmdKey(ref m,keys);
         }
-        internal void SetTheme(bool dark){bool old=Preferences.dark;Preferences.dark=dark;try{SavePreferences();colors=Palette.Create(dark);ApplyTheme();}catch{Preferences.dark=old;Error("主题偏好未能保存，请检查界面偏好文件权限。");}}
+        internal void SetTheme(bool dark){try{var next=Options.Copy();next.theme=dark?"dark":"light";ChangeSettings(next);}catch{Error("设置未能保存，请检查本机文件和注册表权限。");}}
+        internal void ChangeSettings(AppSettings next){
+            bool startupChanged=next.autoStart!=Options.autoStart;
+            if(startupChanged&&!isolated)StartupRegistration.Set(Application.ExecutablePath,next.autoStart);
+            try{if(!preview)next.Save(stateDirectory);}catch{if(startupChanged&&!isolated)StartupRegistration.Set(Application.ExecutablePath,Options.autoStart);throw;}
+            Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
+            foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
+        }
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();}
+        internal void CloseSettings(){if(Settings==null)return;var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;}
+        void SettingsAction(string name){try{
+            if(name=="update"){RunUpdate();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
+            if(name=="shortcut"){DesktopShortcut.Create(Application.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
+            else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
+        }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
+        void RunUpdate(){updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
+        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.UpdateTip(message);if(Settings!=null)Settings.SetUpdateStatus(message);else if(updateNotice){notice=message;status.Text=L.Text(message);}}
+        internal void HideToTray(){
+            if(!isolated&&tray==null){var menu=new ContextMenuStrip();menu.Items.Add(L.Text("打开主界面"),null,delegate{RestoreManager();});menu.Items.Add(L.Text("退出界面，保留连接"),null,delegate{exiting=true;Close();});tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=menu};tray.DoubleClick+=delegate{RestoreManager();};}
+            TrayVisible=true;if(tray!=null){tray.ContextMenuStrip.Items[0].Text=L.Text("打开主界面");tray.ContextMenuStrip.Items[1].Text=L.Text("退出界面，保留连接");tray.Visible=true;}Hide();
+        }
+        internal void RestoreManager(){TrayVisible=false;if(tray!=null)tray.Visible=false;Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
+        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}base.WndProc(ref message);if(message.Msg==0x1a&&Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
-        void Error(string text){notice=text;status.Text=text;status.ForeColor=colors.Danger;}
-        void OpenLocal(string path){try{if(!File.Exists(path)&&!Directory.Exists(path)){MessageBox.Show(this,"该位置尚不存在。首次连接后会生成日志。",Text);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}catch{Error("无法打开该位置，请检查文件是否存在。");}}
+        void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}
+        void OpenLocal(string path){try{if(!File.Exists(path)&&!Directory.Exists(path)){MessageBox.Show(this,L.Text("该位置尚不存在。首次连接后会生成日志。"),Text);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}catch{Error("无法打开该位置，请检查文件是否存在。");}}
         void Select(TargetCard card){selected=card.Target.Name;foreach(var other in Cards.Values){other.Selected=other==card;other.Apply(colors);}}
         bool IsBusy(string name){return children.Any(p=>p.Name==name&&!p.Superseded);}
         void Launch(string action,TargetCard card,string initialUrl){
+            if(updates.Installing){Error("正在下载并校验更新…");return;}
             if(preview){if(card!=null&&(action=="connect"||action=="stop")){card.Target.State=action=="connect"?"connected":"stopped";card.Target.Detail=LocalState.Detail(card.Target.State);card.RefreshTarget(card.Target);}return;}
             if(action!="add"&&card==null)return;
             string name=card==null?"":card.Target.Name;
@@ -89,7 +125,7 @@ namespace ClaudeMcp {
         void ConnectCard(TargetCard card){Select(card);bool active=card.Target.State=="connected"||card.BusyConnect||card.Target.State=="connecting"||card.Target.State=="configuring"||card.Target.State=="waiting-login";if(active)StopCard(card);else Launch("connect",card,"");}
         void StopCard(TargetCard card){Launch("stop",card,"");}
         internal void OpenAdd(){
-            if(Editor!=null)return;editorScroll=ScrollOffset;
+            if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;
             ShowEditor(new Target{Name="",Url=""},new CardPreference());
         }
         void ShowEditor(Target target,CardPreference preference){
@@ -99,7 +135,7 @@ namespace ClaudeMcp {
         }
         void EditCard(TargetCard card){OpenEditor(card.Target.Name);}
         internal void OpenEditor(string name){
-            TargetCard card;if(Editor!=null||!Cards.TryGetValue(name,out card))return;
+            TargetCard card;if(Editor!=null||Settings!=null||!Cards.TryGetValue(name,out card))return;
             Select(card);editorScroll=ScrollOffset;
             ShowEditor(card.Target,card.Preference);
         }
@@ -170,8 +206,8 @@ namespace ClaudeMcp {
                 pending.Process.Dispose();children.Remove(pending);
             }
         }
-        void DeleteCard(TargetCard card){Select(card);if(preview){targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,"删除这台云电脑的本地配置并停止它的连接？\r\n"+card.Target.Url+"\r\n不会删除 VPS 或本机文件，其他连接保持不变。","删除云电脑",MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK)Launch("remove",card,"");}
-        void CopyCard(TargetCard card){try{Clipboard.SetText(card.Target.Url);notice="地址已复制（不包含登录凭据）";status.Text=notice;}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
+        void DeleteCard(TargetCard card){Select(card);if(preview){targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,(L.Language=="en"?"Remove this cloud PC and stop its connection?\r\n":"删除这台云电脑的本地配置并停止它的连接？\r\n")+card.Target.Url+(L.Language=="en"?"\r\nVPS and local files are preserved. Other connections remain unchanged.":"\r\n不会删除 VPS 或本机文件，其他连接保持不变。"),L.Text("删除云电脑"),MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK)Launch("remove",card,"");}
+        void CopyCard(TargetCard card){try{Clipboard.SetText(card.Target.Url);notice="地址已复制（不包含登录凭据）";status.Text=L.Text(notice);}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
         TargetCard CreateCard(Target target){var card=new TargetCard(target,Preferences.Get(target.Name)){Margin=new Padding(0,0,0,Palette.Gap),Font=Font};card.SelectedCard+=Select;card.ConnectRequested+=ConnectCard;card.StopRequested+=StopCard;card.EditRequested+=EditCard;card.DeleteRequested+=DeleteCard;card.CopyRequested+=CopyCard;card.OpenRequested+=delegate(TargetCard c){Select(c);Launch("open",c,"");};card.LogsRequested+=delegate{if(!preview)OpenLocal(stateDirectory);};card.MoveRequested+=MoveByKeyboard;card.SizeChanged+=delegate{Arrange();};
             card.DragEnter+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragOver+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragDrop+=delegate(object sender,DragEventArgs e){if(CanDrop(e))DropMove((string)e.Data.GetData(typeof(string)),card.Target.Name,card.PointToClient(new Point(e.X,e.Y)).Y>card.Height/2);};return card;}
         bool CanDrop(DragEventArgs e){return e.Data.GetDataPresent(typeof(string))&&Cards.ContainsKey((string)e.Data.GetData(typeof(string)));}
@@ -183,6 +219,7 @@ namespace ClaudeMcp {
             var snapshot=preview?new Snapshot{Running=true,Targets=!previewInitialized?Demo().Targets:targets}:LocalState.Load(stateDirectory);targets=snapshot.Targets;previewInitialized=true;
             count.Text="云电脑  ·  "+targets.Count;
             status.Text=notice.Length>0?notice:preview?"交互预览 · 示例数据，不会连接 VPS":snapshot.ReadError?"本地状态暂时无法完整读取，将自动刷新":Preferences.ReadError?"界面偏好文件无法读取，已保留原文件":snapshot.Stale?"后台状态未更新，请检查连接":snapshot.Running?targets.Count(t=>t.State=="connected")+" 台已连接 · 每台云电脑独立控制":"后台尚未运行 · 打开界面不会自动连接";
+            if(L.Language=="en"){count.Text="Cloud PCs  ·  "+targets.Count;status.Text=snapshot.Running&&notice.Length==0&&!preview&&!snapshot.ReadError&&!snapshot.Stale?targets.Count(t=>t.State=="connected")+" connected · Each PC is controlled independently":L.Message(status.Text);empty.Text="No cloud PCs yet\r\nAdd a cloud PC to get started.";}else empty.Text="还没有云电脑\r\n点击右上角「添加云电脑」，保存地址后即可连接。";
             foreach(var key in Cards.Keys.Where(key=>!targets.Any(t=>t.Name==key)).ToArray()){var old=Cards[key];Cards.Remove(key);list.Controls.Remove(old);old.Dispose();}
             if(!targets.Any(t=>t.Name==selected))selected=targets.Count>0?targets[0].Name:"";
             foreach(var target in targets){TargetCard card;if(!Cards.TryGetValue(target.Name,out card)){card=CreateCard(target);Cards.Add(target.Name,card);list.Controls.Add(card);}

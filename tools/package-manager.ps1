@@ -16,6 +16,7 @@ $required += @('tools\desktop-ui\TargetCard.cs','tools\desktop-ui\TargetEditorPa
 $required += @('app\manager-events.ps1','app\manager-save.ps1','tools\desktop-ui\InlineWorker.cs','tools\desktop-ui\CardList.cs')
 $required += @('app\shared-autofill.mjs')
 $required += @('app\manager-restart.ps1','tools\desktop-ui\BackendRestart.cs')
+$required += @('app\update.ps1','app\update-core.ps1','app\update-apply.ps1','tools\desktop-ui\SettingsPage.cs','tools\desktop-ui\AppSettings.cs','tools\desktop-ui\Language.cs','tools\desktop-ui\Updater.cs','tools\desktop-ui\SettingsTests.cs')
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($item in $items) { Copy-Item -LiteralPath (Join-Path $projectRoot $item) -Destination $destination -Recurse }
@@ -30,8 +31,25 @@ if (Get-Command git.exe -ErrorAction SilentlyContinue) {
 }
 $build = [ordered]@{version=$version;sourceCommit=$commit;builtAtUtc=[DateTime]::UtcNow.ToString('o');nodeSha256=(Get-FileHash -LiteralPath (Join-Path $destination 'app\runtime\node.exe') -Algorithm SHA256).Hash.ToLowerInvariant()}
 [IO.File]::WriteAllText((Join-Path $destination 'app\build-info.json'),($build | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($destination, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
+Add-Type -AssemblyName System.IO.Compression.FileSystem,System.IO.Compression
+$inventory = @()
+foreach ($file in Get-ChildItem -LiteralPath $destination -File -Recurse -Force) {
+    $relative = $file.FullName.Substring($destination.Length+1).Replace('\','/')
+    if ($relative -eq 'app/distribution-manifest.json') { throw 'Stale distribution manifest must not be packaged' }
+    if ($file.Name -like '.env*' -or $file.Name -in @('application-preferences.json','config.json','cloudpc-targets.json','vps-targets.json','link-status.json','target-controls.json','browser-entries.json','manager-preferences.json','dashboard-preferences.json','session.json','stopped.flag') -or $file.Extension -in @('.lnk','.key','.pem','.pfx','.p12')) { throw 'Private state must not enter a distribution' }
+    $inventory += [ordered]@{path=$relative;sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+}
+$manifest = [ordered]@{schema=1;version=$version;platform='windows-x64';sourceCommit=$commit;files=$inventory}
+[IO.File]::WriteAllText((Join-Path $destination 'app\distribution-manifest.json'),($manifest | ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
+. (Join-Path $projectRoot 'app\update-core.ps1')
+$null = Test-CmcpTree $destination $version
+$archive = [IO.Compression.ZipFile]::Open($zip,[IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in Get-ChildItem -LiteralPath $destination -File -Recurse -Force) {
+        $relative = $packageName + '/' + $file.FullName.Substring($destination.Length+1).Replace('\','/')
+        $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.FullName,$relative,[IO.Compression.CompressionLevel]::Optimal)
+    }
+} finally { $archive.Dispose() }
 $hash = Get-FileHash -LiteralPath $zip -Algorithm SHA256
 [IO.File]::WriteAllText($zip + '.sha256', $hash.Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($zip) + [Environment]::NewLine, [Text.Encoding]::ASCII)
 Get-Item -LiteralPath $zip | Select-Object FullName,Length

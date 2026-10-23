@@ -7,7 +7,7 @@ using System.Windows.Forms;
 namespace ClaudeMcp {
     // Explicit vertical layout avoids FlowLayoutPanel's partial resize paints.
     // Sorting uses short eased translations; preferences change only on drop.
-    internal sealed class CardList : Panel {
+    internal sealed class CardList : EditorViewport {
         readonly Timer motion=new Timer{Interval=15};
         readonly Dictionary<Control,int> destinations=new Dictionary<Control,int>();
         List<TargetCard> order, original;
@@ -22,7 +22,7 @@ namespace ClaudeMcp {
         protected override void OnSizeChanged(EventArgs e){motion.Stop();destinations.Clear();base.OnSizeChanged(e);Invalidate(true);}
         internal void Place(IList<TargetCard> cards,bool animate){
             if(Sorting)cards=order;
-            int y=0,scroll=AutoScrollPosition.Y,width=Math.Max(420,ClientSize.Width-22);
+            int y=0,scroll=AutoScrollPosition.Y,width=Math.Max(420,ClientSize.Width-2);
             if(!animate&&motion.Enabled){
                 int expected=0;bool same=cards.Count==destinations.Count;
                 foreach(var card in cards){int goal;same&=destinations.TryGetValue(card,out goal)&&goal==expected&&card.Width==width;expected+=card.Height+Palette.Gap;}

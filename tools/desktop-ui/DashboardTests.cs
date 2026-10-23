@@ -93,7 +93,7 @@ namespace ClaudeMcp {
                     form.ClientSize=size;Pump();check(form.LayoutFits(),"responsive layout fits at "+size.Width+"x"+size.Height);
                 }
                 form.SetTheme(true);Pump();DarkCaptionResult=NativeFrame.LastCaptionResult;check(form.Preferences.dark&&a.Colors.Dark&&a.Details.Colors.Dark,"dark theme reaches cards and nested details");form.SetTheme(false);Pump();LightCaptionResult=NativeFrame.LastCaptionResult;check(!a.Colors.Dark,"light theme restores semantic colors");
-                var bar=form.Controls.OfType<DashboardToolbar>().Single();check(!bar.Settings.Enabled&&!bar.UpdateButton.Enabled&&bar.Add.Enabled,"future settings and update remain explicitly disabled; add works");
+                var bar=form.Controls.OfType<DashboardToolbar>().Single();check(bar.Settings.Enabled&&bar.UpdateButton.Enabled&&bar.Add.Enabled,"settings, update and add entries are available");
                 check(!File.Exists(Path.Combine(directory,"config.json")),"all UI tests use isolated state and never create a bridge token");
                 check(form.Text=="CMCP","native title contains only CMCP");
                 check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");

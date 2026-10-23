@@ -58,6 +58,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/powershell.json -Raw | ConvertFrom-Json
           if ($r.passed -ne 20 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete PowerShell regression' }
+      - name: Offline platform update and rollback boundaries
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/update.test.ps1 | Set-Content test-results/updater.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/updater.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 40 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete update regression' }
+      - name: Startup preference registration isolation
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/startup-settings.test.ps1 | Set-Content test-results/startup-settings.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/startup-settings.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 6 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete startup preference regression' }
+      - name: Real external update helper against disposable executables
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/update-apply.test.ps1 | Set-Content test-results/update-apply.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/update-apply.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 8 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete external update helper regression' }
       - name: Build and exercise real WinForms and Shell shortcuts
         shell: pwsh
         run: |
@@ -68,7 +89,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 139 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 160 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |
@@ -107,7 +128,7 @@ jobs:
       - name: Capture real WinForms layouts
         shell: pwsh
         run: |
-          foreach ($case in @(@('light',1100,720,'light','idle'),@('hover',1100,720,'light','hover'),@('dark',1100,720,'dark','idle'),@('narrow',660,580,'light','hover'),@('editor',1100,720,'light','editor'),@('editor-dark',660,580,'dark','editor'),@('add',1100,720,'light','add'),@('progress',1100,720,'light','progress'))) {
+          foreach ($case in @(@('light',1100,720,'light','idle'),@('hover',1100,720,'light','hover'),@('dark',1100,720,'dark','idle'),@('narrow',660,580,'light','hover'),@('editor',1100,720,'light','editor'),@('editor-dark',660,580,'dark','editor'),@('add',1100,720,'light','add'),@('progress',1100,720,'light','progress'),@('settings',1100,720,'light','settings'),@('settings-en',660,580,'dark','settings-en'),@('about',1100,720,'light','about'))) {
             $imageFile = Join-Path $PWD ('test-results/' + $case[0] + '.png')
             $arguments = '--preview "' + $imageFile + '" ' + $case[1] + ' ' + $case[2] + ' ' + $case[3] + ' ' + $case[4]
             $p = Start-Process -FilePath (Join-Path $PWD 'Claude-MCP.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru

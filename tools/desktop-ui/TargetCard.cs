@@ -18,7 +18,7 @@ namespace ClaudeMcp {
         internal readonly Label StatusText=new Label{TextAlign=ContentAlignment.MiddleRight,AutoEllipsis=true};
         internal event Action<TargetCard> SelectedCard, EditRequested, CopyRequested, DeleteRequested, ConnectRequested, OpenRequested, StopRequested, LogsRequested;
         internal event Action<TargetCard,int> MoveRequested;
-        readonly ToolTip tips=new ToolTip();
+        readonly LocalToolTip tips=new LocalToolTip();
         readonly Timer animation=new Timer{Interval=15};
         Bitmap icon;
         bool hovered, keyboardFocus, changingHover, dragArmed;
@@ -88,7 +88,7 @@ namespace ClaudeMcp {
         internal void RefreshTarget(Target target) {
             Target=target;Details.Target=target;
             AccessibleName=(Preference.label.Length>0?Preference.label:new Uri(target.Url).Host)+"，"+LocalState.Caption(target.State);
-            AccessibleDescription=target.Url+"，"+target.Mode+"。"+target.Detail;
+            AccessibleDescription=target.Url+" · "+L.Text(target.Mode)+" · "+L.Message(target.Detail);
             UpdateActions();Invalidate();Details.Invalidate();
         }
 
@@ -123,9 +123,9 @@ namespace ClaudeMcp {
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
             StatusText.Text=BusyStop?"正在停止":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
-            StatusText.AccessibleName=StatusText.Text;
+            StatusText.Text=L.Text(StatusText.Text);StatusText.AccessibleName=StatusText.Text;
             tips.SetToolTip(Connect,connected?"点击停止此云电脑的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台云电脑");
-            Connect.AccessibleName=Connect.Text+"："+Target.Url;
+            Connect.AccessibleName=L.Text(Connect.Text)+" · "+Target.Url;
             Details.Stop.Text=BusyStop?"正在停止":"停止连接";
             Connect.Invalidate();StatusText.Invalidate();
         }

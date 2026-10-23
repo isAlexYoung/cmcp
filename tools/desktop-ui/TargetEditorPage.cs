@@ -13,7 +13,7 @@ namespace ClaudeMcp {
         protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);Invalidate(true);}
     }
     // Keep WinForms scrolling/focus navigation, without native white chrome.
-    internal sealed class EditorViewport : ResizePanel {
+    internal class EditorViewport : ResizePanel {
         [DllImport("user32.dll")] static extern bool ShowScrollBar(IntPtr window,int bar,bool show);
         [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr window,int index);
         bool hiding;
@@ -59,7 +59,7 @@ namespace ClaudeMcp {
         readonly ResizePanel header = new ResizePanel(), footer = new ResizePanel();
         internal readonly EditorViewport viewport = new EditorViewport();
         readonly RoundedSheet sheet = new RoundedSheet();
-        readonly ToolTip tips = new ToolTip();
+        readonly LocalToolTip tips = new LocalToolTip();
         internal event Action BackRequested, SaveRequested;
         internal readonly string TargetName;
         readonly string initialUrl;
@@ -75,17 +75,17 @@ namespace ClaudeMcp {
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;
             header.Dock=DockStyle.Top;header.Height=78;header.Controls.Add(Back);header.Controls.Add(title);
-            Back.Bounds=new Rectangle(28,20,40,40);title.Text=IsNew?"添加云电脑":"编辑云电脑";title.Font=new Font(Font,FontStyle.Bold);title.Bounds=new Rectangle(84,21,300,38);
+            Back.Bounds=new Rectangle(28,20,40,40);title.Text=L.Text(IsNew?"添加云电脑":"编辑云电脑");title.Font=new Font(Font,FontStyle.Bold);title.Bounds=new Rectangle(84,21,300,38);
             footer.Dock=DockStyle.Bottom;footer.Height=78;footer.Controls.Add(Save);
             viewport.Dock=DockStyle.Fill;viewport.AutoScroll=true;viewport.Padding=new Padding(28,16,28,24);
             sheet.Dock=DockStyle.Top;sheet.Height=654;viewport.Controls.Add(sheet);
             PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;
             Remember.Checked=target.AutoLogin;
-            passwordLabel.Text=target.HasSavedPassword?"密码（已加密保存；同一地址留空保留）":"密码（手动共享网页登录可留空）";
+            passwordLabel.Text=L.Text(target.HasSavedPassword?"密码（已加密保存；同一地址留空保留）":"密码（手动共享网页登录可留空）");
             Save.Text=IsNew?"添加":"保存";
             sheet.Controls.AddRange(new Control[]{icon,choose,reset,nameLabel,NameInput,urlLabel,UrlInput,passwordLabel,PasswordInput,Remember,help,error});
-            nameLabel.Text="名称 / 备注";urlLabel.Text="云电脑地址";
-            help.Text="勾选后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。取消勾选会删除共享模式保存的密码。";
+            nameLabel.Text=L.Text("名称 / 备注");urlLabel.Text=L.Text("云电脑地址");Remember.Text=L.Text(Remember.Text);
+            help.Text=L.Text("勾选后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。取消勾选会删除共享模式保存的密码。");
             error.AutoEllipsis=true;
             Controls.Add(viewport);Controls.Add(footer);Controls.Add(header);
             tips.SetToolTip(Back,"返回列表，不保存本次修改");tips.SetToolTip(choose,"选择 PNG、JPEG 或 ICO，最多 1 MiB");tips.SetToolTip(reset,"移除自定义图标，使用默认图标");tips.SetToolTip(Save,"保存这台云电脑的修改");
@@ -121,7 +121,7 @@ namespace ClaudeMcp {
             foreach(var b in new[]{Back,Save,choose,reset}){b.Colors=colors;b.BackColor=b==choose||b==reset?colors.Surface:colors.Page;b.Invalidate();}
             NameInput.Apply(colors);UrlInput.Apply(colors);PasswordInput.Apply(colors);sheet.Invalidate();
         }
-        internal void ShowError(string message) { error.Text=message; }
+        internal void ShowError(string message) { error.Text=L.Message(message); }
         internal void SetBusy(bool busy){Save.Enabled=Back.Enabled=choose.Enabled=reset.Enabled=NameInput.Enabled=UrlInput.Enabled=PasswordInput.Enabled=Remember.Enabled=!busy;}
         internal bool ValidateFields() {
             Uri parsed;

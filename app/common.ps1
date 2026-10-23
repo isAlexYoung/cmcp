@@ -6,7 +6,7 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.0.1'
+$script:KitVersion = '4.1.0'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = Join-Path $env:LOCALAPPDATA 'ClaudeLocalMcp'
 $script:TargetsFile = Join-Path $script:StateDir 'cloudpc-targets.json'
@@ -461,6 +461,22 @@ function Get-ServiceCommand {
 }
 
 function Register-AutoStart {
+    $preferences = Join-Path $script:StateDir 'application-preferences.json'
+    if (Test-Path -LiteralPath $preferences) {
+        try {
+            $options = Get-Content -LiteralPath $preferences -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($options.schema -ne 1 -or $options.autoStart -isnot [bool]) { throw 'Invalid application preferences' }
+            if (!$options.autoStart) { Unregister-AutoStart; return 'disabled' }
+            $manager = Join-Path (Split-Path $script:KitDir -Parent) 'Claude-MCP.exe'
+            if (!(Test-Path -LiteralPath $manager)) { throw 'CMCP manager is missing' }
+            if (!(Test-Path -LiteralPath $script:RunKey)) { New-Item -Path $script:RunKey | Out-Null }
+            $existing = (Get-ItemProperty -LiteralPath $script:RunKey -ErrorAction Stop).CMCPManager
+            if ($existing -and $existing -notmatch '\\Claude-MCP\.exe" --startup$') { throw 'Unrelated startup entry preserved' }
+            New-ItemProperty -LiteralPath $script:RunKey -Name 'CMCPManager' -Value ('"'+$manager+'" --startup') -PropertyType String -Force | Out-Null
+            Unregister-AutoStart
+            return 'manager'
+        } catch { Write-ErrorLog '设置开机自启' $_; return 'none' }
+    }
     $svc = Get-ServiceCommand
     try {
         if (!(Test-Path -LiteralPath $script:RunKey)) { New-Item -Path $script:RunKey | Out-Null }

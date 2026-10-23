@@ -1,12 +1,12 @@
 # CMCP
 
-让独立云电脑中的 Claude 使用本机 Windows 的文件、命令与桌面工具。**4.0.1** 提供卡片式界面、明暗主题和独立的多台云电脑连接。设置和更新功能留待 4.1.0 实现。
+让独立云电脑中的 Claude 使用本机 Windows 的文件、命令与桌面工具。**4.1.0** 提供卡片式界面、明暗主题、独立的多台云电脑连接，以及中英文设置、开机自启、托盘和 Windows 发布包更新。
 
 本项目为独立工具，与 Anthropic 无官方隶属关系。
 
 ## 下载与使用
 
-从 [Releases](https://github.com/isAlexYoung/cmcp/releases) 下载 `CMCP-4.0.1-windows-x64.zip`，完整解压后打开 `Claude-MCP.exe`。不要只复制 EXE，不要把 GitHub 的 Source code 压缩包当作可运行便携包。
+从 [Releases](https://github.com/isAlexYoung/cmcp/releases) 下载 `CMCP-4.1.0-windows-x64.zip`，完整解压后打开 `Claude-MCP.exe`。不要只复制 EXE，不要把 GitHub 的 Source code 压缩包当作可运行便携包。
 
 支持具备 Windows PowerShell 5.1、.NET Framework 4.x 的 Windows 10/11 x64。发布包内置 Node.js 和 Node 依赖，不会自动下载或安装缺少的依赖。
 
@@ -54,4 +54,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\tests\target-contr
 
 编译后运行 `Claude-MCP.exe --self-test <输出 JSON 路径>`，测试使用独立临时目录；不会在真实桌面创建快捷方式、修改用户连接或访问真实 VPS。
 
-第三方图标、Node.js 与依赖授权见 [THIRD_PARTY_NOTICES](../docs/THIRD_PARTY_NOTICES.md)。设置和更新入口暂时禁用。界面布局参考 [CC Switch](https://github.com/farion1231/cc-switch)，使用原生 WinForms 实现；真实 React 仅用于隔离的自动登录回归夹具，不属于运行依赖，也不包含在发布包内。
+第三方图标、Node.js 与依赖授权见 [THIRD_PARTY_NOTICES](../docs/THIRD_PARTY_NOTICES.md)。设置页包含简体中文 / English、浅色 / 深色 / 跟随系统、开机自启、关闭界面或隐藏到托盘，以及桌面快捷方式。所有列表和表单隐藏原生滚动条，保留滚轮和键盘滚动。
+
+更新按钮悬停时检查 GitHub 最新稳定 Release；点击后只选择 `windows-x64` 包，校验 SHA-256 和安装文件清单后准备替换并重新启动。失败时恢复旧便携包，备份保留在同级 `.cmcp-backup-*` 目录。密码、连接配置和日志位于用户目录，不参与程序替换。源码工作区、有额外文件或已修改程序的目录不会自动覆盖，需手动下载完整便携包。4.0.1 及更早版本首次升级请手动下载 4.1.0。界面布局参考 [CC Switch](https://github.com/farion1231/cc-switch)，使用原生 WinForms 实现；真实 React 仅用于隔离的自动登录回归夹具，不属于运行依赖，也不包含在发布包内。

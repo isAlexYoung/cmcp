@@ -138,11 +138,11 @@ namespace ClaudeMcp {
             ClientSize = new Size(460,208); FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
             Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            Controls.Add(new Label { Text = "是否创建桌面快捷方式？", Location = new Point(24,22), AutoSize = true, Font = new Font(Font,FontStyle.Bold) });
-            Controls.Add(new Label { Text = "名称：Claude-MCP\r\n快捷方式将打开本机连接管理界面。", Location = new Point(24,57), Size = new Size(410,49) });
-            remember.Text = "下次不再提示"; remember.Location = new Point(24,115); remember.AutoSize = true; Controls.Add(remember);
-            var yes = new Button { Text = "是", DialogResult = DialogResult.Yes, Location = new Point(237,160), Size = new Size(90,32) };
-            var no = new Button { Text = "否", DialogResult = DialogResult.No, Location = new Point(339,160), Size = new Size(90,32) };
+            Controls.Add(new Label { Text = L.Text("是否创建桌面快捷方式？"), Location = new Point(24,22), AutoSize = true, Font = new Font(Font,FontStyle.Bold) });
+            Controls.Add(new Label { Text = L.Text("名称：Claude-MCP\r\n快捷方式将打开本机连接管理界面。"), Location = new Point(24,57), Size = new Size(410,49) });
+            remember.Text = L.Text("下次不再提示"); remember.Location = new Point(24,115); remember.AutoSize = true; Controls.Add(remember);
+            var yes = new Button { Text = L.Text("是"), DialogResult = DialogResult.Yes, Location = new Point(237,160), Size = new Size(90,32) };
+            var no = new Button { Text = L.Text("否"), DialogResult = DialogResult.No, Location = new Point(339,160), Size = new Size(90,32) };
             Controls.Add(yes); Controls.Add(no); AcceptButton = no; CancelButton = no;
         }
         internal static void AskBeforeManager() {

@@ -51,15 +51,30 @@ namespace ClaudeMcp {
             } g.Restore(old);
         }
     }
-    internal sealed class ModernButton : Button {
+    internal sealed class ModernButton : Control, IButtonControl {
         internal Palette Colors=Palette.Create(false);
         internal string Glyph="";
-        internal bool Primary, Neutral, Destructive;
+        internal bool Primary, Neutral, Destructive, CenterText;
         bool hover, pressed;
         internal ModernButton() {
-            FlatStyle=FlatStyle.Flat; FlatAppearance.BorderSize=0; Size=new Size(32,32); Cursor=Cursors.Hand;
-            SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
+            Size=new Size(32,32); Cursor=Cursors.Hand;TabStop=true;AccessibleRole=AccessibleRole.PushButton;
+            SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable|ControlStyles.StandardClick,true);
         }
+        public DialogResult DialogResult{get;set;}
+        public void NotifyDefault(bool value){}
+        public void PerformClick(){if(Enabled)OnClick(EventArgs.Empty);}
+        sealed class ButtonAccessibility : ControlAccessibleObject {
+            readonly ModernButton button;
+            internal ButtonAccessibility(ModernButton value):base(value){button=value;}
+            public override string Name{get{return L.Text(button.AccessibleName??button.Text);}set{button.AccessibleName=value;}}
+            public override string DefaultAction{get{return "Press";}}
+            public override void DoDefaultAction(){button.PerformClick();}
+        }
+        protected override AccessibleObject CreateAccessibilityInstance(){return new ButtonAccessibility(this);}
+        protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter){pressed=true;e.Handled=true;Invalidate();}base.OnKeyDown(e);}
+        protected override void OnKeyUp(KeyEventArgs e){if((e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter)&&pressed){pressed=false;e.Handled=true;PerformClick();Invalidate();}base.OnKeyUp(e);}
+        protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+        protected override void OnLostFocus(EventArgs e){pressed=false;base.OnLostFocus(e);Invalidate();}
         protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
         protected override void OnMouseLeave(EventArgs e){hover=false;pressed=false;Invalidate();base.OnMouseLeave(e);}
         protected override void OnMouseDown(MouseEventArgs e){pressed=true;Invalidate();base.OnMouseDown(e);}
@@ -74,20 +89,20 @@ namespace ClaudeMcp {
             PaintUi.Box(g,new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),8,bg,bg);
             int glyphSize=Height>=40?22:20, x=Text.Length==0?(Width-glyphSize)/2:12;
             if(Glyph.Length>0)PaintUi.Icon(g,Glyph,new Rectangle(x,(Height-glyphSize)/2,glyphSize,glyphSize),fg);
-            if(Text.Length>0)PaintUi.Text(g,Text,Font,new Rectangle(Glyph.Length>0?39:10,0,Width-(Glyph.Length>0?44:20),Height),fg);
+            if(Text.Length>0){if(CenterText)TextRenderer.DrawText(g,L.Text(Text),Font,ClientRectangle,fg,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);else PaintUi.Text(g,L.Text(Text),Font,new Rectangle(Glyph.Length>0?39:10,0,Width-(Glyph.Length>0?44:20),Height),fg);}
             if(Focused&&ShowFocusCues)using(var path=PaintUi.Round(new Rectangle(2,2,Width-5,Height-5),8))using(var p=new Pen(Colors.SelectionBorder))g.DrawPath(p,path);
         }
     }
     internal sealed class DashboardToolbar : Panel {
-        internal readonly ModernButton Settings=new ModernButton { Glyph="settings",Enabled=false,AccessibleName="设置（尚未开放）" }, UpdateButton=new ModernButton { Glyph="refresh",Enabled=false,AccessibleName="更新（尚未开放）" }, Theme=new ModernButton { Glyph="theme",AccessibleName="切换浅色或深色" }, Add=new ModernButton { Glyph="plus",Text="添加云电脑",Primary=true,AccessibleName="添加云电脑" };
-        readonly ToolTip tips=new ToolTip();
+        internal readonly ModernButton Settings=new ModernButton { Glyph="settings",AccessibleName="设置" }, UpdateButton=new ModernButton { Glyph="refresh",AccessibleName="检查更新" }, Theme=new ModernButton { Glyph="theme",AccessibleName="切换浅色或深色" }, Add=new ModernButton { Glyph="plus",Text="添加云电脑",Primary=true,AccessibleName="添加云电脑" };
+        readonly LocalToolTip tips=new LocalToolTip();
         internal Palette Colors=Palette.Create(false);
         internal DashboardToolbar() {
             Height=72;Dock=DockStyle.Top;DoubleBuffered=true;Font=new Font("Microsoft YaHei UI",9F);
             Controls.AddRange(new Control[]{Settings,UpdateButton,Theme,Add});
-            tips.SetToolTip(this,"设置和更新入口将在后续版本开放");
-            tips.SetToolTip(Settings,"设置将在后续版本开放");tips.SetToolTip(UpdateButton,"更新将在后续版本开放（不会自动更新）");tips.SetToolTip(Theme,"切换浅色 / 深色主题");tips.SetToolTip(Add,"添加新的云电脑，不会自动连接");
+            tips.SetToolTip(Settings,"设置");tips.SetToolTip(UpdateButton,"检查更新");tips.SetToolTip(Theme,"切换浅色 / 深色主题");tips.SetToolTip(Add,"添加新的云电脑，不会自动连接");
         }
+        internal void UpdateTip(string value){tips.SetToolTip(UpdateButton,value);UpdateButton.AccessibleDescription=L.Text(value);}
         internal void Apply(Palette colors){Colors=colors;BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=b==Settings||b==UpdateButton?colors.Subtle:colors.Surface;b.Invalidate();}Invalidate();}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(166,20,32,32);UpdateButton.Bounds=new Rectangle(204,20,32,32);Theme.Bounds=new Rectangle(Width-231,17,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(e.Graphics,new Rectangle(160,16,82,40),10,Colors.Subtle,Colors.Subtle);using(var f=new Font(Font.FontFamily,14,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
@@ -100,13 +115,13 @@ namespace ClaudeMcp {
         internal readonly ModernButton Open=new ModernButton{Glyph="monitor",Text="打开云电脑"}, Stop=new ModernButton{Glyph="stop",Text="停止连接",Destructive=true}, Logs=new ModernButton{Text="查看日志"};
         internal ConnectionDetails(){DoubleBuffered=true;Controls.AddRange(new Control[]{Open,Stop,Logs});}
         internal void Apply(Palette colors){Colors=colors;BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}Invalidate();}
-        internal int NeededHeight(int width){return 164+TextRenderer.MeasureText(Target==null?"":Target.Detail,Font,new Size(Math.Max(100,width-44),1000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;}
+        internal int NeededHeight(int width){return 164+TextRenderer.MeasureText(Target==null?"":L.Message(Target.Detail),Font,new Size(Math.Max(100,width-44),1000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Open.Bounds=new Rectangle(14,Height-54,164,40);Stop.Bounds=new Rectangle(185,Height-54,144,40);Logs.Bounds=new Rectangle(336,Height-54,140,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(Target==null)return;var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),11,Colors.Surface,Colors.Border);
-            PaintUi.Text(g,"连接状态",Font,new Rectangle(18,10,100,24),Colors.Muted);PaintUi.Text(g,StatusOverride.Length>0?StatusOverride:LocalState.Caption(Target.State),Font,new Rectangle(130,10,Width-148,24),Target.State=="connected"?Colors.Success:Colors.Text,true);
-            PaintUi.Text(g,"登录方式",Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,Target.Mode,Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
+            PaintUi.Text(g,L.Text("连接状态"),Font,new Rectangle(18,10,100,24),Colors.Muted);PaintUi.Text(g,StatusOverride.Length>0?L.Text(StatusOverride):L.Text(LocalState.Caption(Target.State)),Font,new Rectangle(130,10,Width-148,24),Target.State=="connected"?Colors.Success:Colors.Text,true);
+            PaintUi.Text(g,L.Text("登录方式"),Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,L.Text(Target.Mode),Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
             using(var p=new Pen(Colors.Border))g.DrawLine(p,18,76,Width-18,76);
-            TextRenderer.DrawText(g,Target.Detail,Font,new Rectangle(18,88,Width-36,Height-153),Colors.Muted,TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(g,L.Message(Target.Detail),Font,new Rectangle(18,88,Width-36,Height-153),Colors.Muted,TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix);
         }
     }
 }

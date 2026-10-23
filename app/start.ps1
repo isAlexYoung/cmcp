@@ -125,6 +125,8 @@ function Start-Background {
     Start-LinkService
     if ($how -eq 'none') {
         Write-Warn '后台服务已启动，但开机自动连接设置失败（可能被安全软件拦截）。电脑重启后需要再次双击 Start-Claude-MCP.bat。'
+    } elseif ($how -eq 'disabled') {
+        Write-Ok '后台服务已启动；按设置保留开机自启关闭。'
     } else {
         Write-Ok '后台服务已启动，已设置为开机登录后自动连接。'
     }
