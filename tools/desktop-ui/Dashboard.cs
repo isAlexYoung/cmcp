@@ -14,8 +14,10 @@ namespace ClaudeMcp {
         readonly bool preview;
         readonly DashboardToolbar toolbar = new DashboardToolbar();
         readonly FlowLayoutPanel list = new FlowLayoutPanel();
-        readonly Label status = new Label(), count = new Label(), note = new Label(), empty = new Label();
-        readonly FlowLayoutPanel links = new FlowLayoutPanel();
+        readonly Label status = new Label(), count = new Label(), empty = new Label();
+        readonly Panel content = new Panel();
+        internal TargetEditorPage Editor;
+        int editorScroll;
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         sealed class PendingAction { internal Process Process; internal string Name, Action; }
         readonly List<PendingAction> children = new List<PendingAction>();
@@ -28,27 +30,35 @@ namespace ClaudeMcp {
         internal Manager(bool demo, string stateOverride = null) {
             if (stateOverride != null) stateDirectory = stateOverride;
             preview = demo; Preferences = demo ? new UiPreferences() : UiPreferences.Load(stateDirectory);
-            colors=Palette.Create(Preferences.dark);Text="Claude MCP · 云电脑连接管理 · 4.0.0";
+            colors=Palette.Create(Preferences.dark);Text="CMCP";
             Icon=System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            Font=new Font("Microsoft YaHei UI",9F);AutoScaleMode=AutoScaleMode.Dpi;
+            Font=new Font("Microsoft YaHei UI",11F);AutoScaleMode=AutoScaleMode.Dpi;
             ClientSize=new Size(1100,720);MinimumSize=new Size(660,500);StartPosition=FormStartPosition.CenterScreen;
-            var content = new Panel { Dock=DockStyle.Fill, Padding=new Padding(28,10,28,0) };
+            content.Dock=DockStyle.Fill;content.Padding=new Padding(28,10,28,0);
             var heading = new Panel { Dock=DockStyle.Top, Height=66 };
             count.Bounds=new Rectangle(0,2,400,28);count.Font=new Font(Font.FontFamily,12F,FontStyle.Bold);heading.Controls.Add(count);
             status.Bounds=new Rectangle(0,34,850,24);status.Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top;heading.Controls.Add(status);
             list.Dock=DockStyle.Fill;list.FlowDirection=FlowDirection.TopDown;list.WrapContents=false;list.AutoScroll=true;
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有云电脑\r\n点击右上角「添加云电脑」，保存地址后即可连接。";empty.Margin=new Padding(0,30,0,0);
             content.Controls.Add(list);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
-            var bottom=new Panel{Dock=DockStyle.Bottom,Height=102,Padding=new Padding(28,8,28,8)};
-            note.Dock=DockStyle.Top;note.Height=42;note.Text="连接后，Claude 可按当前 Windows 账户权限访问文件、运行命令和操作桌面。\r\n支持多台同时连接；关闭此窗口会保留连接，启动和停止只作用于对应卡片。";bottom.Controls.Add(note);
-            links.Dock=DockStyle.Bottom;links.Height=34;links.WrapContents=false;AddLink("日志文件夹",delegate{OpenLocal(stateDirectory);});AddLink("使用说明",delegate{OpenLocal(Path.Combine(root,"docs","桌面版使用说明.md"));});AddLink("程序文件夹",delegate{OpenLocal(root);});bottom.Controls.Add(links);Controls.Add(bottom);
-            bottom.SizeChanged+=delegate{int textHeight=TextRenderer.MeasureText(note.Text,Font,new Size(Math.Max(120,bottom.ClientSize.Width-56),500),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;note.Height=textHeight+8;int needed=textHeight+60;if(bottom.Height!=needed)bottom.Height=needed;};
             toolbar.Add.Click+=delegate{Launch("add",null,"");};toolbar.Theme.Click+=delegate{SetTheme(!Preferences.dark);};
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
+            Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             FormClosed+=delegate{timer.Stop();timer.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();
         }
-        void AddLink(string text,Action action){var link=new LinkLabel{Text=text,AutoSize=true,Margin=new Padding(0,7,24,0),LinkBehavior=LinkBehavior.HoverUnderline};link.LinkClicked+=delegate{if(!preview)action();};links.Controls.Add(link);}
-        void ApplyTheme(){BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);status.ForeColor=note.ForeColor=colors.Muted;count.ForeColor=empty.ForeColor=colors.Text;foreach(LinkLabel link in links.Controls){link.LinkColor=colors.Muted;link.ActiveLinkColor=colors.Blue;}foreach(var card in Cards.Values){card.Selected=card.Target.Name==selected;card.Apply(colors);}Invalidate(true);}
+        void ApplyTheme(){
+            BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);
+            status.ForeColor=colors.Muted;count.ForeColor=empty.ForeColor=colors.Text;
+            foreach(var card in Cards.Values){card.Selected=card.Target.Name==selected;card.Apply(colors);}
+            if(Editor!=null)Editor.Apply(colors);
+            if(IsHandleCreated)NativeFrame.Apply(Handle,colors);
+            Invalidate(true);
+        }
+        protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);if(colors!=null)NativeFrame.Apply(Handle,colors);}
+        protected override bool ProcessCmdKey(ref Message m,Keys keys){
+            if(keys==Keys.Tab||keys==(Keys.Shift|Keys.Tab))foreach(var card in Cards.Values)card.BeginKeyboardNavigation();
+            return base.ProcessCmdKey(ref m,keys);
+        }
         internal void SetTheme(bool dark){bool old=Preferences.dark;Preferences.dark=dark;try{SavePreferences();colors=Palette.Create(dark);ApplyTheme();}catch{Preferences.dark=old;Error("主题偏好未能保存，请检查界面偏好文件权限。");}}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
         void Error(string text){notice=text;status.Text=text;status.ForeColor=colors.Danger;}
@@ -66,11 +76,35 @@ namespace ClaudeMcp {
         }
         void ConnectCard(TargetCard card){Select(card);bool active=card.Target.State=="connected"||card.BusyConnect||card.Target.State=="connecting"||card.Target.State=="configuring"||card.Target.State=="waiting-login";if(active)StopCard(card);else Launch("connect",card,"");}
         void StopCard(TargetCard card){if(preview||MessageBox.Show(this,"只停止这台云电脑的连接？\r\n"+card.Target.Url+"\r\n其他云电脑不受影响。","停止连接",MessageBoxButtons.OKCancel,MessageBoxIcon.Question)==DialogResult.OK)Launch("stop",card,"");}
-        void EditCard(TargetCard card){Select(card);using(var editor=new TargetEditor(card.Target,card.Preference,colors)){if(editor.ShowDialog(this)!=DialogResult.OK)return;bool changed=!String.Equals(editor.Url.TrimEnd('/'),card.Target.Url,StringComparison.OrdinalIgnoreCase);
-            if(changed&&card.Target.State!="stopped"){Error("请先停止此连接，再修改云电脑地址；备注和图标可随时修改。");return;}
-            if(changed&&targets.Any(t=>t.Name!=card.Target.Name&&String.Equals(t.Url,editor.Url.TrimEnd('/'),StringComparison.OrdinalIgnoreCase))){Error("该地址已经添加，未覆盖其他云电脑。");return;}
-            try{Preferences.Set(card.Target.Name,editor.DisplayName,editor.IconData,targets);SavePreferences();RebuildCard(card.Target.Name);if(changed)Launch("edit",Cards[card.Target.Name],editor.Url);RefreshState();}catch{Error("无法保存界面偏好，未更改连接信息。");}
-        }}
+        void EditCard(TargetCard card){OpenEditor(card.Target.Name);}
+        internal void OpenEditor(string name){
+            TargetCard card;if(Editor!=null||!Cards.TryGetValue(name,out card))return;
+            Select(card);editorScroll=ScrollOffset;
+            Editor=new TargetEditorPage(card.Target,card.Preference,colors);
+            Editor.BackRequested+=CloseEditor;Editor.SaveRequested+=SaveEditor;
+            content.Visible=false;toolbar.Visible=false;
+            Controls.Add(Editor);Editor.BringToFront();Editor.NameInput.Box.Focus();
+        }
+        internal void CloseEditor(){
+            if(Editor==null)return;
+            var previous=Editor;Editor=null;Controls.Remove(previous);previous.Dispose();
+            content.Visible=true;toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;
+            foreach(var card in Cards.Values)card.ClearPointer();
+        }
+        void SaveEditor(){
+            if(Editor==null)return;
+            var editor=Editor;
+            TargetCard card;if(!Cards.TryGetValue(editor.TargetName,out card)){editor.ShowError("所选云电脑已不存在，请返回列表。");return;}
+            if(IsBusy(card.Target.Name)){editor.ShowError("此云电脑正在处理操作，请完成后重试。");return;}
+            bool changed=!String.Equals(editor.Url.TrimEnd('/'),card.Target.Url,StringComparison.OrdinalIgnoreCase);
+            if(changed&&card.Target.State!="stopped"){editor.ShowError("请先停止此连接，再修改云电脑地址；备注和图标可随时修改。");return;}
+            if(changed&&targets.Any(t=>t.Name!=card.Target.Name&&String.Equals(t.Url,editor.Url.TrimEnd('/'),StringComparison.OrdinalIgnoreCase))){editor.ShowError("该地址已经添加，未覆盖其他云电脑。");return;}
+            try{
+                string name=card.Target.Name,url=editor.Url;
+                Preferences.Set(name,editor.DisplayName,editor.IconData,targets);SavePreferences();RebuildCard(name);
+                CloseEditor();if(changed)Launch("edit",Cards[name],url);RefreshState();
+            }catch{if(Editor!=null)Editor.ShowError("无法保存界面偏好，未更改连接信息。");else Error("无法保存界面偏好，未更改连接信息。");}
+        }
         void DeleteCard(TargetCard card){Select(card);if(preview){targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,"删除这台云电脑的本地配置并停止它的连接？\r\n"+card.Target.Url+"\r\n不会删除 VPS 或本机文件，其他连接保持不变。","删除云电脑",MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK)Launch("remove",card,"");}
         void CopyCard(TargetCard card){try{Clipboard.SetText(card.Target.Url);notice="地址已复制（不包含登录凭据）";status.Text=notice;}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
         TargetCard CreateCard(Target target){var card=new TargetCard(target,Preferences.Get(target.Name)){Margin=new Padding(0,0,0,Palette.Gap),Font=Font};card.SelectedCard+=Select;card.ConnectRequested+=ConnectCard;card.StopRequested+=StopCard;card.EditRequested+=EditCard;card.DeleteRequested+=DeleteCard;card.CopyRequested+=CopyCard;card.OpenRequested+=delegate(TargetCard c){Select(c);Launch("open",c,"");};card.LogsRequested+=delegate{if(!preview)OpenLocal(stateDirectory);};card.MoveRequested+=MoveByKeyboard;
@@ -94,7 +128,7 @@ namespace ClaudeMcp {
         }
         void Arrange(){if(arranging||IsDisposed)return;arranging=true;list.SuspendLayout();try{if(Cards.Count==0){if(!list.Controls.Contains(empty))list.Controls.Add(empty);empty.Visible=true;empty.Width=Math.Max(100,list.ClientSize.Width-22);}else{list.Controls.Remove(empty);int index=0;foreach(var target in Preferences.Sort(targets)){TargetCard card;if(!Cards.TryGetValue(target.Name,out card))continue;list.Controls.SetChildIndex(card,index++);card.Width=Math.Max(420,list.ClientSize.Width-22);card.PerformLayout();}}}finally{list.ResumeLayout();arranging=false;}}
         internal bool TestIndependentButtons(){if(Cards.Count!=2)return false;var cards=Cards.Values.ToArray();var process=Process.GetCurrentProcess();var pending=new PendingAction{Process=process,Name=cards[0].Target.Name,Action="connect"};try{children.Add(pending);RefreshState();return cards[0].BusyConnect&&cards[0].Details.Stop.Enabled&&!cards[0].Edit.Enabled&&!cards[1].BusyConnect&&cards[1].Edit.Enabled&&cards[1].Details.Open.Enabled;}finally{children.Remove(pending);process.Dispose();RefreshState();}}
-        internal bool LayoutFits(){return Cards.Values.All(c=>c.Right<=list.ClientSize.Width&&c.Connect.Left>=40&&c.Delete.Right<c.Width&&c.Details.Open.Right<c.Details.Width&&c.Details.Logs.Right<c.Details.Width)&&toolbar.Add.Right<=toolbar.ClientSize.Width&&toolbar.Theme.Left>toolbar.UpdateButton.Right;}
+        internal bool LayoutFits(){return (Editor==null||Editor.LayoutFits)&&Cards.Values.All(c=>c.Right<=list.ClientSize.Width&&c.Connect.Left>=40&&c.Delete.Right<c.Width&&c.Details.Open.Right<c.Details.Width&&c.Details.Logs.Right<c.Details.Width)&&toolbar.Add.Right<=toolbar.ClientSize.Width&&toolbar.Theme.Left>toolbar.UpdateButton.Right;}
         internal int ScrollOffset { get { return -list.AutoScrollPosition.Y; } set { list.AutoScrollPosition=new Point(0,value); } }
         internal static Snapshot Demo(){var s=new Snapshot{Running=true};s.Targets.Add(new Target{Name="preview-a",Url="https://desktop1.example.com",Mode="共享网页登录",State="connected",Detail=LocalState.Detail("connected")});s.Targets.Add(new Target{Name="preview-b",Url="https://desktop2.example.com",Mode="共享网页登录",State="stopped",Detail=LocalState.Detail("stopped")});return s;}
     }

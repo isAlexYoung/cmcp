@@ -170,7 +170,11 @@ namespace ClaudeMcp {
                 using (var form = new Manager(true)) {
                     if(args.Length > 2) form.ClientSize=new Size(Int32.Parse(args[2]),args.Length>3?Int32.Parse(args[3]):720);
                     form.Show();Application.DoEvents();if(args.Length>4&&args[4]=="dark")form.SetTheme(true);
-                    var first=form.Cards.Values.First();first.SetExpanded(true,false);first.TestHover(true);Application.DoEvents();
+                    var first=form.Cards.Values.First();
+                    string page=args.Length>5?args[5]:"expanded";
+                    if(page=="editor")form.OpenEditor(first.Target.Name);
+                    else {first.SetExpanded(page=="expanded",false);foreach(var card in form.Cards.Values)card.ClearPointer();if(page!="idle")first.TestHover(true);}
+                    Application.DoEvents();
                     using(var bmp=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bmp,new Rectangle(Point.Empty,bmp.Size));bmp.Save(Path.GetFullPath(args[1]),System.Drawing.Imaging.ImageFormat.Png);}
                 }
                 return 0;
@@ -233,7 +237,7 @@ namespace ClaudeMcp {
                 using (var form = new Manager(false,temp)) { form.Show(); Application.DoEvents(); check(form.TestIndependentButtons(), "waiting A leaves stop A and all B controls available"); }
                 using (var form = new Manager(true)) { form.Show(); Application.DoEvents(); check(form.Visible && form.Controls.Count > 0, "real WinForms preview starts with no connector"); }
                 DashboardTests.Run(temp, check);
-                File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, checks = checks }), Encoding.UTF8); return 0;
+                File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.Message + " / " + e.GetBaseException().Message, checks = checks }), Encoding.UTF8); return 1; }
             finally {
                 // Remove only files created by this test; never recursively

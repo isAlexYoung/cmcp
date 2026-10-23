@@ -64,7 +64,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content $resultFile; throw 'Manager self-test failed' }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 68 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 83 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |
@@ -75,9 +75,9 @@ jobs:
       - name: Capture real WinForms layouts
         shell: pwsh
         run: |
-          foreach ($case in @(@('light',1100,720,'light'),@('dark',1100,720,'dark'),@('narrow',660,580,'light'))) {
+          foreach ($case in @(@('light',1100,720,'light','idle'),@('hover',1100,720,'light','hover'),@('dark',1100,720,'dark','idle'),@('narrow',660,580,'light','hover'),@('editor',1100,720,'light','editor'),@('editor-dark',660,580,'dark','editor'))) {
             $imageFile = Join-Path $PWD ('test-results/' + $case[0] + '.png')
-            $arguments = '--preview "' + $imageFile + '" ' + $case[1] + ' ' + $case[2] + ' ' + $case[3]
+            $arguments = '--preview "' + $imageFile + '" ' + $case[1] + ' ' + $case[2] + ' ' + $case[3] + ' ' + $case[4]
             $p = Start-Process -FilePath (Join-Path $PWD 'Claude-MCP.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
             if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Preview capture timed out' }
             if ($p.ExitCode -ne 0 -or !(Test-Path -LiteralPath $imageFile)) { throw 'Preview capture failed' }

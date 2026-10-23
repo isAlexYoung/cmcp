@@ -6,6 +6,7 @@ using System.Windows.Forms;
 
 namespace ClaudeMcp {
     internal static class DashboardTests {
+        internal static int? DarkCaptionResult, LightCaptionResult;
         static void Pump(){Application.DoEvents();}
         internal static void Run(string temp,Action<bool,string> check){
             string directory=Path.Combine(temp,"dashboard");Directory.CreateDirectory(directory);
@@ -31,20 +32,43 @@ namespace ClaudeMcp {
                 b.TestHover(true);b.Connect.PerformClick();check(b.Target.State=="connected"&&a.Target.State=="connected","card connect dispatch addresses B only in isolated interactive demo");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","card disconnect leaves A intact in isolated interactive demo");
                 a.SetExpanded(true,false);Pump();check(a.Details.Visible&&a.Height>a.Width/20&&b.Top>=a.Bottom,"accordion expands inside card and shifts following card");
-                a.Toggle.PerformClick();a.SetExpanded(false,false);Pump();check(!a.Details.Visible&&a.Height==96,"accordion collapse restores natural header height");
+                a.Toggle.PerformClick();a.SetExpanded(false,false);Pump();check(!a.Details.Visible&&a.Height==116,"accordion collapse restores enlarged 116px header height");
                 a.SetExpanded(true,false);form.RefreshState();Pump();check(Object.ReferenceEquals(a,form.Cards["preview-a"])&&a.Expanded,"status polling preserves card instance and expanded state");
                 a.TestHover(false);check(!a.Edit.Visible&&!a.Copy.Visible&&!a.Delete.Visible,"secondary card actions hide outside hover");a.TestHover(true);check(a.Edit.Visible&&a.Copy.Visible&&a.Delete.Visible,"secondary card actions reveal on hover");
                 form.MoveCard("preview-b","preview-a");Pump();check(b.Top<a.Top,"reorder moves existing controls without reconnecting targets");
                 form.DropMove("preview-b","preview-a",true);Pump();check(a.Top<b.Top,"dragging onto lower half can move first card to end");
                 form.DropMove("preview-b","preview-a",false);Pump();check(b.Top<a.Top,"dragging onto upper half can move card to start");
-                b.Focus();Pump();check(b.Selected&&b.Edit.Visible&&b.CanFocus,"keyboard focus selects card and reveals accessible actions");
+                b.BeginKeyboardNavigation();b.Focus();Pump();check(b.Selected&&b.Edit.Visible&&b.CanFocus,"keyboard focus selects card and reveals accessible actions");
                 check(form.Cards.Values.Count(c=>c.Selected)==1,"exactly one current card has selected styling");
                 foreach(var size in new[]{new Size(660,500),new Size(800,600),new Size(1100,720),new Size(1440,850)}){
                     form.ClientSize=size;Pump();check(form.LayoutFits(),"responsive layout fits at "+size.Width+"x"+size.Height);
                 }
-                form.SetTheme(true);Pump();check(form.Preferences.dark&&a.Colors.Dark&&a.Details.Colors.Dark,"dark theme reaches cards and nested details");form.SetTheme(false);Pump();check(!a.Colors.Dark,"light theme restores semantic colors");
+                form.SetTheme(true);Pump();DarkCaptionResult=NativeFrame.LastCaptionResult;check(form.Preferences.dark&&a.Colors.Dark&&a.Details.Colors.Dark,"dark theme reaches cards and nested details");form.SetTheme(false);Pump();LightCaptionResult=NativeFrame.LastCaptionResult;check(!a.Colors.Dark,"light theme restores semantic colors");
                 var bar=form.Controls.OfType<DashboardToolbar>().Single();check(!bar.Settings.Enabled&&!bar.UpdateButton.Enabled&&bar.Add.Enabled,"future settings and update remain explicitly disabled; add works");
                 check(!File.Exists(Path.Combine(directory,"config.json")),"all UI tests use isolated state and never create a bridge token");
+                check(form.Text=="CMCP","native title contains only CMCP");
+                check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");
+                check(a.Font.Size==11F&&a.Connect.Height==40&&a.Edit.Width==36&&a.Connect.Width==136,"card text and interactive controls are enlarged together");
+                b.ClearPointer();form.RefreshState();Pump();check(b.StatusText.Visible&&b.StatusText.Text=="已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
+                b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
+                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();check(b.StatusText.Visible&&b.StatusText.Text=="已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
+                b.TestHover(true);check(b.ActionsVisible&&!b.StatusText.Visible,"hover replaces idle status with full action set");
+                b.ClearPointer();for(int i=0;i<20;i++){b.TestHover(true);b.ClearPointer();b.UpdateActions();}
+                check(b.StatusText.Visible&&!b.ActionsVisible&&b.StatusText.Text.Length>0,"repeated hover exits and state updates never leave a blank status slot");
+                bool wasExpanded=b.Expanded;
+                b.TestHover(true);b.Edit.PerformClick();Pump();
+                check(form.Editor!=null&&form.Editor.Parent==form&&form.OwnedForms.Length==0,"edit opens an embedded page without creating an owned window");
+                check(form.Editor.LayoutFits&&form.Editor.Back.Visible&&form.Editor.Save.Visible,"embedded edit page provides return and save controls");
+                form.Editor.NameInput.Box.Text="未保存名称";form.Editor.Back.PerformClick();Pump();
+                check(form.Editor==null&&form.Preferences.Get(b.Target.Name).label==""&&b.Expanded==wasExpanded,"back discards unsaved edits and preserves list expansion");
+                form.OpenEditor(b.Target.Name);Pump();form.Editor.UrlInput.Box.Text="http://invalid.example";form.Editor.Save.PerformClick();Pump();
+                check(form.Editor!=null,"invalid URL remains on the edit page without starting a process");
+                form.Editor.UrlInput.Box.Text=b.Target.Url;form.Editor.NameInput.Box.Text="我的第二台云电脑";form.Editor.Save.PerformClick();Pump();
+                b=form.Cards["preview-b"];
+                check(form.Editor==null&&b.Preference.label=="我的第二台云电脑"&&b.Target.State=="connected"&&a.Target.State=="connected","embedded save updates remark and retains both connections");
+                form.OpenEditor(b.Target.Name);Pump();
+                foreach(var size in new[]{new Size(660,500),new Size(1100,720)}){form.ClientSize=size;Pump();check(form.Editor.LayoutFits,"edit page fits at "+size.Width+"x"+size.Height);}
+                form.Editor.Back.PerformClick();Pump();
             }
             string manyFile=Path.Combine(directory,"cloudpc-targets.json");
             var records=Enumerable.Range(0,30).Select(i=>new {name="entry-"+i,url="https://desktop"+i+".invalid",authMode="shared-browser"}).ToArray();
