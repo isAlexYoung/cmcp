@@ -73,4 +73,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File F:\CMCP\app\tests\manage
 
 本机最终 `build-results/editor-final-strict.json`：106 passed / 0 failed / 0 skipped（原 102 项全部保留，新增 4 项）。CI 对当前提交重新执行，完整预期数为 200（106 + 25 + 30 + 20 + 19），以本提交对应实际运行结果为准，不将上一轮 CI 当成本轮结果。新增 `CMCP-UI-Preview-v4.exe` 方便审查；正式程序仍为 `Claude-MCP.exe`。未连接或更改任何真实 VPS，未中断旧目录运行中的 MCP。实际鼠标连续缩放的观感仍需用户打开新版确认。
 
-为复核像素测试自身，使用基线编辑页源码配合最终严格测试重新编译，uild-results/editor-baseline-strict.json 再次为 88/1，失败在浅色添加页；修复源码配合同一测试为 106/0。基线编译仅使用独立测试副本，没有临时回退实际源码或运行中的程序。
+为复核像素测试自身，使用基线编辑页源码配合最终严格测试重新编译，`build-results/editor-baseline-strict.json` 再次为 88/1，失败在浅色添加页；修复源码配合同一测试为 106/0。基线编译仅使用独立测试副本，没有临时回退实际源码或运行中的程序。
