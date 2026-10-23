@@ -104,7 +104,7 @@ namespace ClaudeMcp {
             if(changed&&targets.Any(t=>t.Name!=card.Target.Name&&String.Equals(t.Url,editor.Url.TrimEnd('/'),StringComparison.OrdinalIgnoreCase))){editor.ShowError("该地址已经添加，未覆盖其他云电脑。");return;}
             try{
                 string name=card.Target.Name,url=editor.Url;
-                Preferences.Set(name,editor.DisplayName,editor.IconData,targets);SavePreferences();Mark("editor-save preferences saved");RebuildCard(name);Mark("editor-save card rebuilt");
+                Preferences.Set(name,editor.DisplayName,editor.IconData,targets);SavePreferences();Mark("editor-save preferences saved");card.UpdatePreference(Preferences.Get(name));Mark("editor-save card presentation updated");
                 CloseEditor();Mark("editor-save returned to list");if(changed)Launch("edit",Cards[name],url);RefreshState();Mark("editor-save complete");
             }catch{if(Editor!=null)Editor.ShowError("无法保存界面偏好，未更改连接信息。");else Error("无法保存界面偏好，未更改连接信息。");}
         }
@@ -116,7 +116,6 @@ namespace ClaudeMcp {
         internal void MoveCard(string from,string before){try{Preferences.Move(from,before,targets);SavePreferences();Arrange();}catch{Error("排序未能保存，请检查界面偏好文件。");}}
         internal void DropMove(string from,string hit,bool after){if(from==hit)return;var ordered=Preferences.Sort(targets).Where(t=>t.Name!=from).ToList();int index=ordered.FindIndex(t=>t.Name==hit);if(index<0)return;MoveCard(from,after?(index+1<ordered.Count?ordered[index+1].Name:""):hit);}
         void MoveByKeyboard(TargetCard card,int direction){var ordered=Preferences.Sort(targets);int index=ordered.FindIndex(t=>t.Name==card.Target.Name);if(index+direction<0||index+direction>=ordered.Count)return;MoveCard(card.Target.Name,direction<0?ordered[index-1].Name:index+2<ordered.Count?ordered[index+2].Name:"");}
-        void RebuildCard(string name){TargetCard old;if(!Cards.TryGetValue(name,out old))return;bool expanded=old.Expanded;Mark("rebuild create");var card=CreateCard(old.Target);Cards[name]=card;Mark("rebuild remove old");list.Controls.Remove(old);Mark("rebuild dispose old");old.Dispose();Mark("rebuild add new");list.Controls.Add(card);Mark("rebuild resize");card.SetExpanded(expanded,false);Mark("rebuild theme");ApplyTheme();Mark("rebuild arrange");Arrange();Mark("rebuild complete");}
         internal void RefreshState(){
             foreach(var pending in children.ToArray()){try{if(!pending.Process.HasExited)continue;if(pending.Process.ExitCode!=0)Error("上次操作未完成，请查看向导或日志；其他连接不受影响。");}catch{}pending.Process.Dispose();children.Remove(pending);}
             var snapshot=preview?new Snapshot{Running=true,Targets=!previewInitialized?Demo().Targets:targets}:LocalState.Load(stateDirectory);targets=snapshot.Targets;previewInitialized=true;
@@ -129,7 +128,7 @@ namespace ClaudeMcp {
             }
             toolbar.Add.Enabled=!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove");Arrange();ApplyTheme();
         }
-        void Arrange(){if(arranging||IsDisposed)return;arranging=true;list.SuspendLayout();try{if(Cards.Count==0){if(!list.Controls.Contains(empty))list.Controls.Add(empty);empty.Visible=true;empty.Width=Math.Max(100,list.ClientSize.Width-22);}else{list.Controls.Remove(empty);int index=0;foreach(var target in Preferences.Sort(targets)){TargetCard card;if(!Cards.TryGetValue(target.Name,out card))continue;list.Controls.SetChildIndex(card,index++);card.Width=Math.Max(420,list.ClientSize.Width-22);card.PerformLayout();}}}finally{list.ResumeLayout();arranging=false;}}
+        void Arrange(){if(arranging||IsDisposed)return;arranging=true;list.SuspendLayout();try{if(Cards.Count==0){if(!list.Controls.Contains(empty))list.Controls.Add(empty);empty.Visible=true;empty.Width=Math.Max(100,list.ClientSize.Width-22);}else{list.Controls.Remove(empty);int index=0;foreach(var target in Preferences.Sort(targets)){TargetCard card;if(!Cards.TryGetValue(target.Name,out card)||card.Parent!=list)continue;list.Controls.SetChildIndex(card,index++);card.Width=Math.Max(420,list.ClientSize.Width-22);card.PerformLayout();}}}finally{list.ResumeLayout();arranging=false;}}
         internal bool TestIndependentButtons(){if(Cards.Count!=2)return false;var cards=Cards.Values.ToArray();var process=Process.GetCurrentProcess();var pending=new PendingAction{Process=process,Name=cards[0].Target.Name,Action="connect"};try{children.Add(pending);RefreshState();return cards[0].BusyConnect&&cards[0].Details.Stop.Enabled&&!cards[0].Edit.Enabled&&!cards[1].BusyConnect&&cards[1].Edit.Enabled&&cards[1].Details.Open.Enabled;}finally{children.Remove(pending);process.Dispose();RefreshState();}}
         internal bool LayoutFits(){return (Editor==null||Editor.LayoutFits)&&Cards.Values.All(c=>c.Right<=list.ClientSize.Width&&c.Connect.Left>=40&&c.Delete.Right<c.Width&&c.Details.Open.Right<c.Details.Width&&c.Details.Logs.Right<c.Details.Width)&&toolbar.Add.Right<=toolbar.ClientSize.Width&&toolbar.Theme.Left>toolbar.UpdateButton.Right;}
         internal int ScrollOffset { get { return -list.AutoScrollPosition.Y; } set { list.AutoScrollPosition=new Point(0,value); } }

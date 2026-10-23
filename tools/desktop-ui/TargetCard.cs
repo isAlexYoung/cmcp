@@ -92,6 +92,14 @@ namespace ClaudeMcp {
             UpdateActions();Invalidate();Details.Invalidate();
         }
 
+        internal void UpdatePreference(CardPreference preference) {
+            Bitmap replacement=preference.icon.Length>0?UiPreferences.DecodeIcon(preference.icon):null;
+            var previous=icon;
+            Preference=preference;icon=replacement;
+            if(previous!=null)previous.Dispose();
+            RefreshTarget(Target);
+        }
+
         internal void Apply(Palette colors) {
             Colors=colors;BackColor=colors.Page;
             Color fill=Selected?colors.Selected:colors.Surface;

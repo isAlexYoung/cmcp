@@ -65,12 +65,18 @@ namespace ClaudeMcp {
                 check(form.Editor==null&&form.Preferences.Get(b.Target.Name).label==""&&b.Expanded==wasExpanded,"back discards unsaved edits and preserves list expansion");
                 form.OpenEditor(b.Target.Name);Pump();form.Editor.UrlInput.Box.Text="http://invalid.example";form.Editor.Save.PerformClick();Pump();
                 check(form.Editor!=null,"invalid URL remains on the edit page without starting a process");
+                var previousCard=b;
                 form.Editor.UrlInput.Box.Text=b.Target.Url;form.Editor.NameInput.Box.Text="我的第二台云电脑";form.Editor.Save.PerformClick();Pump();
                 b=form.Cards["preview-b"];
                 check(form.Editor==null&&b.Preference.label=="我的第二台云电脑"&&b.Target.State=="connected"&&a.Target.State=="connected","embedded save updates remark and retains both connections");
+                check(Object.ReferenceEquals(previousCard,b),"saving presentation keeps the live card and its controls intact");
                 form.OpenEditor(b.Target.Name);Pump();
                 foreach(var size in new[]{new Size(660,500),new Size(1100,720)}){form.ClientSize=size;Pump();check(form.Editor.LayoutFits,"edit page fits at "+size.Width+"x"+size.Height);}
                 form.Editor.Back.PerformClick();Pump();
+                var parent=a.Parent;
+                parent.Controls.Remove(a);
+                try{form.RefreshState();Pump();check(a.Parent==null&&!a.IsDisposed&&b.Parent==parent,"layout reentry never indexes a temporarily detached card");}
+                finally{parent.Controls.Add(a);form.RefreshState();Pump();}
             }
             string manyFile=Path.Combine(directory,"cloudpc-targets.json");
             var records=Enumerable.Range(0,30).Select(i=>new {name="entry-"+i,url="https://desktop"+i+".invalid",authMode="shared-browser"}).ToArray();
