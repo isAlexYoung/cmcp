@@ -140,6 +140,17 @@ namespace ClaudeMcp {
             bool missing=false;try{Actions.Command("C:\\app","remove","");}catch(ArgumentException){missing=true;}check(missing,"delete cannot dispatch without an explicit target");
             if(File.Exists(UiPreferences.PathFor(directory)))File.Delete(UiPreferences.PathFor(directory));Directory.Delete(directory,false);
             InlineTests(temp,check);
+            foreach(bool dark in new[]{false,true})foreach(bool add in new[]{false,true}){
+                using(var host=new Form{ClientSize=new Size(660,500)})using(var page=new TargetEditorPage(new Target{Name=add?"":"edit",Url=add?"":"https://example.invalid"},new CardPreference(),Palette.Create(dark))){
+                    host.Controls.Add(page);host.Show();Pump();
+                    check(!page.viewport.NativeBarsVisible&&page.LayoutFits,"editor hides both native bars in "+(dark?"dark":"light")+" "+(add?"add":"edit"));
+                    page.viewport.Wheel(-360);Pump();check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"hidden editor scrollbar retains wheel scrolling in "+dark+" "+add);
+                    page.viewport.AutoScrollPosition=Point.Empty;page.PasswordInput.Box.Focus();Pump();
+                    check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"keyboard focus still scrolls the password field into view in "+dark+" "+add);
+                    host.ClientSize=new Size(1440,850);Pump();host.ClientSize=new Size(700,540);Pump();
+                    check(!page.viewport.NativeBarsVisible&&page.LayoutFits&&page.Save.Visible,"editor resize preserves hidden bars and fixed save action in "+dark+" "+add);
+                }
+            }
             using(var page=new TargetEditorPage(new Target{Name="",Url=""},new CardPreference(),Palette.Create(false))){
                 check(!page.AutoLogin,"new target never enables saved shared login implicitly");
                 page.UrlInput.Box.Text="https://auto.invalid";page.Remember.Checked=true;

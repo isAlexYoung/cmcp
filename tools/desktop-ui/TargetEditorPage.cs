@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ClaudeMcp {
@@ -10,6 +11,18 @@ namespace ClaudeMcp {
     internal class ResizePanel : Panel {
         internal ResizePanel(){DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);}
         protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);Invalidate(true);}
+    }
+    // Keep WinForms scrolling/focus navigation, without native white chrome.
+    internal sealed class EditorViewport : ResizePanel {
+        [DllImport("user32.dll")] static extern bool ShowScrollBar(IntPtr window,int bar,bool show);
+        [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr window,int index);
+        bool hiding;
+        protected override CreateParams CreateParams { get { var value=base.CreateParams;value.Style&=~0x00300000;return value; } }
+        void HideBars(){if(hiding||!IsHandleCreated)return;hiding=true;try{ShowScrollBar(Handle,3,false);}finally{hiding=false;}}
+        protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);HideBars();}
+        protected override void WndProc(ref Message m){base.WndProc(ref m);if(m.Msg==0x83||m.Msg==0x85||m.Msg==0x5||m.Msg==0x7d||m.Msg==0x47||m.Msg==0x20a)HideBars();}
+        internal bool NativeBarsVisible {get{return IsHandleCreated&&(GetWindowLong(Handle,-16)&0x00300000)!=0;}}
+        internal void Wheel(int delta){base.OnMouseWheel(new MouseEventArgs(MouseButtons.None,0,20,20,delta));HideBars();}
     }
     internal sealed class RoundedSheet : ResizePanel {
         internal Palette Colors = Palette.Create(false);
@@ -43,7 +56,8 @@ namespace ClaudeMcp {
         readonly ModernButton choose = new ModernButton { Text="选择图片…",Neutral=true }, reset = new ModernButton { Text="恢复默认" };
         readonly Label title = new Label(), nameLabel = new Label(), urlLabel = new Label(), help = new Label(), error = new Label();
         readonly PictureBox icon = new PictureBox { SizeMode=PictureBoxSizeMode.Zoom };
-        readonly ResizePanel header = new ResizePanel(), viewport = new ResizePanel(), footer = new ResizePanel();
+        readonly ResizePanel header = new ResizePanel(), footer = new ResizePanel();
+        internal readonly EditorViewport viewport = new EditorViewport();
         readonly RoundedSheet sheet = new RoundedSheet();
         readonly ToolTip tips = new ToolTip();
         internal event Action BackRequested, SaveRequested;

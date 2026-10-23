@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -72,6 +73,21 @@ namespace ClaudeMcp {
                 return destination;
             } finally { Release(shell); if (File.Exists(temporary)) File.Delete(temporary); }
         }
+        internal static bool Exists(string executable,params string[] desktops) {
+            string exe=Path.GetFullPath(executable);
+            foreach(string desktop in desktops) {
+                if(String.IsNullOrWhiteSpace(desktop)||!Directory.Exists(desktop))continue;
+                try { foreach(string file in Directory.EnumerateFiles(desktop,"*.lnk").Take(1024)) {
+                    try {
+                        var link=Read(file);string target=link[0];
+                        if(link[3].Length!=0||target.Length<3||target[1]!=':'||target[2]!='\\')continue;
+                        bool owned=link[4]==Description&&String.Equals(Path.GetFileName(target),"Claude-MCP.exe",StringComparison.OrdinalIgnoreCase);
+                        if((owned||String.Equals(Path.GetFullPath(target),exe,StringComparison.OrdinalIgnoreCase))&&File.Exists(target))return true;
+                    }catch{}
+                }}catch{}
+            }
+            return false;
+        }
     }
 
     internal static class StartupPreferences {
@@ -85,6 +101,9 @@ namespace ClaudeMcp {
         internal static bool ShouldPrompt(string directory) {
             object value; var data = Read(FileName(directory));
             return !data.TryGetValue("suppressDesktopShortcutPrompt",out value) || !Object.Equals(value,true);
+        }
+        internal static bool ShouldPrompt(string directory,string executable,params string[] desktops) {
+            return ShouldPrompt(directory)&&!DesktopShortcut.Exists(executable,desktops);
         }
         internal static void Save(string directory, bool suppress) {
             Directory.CreateDirectory(directory);
@@ -128,7 +147,7 @@ namespace ClaudeMcp {
         }
         internal static void AskBeforeManager() {
             string state = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp");
-            if (!StartupPreferences.ShouldPrompt(state)) return;
+            if (!StartupPreferences.ShouldPrompt(state,Application.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory))) return;
             using (var prompt = new ShortcutPrompt()) {
                 var result = prompt.ShowDialog();
                 try {

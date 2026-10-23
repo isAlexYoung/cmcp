@@ -27,7 +27,12 @@ namespace ClaudeMcp {
                 PromptChoice(DialogResult.No,true,(result,remember) => { StartupPreferences.Apply(result==DialogResult.Yes,remember,exe,desktop,state); });
                 check(!File.Exists(shortcut) && !StartupPreferences.ShouldPrompt(state),"No with checkbox suppresses next prompt");
                 PromptChoice(DialogResult.Yes,false,(result,remember) => { StartupPreferences.Apply(result==DialogResult.Yes,remember,exe,desktop,state); });
-                check(File.Exists(shortcut) && StartupPreferences.ShouldPrompt(state),"Yes creates real Windows shortcut and unchecked keeps prompt");
+                check(File.Exists(shortcut) && StartupPreferences.ShouldPrompt(state)&&!StartupPreferences.ShouldPrompt(state,exe,desktop),"Yes without checkbox creates a shortcut and its existence suppresses the next prompt");
+                string preferenceBefore=File.ReadAllText(StartupPreferences.FileName(state));
+                check(!StartupPreferences.ShouldPrompt(state,exe,desktop)&&File.ReadAllText(StartupPreferences.FileName(state))==preferenceBefore,"existing shortcut suppresses prompt without rewriting the checkbox preference");
+                string renamed=Path.Combine(desktop,"我的 CMCP.lnk");File.Move(shortcut,renamed);
+                check(!StartupPreferences.ShouldPrompt(state,exe,desktop),"renamed owned shortcut is detected without recreating or modifying it");File.Move(renamed,shortcut);
+                check(!StartupPreferences.ShouldPrompt(state,exe,Path.Combine(root,"missing-desktop"),desktop),"desktop detection accepts a later desktop location and ignores missing locations");
                 var properties = DesktopShortcut.Read(shortcut);
                 check(String.Equals(properties[0],exe,StringComparison.OrdinalIgnoreCase) && String.Equals(properties[1],app,StringComparison.OrdinalIgnoreCase),"shortcut points at current EXE with portable working directory");
                 check(properties[2].Trim('"').EndsWith("Claude-MCP.exe,0",StringComparison.OrdinalIgnoreCase) && properties[3]=="", "shortcut uses embedded Claude icon and no startup arguments");
@@ -36,6 +41,10 @@ namespace ClaudeMcp {
                 check(!StartupPreferences.ShouldPrompt(state),"Yes with checkbox persists suppression");
                 DesktopShortcut.Create(movedExe,desktop);
                 check(String.Equals(DesktopShortcut.Read(shortcut)[0],movedExe,StringComparison.OrdinalIgnoreCase),"owned shortcut updates to moved Unicode and apostrophe path");
+                StartupPreferences.Save(state,false);
+                check(!StartupPreferences.ShouldPrompt(state,exe,desktop),"existing owned shortcut in another valid portable directory also suppresses prompt");
+                File.Move(movedExe,movedExe+".hold");
+                check(StartupPreferences.ShouldPrompt(state,exe,desktop),"broken owned shortcut with a missing target does not suppress creation prompt");File.Move(movedExe+".hold",movedExe);
                 byte[] original=File.ReadAllBytes(shortcut);
                 object shell=null,link=null;
                 try {
@@ -48,6 +57,8 @@ namespace ClaudeMcp {
                 original=File.ReadAllBytes(shortcut); bool conflict=false;
                 try { DesktopShortcut.Create(exe,desktop); } catch (IOException) { conflict=true; }
                 check(conflict && Convert.ToBase64String(original)==Convert.ToBase64String(File.ReadAllBytes(shortcut)),"unrelated same-name shortcut is preserved");
+                check(StartupPreferences.ShouldPrompt(state,exe,desktop),"unrelated same-name shortcut does not count as an existing CMCP shortcut");
+                File.WriteAllText(shortcut,"not a shell link");check(StartupPreferences.ShouldPrompt(state,exe,desktop),"invalid shell link does not suppress prompt or crash startup");
                 StartupPreferences.Save(state,false);
                 bool failed=false; try { StartupPreferences.Apply(true,true,exe,Path.Combine(root,"missing-desktop"),state); } catch (IOException) { failed=true; }
                 check(failed && StartupPreferences.ShouldPrompt(state),"failed shortcut creation does not suppress retry");

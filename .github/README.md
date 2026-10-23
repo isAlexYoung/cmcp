@@ -1,18 +1,18 @@
 # CMCP
 
-让独立云电脑中的 Claude 使用本机 Windows 的文件、命令与桌面工具。公开稳定版 **3.3.3**；本开发分支正在实现 **4.0.0 卡片界面**，未发布新 Release。
+让独立云电脑中的 Claude 使用本机 Windows 的文件、命令与桌面工具。**4.0.1** 提供卡片式界面、明暗主题和独立的多台云电脑连接。设置和更新功能留待 4.1.0 实现。
 
 本项目为独立工具，与 Anthropic 无官方隶属关系。
 
 ## 下载与使用
 
-从 [Releases](https://github.com/isAlexYoung/cmcp/releases) 下载 `CMCP-3.3.3-windows-x64.zip`，完整解压后打开 `Claude-MCP.exe`。不要只复制 EXE，不要把 GitHub 的 Source code 压缩包当作可运行便携包。
+从 [Releases](https://github.com/isAlexYoung/cmcp/releases) 下载 `CMCP-4.0.1-windows-x64.zip`，完整解压后打开 `Claude-MCP.exe`。不要只复制 EXE，不要把 GitHub 的 Source code 压缩包当作可运行便携包。
 
 支持具备 Windows PowerShell 5.1、.NET Framework 4.x 的 Windows 10/11 x64。发布包内置 Node.js 和 Node 依赖，不会自动下载或安装缺少的依赖。
 
-首次打开先询问是否创建名为 **Claude-MCP** 的桌面快捷方式，提供“是”“否”和“下次不再提示”。快捷方式使用内置的 Claude Desktop 图标，新电脑不需要安装 Claude Desktop。这里只创建当前用户的快捷方式，不提权、不启用连接。
+桌面尚无有效 CMCP 快捷方式且未勾选“不再提示”时，打开程序会询问是否创建名为 **Claude-MCP** 的快捷方式。已有有效快捷方式时，即使未勾选也不会询问，不会自动修改原快捷方式。快捷方式使用内置的 Claude Desktop 图标，新电脑不需要安装 Claude Desktop。
 
-主界面添加云电脑地址，选中对应行后启动连接，再用“打开云电脑”完成共享网页登录。启动、停止只作用于选中的 VPS；多台独立 VPS 可同时连接本机。关闭界面保留后台连接。原有 BAT 入口仍为批量启停。
+主界面以卡片管理云电脑，支持备注、图标、拖动排序及折叠详情。添加地址后启动对应卡片，再通过“打开云电脑”完成共享网页登录；可选择使用 Windows 加密保存密码并自动登录。卡片启停只作用于对应 VPS；多台独立 VPS 可同时连接本机。每次打开正式 EXE 会静默重启后台，短暂断开全部 MCP 连接，保留各台启停状态；共享网页登录会话需要从新入口恢复。关闭界面保留后台。原有 BAT 入口仍为批量启停。
 
 连接后，远端 Claude 可按当前 Windows 账户权限读写允许的文件、运行命令和操作桌面。请只连接自己信任的云电脑；这是实际工具权限，不是只读预览。
 
@@ -54,4 +54,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\tests\target-contr
 
 编译后运行 `Claude-MCP.exe --self-test <输出 JSON 路径>`，测试使用独立临时目录；不会在真实桌面创建快捷方式、修改用户连接或访问真实 VPS。
 
-第三方图标、Node.js 与依赖授权见 [THIRD_PARTY_NOTICES](../docs/THIRD_PARTY_NOTICES.md)。4.0.0 开发界面的设置和更新入口暂时禁用。界面布局参考 [CC Switch](https://github.com/farion1231/cc-switch)，使用本项目原生 WinForms 重新实现，不引入 React、Tauri 或新的运行依赖。
+第三方图标、Node.js 与依赖授权见 [THIRD_PARTY_NOTICES](../docs/THIRD_PARTY_NOTICES.md)。设置和更新入口暂时禁用。界面布局参考 [CC Switch](https://github.com/farion1231/cc-switch)，使用原生 WinForms 实现；真实 React 仅用于隔离的自动登录回归夹具，不属于运行依赖，也不包含在发布包内。
