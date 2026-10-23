@@ -17,3 +17,9 @@
 开发时曾发现脚本快捷方式接口对测试中文路径返回 E_INVALIDARG，已改为原生 `IShellLinkW`／`IPersistFile`，保留中文路径断言；早期失败不计作通过。接口参考：[Microsoft IShellLinkW](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishelllinkw)。
 
 公开仓库为 `isAlexYoung/cmcp`。运行包名 `CMCP-3.3.3-windows-x64.zip`，独立 `.sha256` 文件提供完整性校验。源码仓库排除 Node 可执行文件、已安装依赖、构建 EXE 与所有个人连接配置；可运行的完整文件夹通过 GitHub Release 分发。Node 与依赖授权、Claude 图标归属见 `THIRD_PARTY_NOTICES.md`。
+
+发布包的 `app/build-info.json` 标注版本、完整源码提交、构建时间和 Node SHA256。未提交的源码修改不能打成有固定提交的发布包；不属于当前仓库的父目录提交不会被误用。没有 Git 元数据的开发构建使用空提交值，不能冒充本次固定版本发布。
+
+## 首次 CI 的保留记录
+
+[首次运行 39921288567](https://github.com/isAlexYoung/cmcp/actions/runs/39921288567) 在版本预检失败：PowerShell 将 `package-lock.json` 的合法空名称键转成对象时拒绝解析。已在本机用相同语句复现，并改为 `ConvertFrom-Json -AsHashtable`；没有移除锁文件版本检查或测试断言。该次运行的 Node、PowerShell、WinForms 和打包步骤均未执行，不能计作通过；空证据目录还使当时的 Artifact 步骤失败。后续流程从依赖安装阶段就保留明确的环境记录，缺失的测试结果仍表示未执行。最终验收以修复后固定提交的 CI 为准。

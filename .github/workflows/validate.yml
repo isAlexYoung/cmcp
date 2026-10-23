@@ -27,6 +27,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item -LiteralPath (Get-Command node.exe).Source -Destination app/runtime/node.exe
           New-Item -ItemType Directory -Path test-results -Force | Out-Null
+          @{node=(node --version);sha='${{ github.sha }}';note='Missing test result files mean those tests were not executed.'} | ConvertTo-Json | Set-Content test-results/environment.json -Encoding utf8
       - name: Parse PowerShell and verify versions
         shell: pwsh
         run: |
@@ -37,8 +38,8 @@ jobs:
             if ($errors.Count) { throw ($errors.Message -join '; ') }
           }
           $package = Get-Content app/package.json -Raw | ConvertFrom-Json
-          $lock = Get-Content app/package-lock.json -Raw | ConvertFrom-Json
-          if ($package.version -ne $lock.version -or $package.version -ne $lock.packages.''.version) { throw 'Version mismatch' }
+          $lock = Get-Content app/package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          if ($package.version -ne $lock['version'] -or $package.version -ne $lock['packages']['']['version']) { throw 'Version mismatch' }
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |

@@ -2,6 +2,7 @@
 /Claude-MCP.exe
 /app/node_modules/
 /app/runtime/node.exe
+/app/build-info.json
 **/__pycache__/
 *.pyc
 *.log

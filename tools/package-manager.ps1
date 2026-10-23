@@ -14,6 +14,17 @@ $items = @('Claude-MCP.exe','app','docs','tools')
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($item in $items) { Copy-Item -LiteralPath (Join-Path $projectRoot $item) -Destination $destination -Recurse }
+$commit = $null
+if (Get-Command git.exe -ErrorAction SilentlyContinue) {
+    $top = & git.exe -C $projectRoot rev-parse --show-toplevel 2>$null
+    if ($LASTEXITCODE -eq 0 -and [IO.Path]::GetFullPath([string]$top) -ieq [IO.Path]::GetFullPath($projectRoot)) {
+        & git.exe -C $projectRoot diff --quiet HEAD --
+        if ($LASTEXITCODE -ne 0) { throw '源码存在未提交修改；请先提交后再打包。' }
+        $commit = ([string](& git.exe -C $projectRoot rev-parse HEAD)).Trim()
+    }
+}
+$build = [ordered]@{version=$version;sourceCommit=$commit;builtAtUtc=[DateTime]::UtcNow.ToString('o');nodeSha256=(Get-FileHash -LiteralPath (Join-Path $destination 'app\runtime\node.exe') -Algorithm SHA256).Hash.ToLowerInvariant()}
+[IO.File]::WriteAllText((Join-Path $destination 'app\build-info.json'),($build | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($destination, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
 $hash = Get-FileHash -LiteralPath $zip -Algorithm SHA256
