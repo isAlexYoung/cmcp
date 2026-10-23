@@ -45,7 +45,7 @@ async function desktop(password){
     wss.handleUpgrade(req,socket,head,ws=>{s.upgrades++;s.sockets.push(ws);ws.on('message',raw=>{if(JSON.parse(raw).t==='hello')ws.send('{"t":"welcome"}');});});
   });server.listen(0,'127.0.0.1');await once(server,'listening');servers.push({server,wss});return {url:`http://127.0.0.1:${server.address().port}`,s};
 }
-let browser,cdp,manager;const profile=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-auto-browser-'));
+let browser,cdp,manager,stage='fixture setup',failureSnapshot;const profile=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-auto-browser-'));
 try{
   const a=await desktop('正确 密码 A1'),b=await desktop('right-B');
   const states=new Map(),reads={A:0,B:0};const desired=new Map(['A','B'].map(name=>[name,{enabled:true,revision:name+'1'}]));
@@ -56,7 +56,9 @@ try{
   await until(()=>manager.values().length===2);check(a.s.posts===0&&b.s.posts===0,'no automatic login before an authorized browser opens the page');
   const executable=[process.env.CMCP_TEST_BROWSER,path.join(process.env.ProgramFiles||'C:\\Program Files','Google','Chrome','Application','chrome.exe'),path.join(process.env['ProgramFiles(x86)']||'C:\\Program Files (x86)','Microsoft','Edge','Application','msedge.exe')].find(p=>p&&fs.existsSync(p));
   if(!executable)throw Error('Required real Chrome/Edge executable is unavailable');
-  browser=spawn(executable,['--headless=new','--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--user-data-dir='+profile,'--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-extensions','--disable-component-update','--window-size=1100,720','about:blank'],{windowsHide:true,stdio:'ignore'});
+  stage='browser startup';
+  browser=spawn(executable,['--headless=new','--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--user-data-dir='+profile,'--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-extensions','--disable-component-update','--window-size=1100,720','about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
+  browser.stderr.pipe(fs.createWriteStream(path.join(evidence,'browser.stderr.txt')));
   await until(()=>fs.existsSync(path.join(profile,'DevToolsActivePort')));
   const [port,wsPath]=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').trim().split(/\r?\n/);
   cdp=new WebSocket(`ws://127.0.0.1:${port}${wsPath}`);cdp.on('error',()=>{});await once(cdp,'open');let serial=0;const waiting=new Map();
@@ -65,7 +67,9 @@ try{
   async function page(url){const {targetId}=await send('Target.createTarget',{url});const {sessionId}=await send('Target.attachToTarget',{targetId,flatten:true});await send('Runtime.enable',{},sessionId);await send('Page.enable',{},sessionId);return sessionId;}
   async function evaluate(session,expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error('Fixture browser evaluation failed');return r.result.value;}
   const gateA=()=>manager.values().find(v=>v.name==='A').gateway;
+  stage='first automatic browser login';
   const pageA=await page(gateA().launchUrl);
+  failureSnapshot=async()=>({states:Object.fromEntries(states),reads,posts:{A:a.s.posts,B:b.s.posts},upgrades:{A:a.s.upgrades,B:b.s.upgrades},page:await evaluate(pageA,`({ready:document.readyState,desktop:document.body?.dataset.ready==='true',passwordFields:document.querySelectorAll('input[type="password"]').length,fieldDisabled:document.querySelector('input')?.disabled,hasPlaceholder:document.querySelector('input')?.value.startsWith('cmcp-auto-'),buttonDisabled:document.querySelector('button')?.disabled,scripts:[...document.scripts].map(s=>new URL(s.src,location.href).pathname)})`)});
   await until(async()=>states.get('A')?.state==='connected'&&await evaluate(pageA,"document.body.dataset.ready==='true'"));
   check(a.s.posts===1&&reads.A===1,'real browser controlled unlock form auto-submits exactly once');
   check(await evaluate(pageA,'window.fixtureSession')===gateA().getSessionId(),'browser and production MCP target share the same session and HTTP cookie');
@@ -84,7 +88,7 @@ try{
   await send('Browser.close');
   const result={passed:checks.length,failed:0,skipped:0,checks,environment:{browser:path.basename(executable),node:process.version},not_executed:['real VPS and its exact frontend build']};
   fs.writeFileSync(path.join(evidence,'browser.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
-}catch(error){const result={passed:checks.length,failed:1,skipped:0,checks,error:error.message};fs.writeFileSync(path.join(evidence,'browser.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));process.exitCode=1;}
+}catch(error){let diagnostics;try{diagnostics=await failureSnapshot?.();}catch{diagnostics={snapshotUnavailable:true};}const result={passed:checks.length,failed:1,skipped:0,checks,error:error.message,stage,browserExitCode:browser?.exitCode,diagnostics};fs.writeFileSync(path.join(evidence,'browser.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));process.exitCode=1;}
 finally{
   cdp?.close();await manager?.close();
   for(const {server,wss} of servers){for(const ws of wss.clients)ws.terminate();await new Promise(r=>wss.close(r));server.closeAllConnections();await new Promise(r=>server.close(r));}
