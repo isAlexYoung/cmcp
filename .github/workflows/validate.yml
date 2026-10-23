@@ -2,7 +2,7 @@ name: Validate CMCP
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/ui-card-dashboard]
   pull_request:
   workflow_dispatch:
 
@@ -64,7 +64,26 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content $resultFile; throw 'Manager self-test failed' }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 32 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 68 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+      - name: Manager edit and delete isolation
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-targets.test.ps1 | Set-Content test-results/manager-targets.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/manager-targets.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 19 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete manager target mutation regression' }
+      - name: Capture real WinForms layouts
+        shell: pwsh
+        run: |
+          foreach ($case in @(@('light',1100,720,'light'),@('dark',1100,720,'dark'),@('narrow',660,580,'light'))) {
+            $imageFile = Join-Path $PWD ('test-results/' + $case[0] + '.png')
+            $arguments = '--preview "' + $imageFile + '" ' + $case[1] + ' ' + $case[2] + ' ' + $case[3]
+            $p = Start-Process -FilePath (Join-Path $PWD 'Claude-MCP.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
+            if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Preview capture timed out' }
+            if ($p.ExitCode -ne 0 -or !(Test-Path -LiteralPath $imageFile)) { throw 'Preview capture failed' }
+          }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build-manager.ps1 -PreviewOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build portable package
         shell: pwsh
         run: |

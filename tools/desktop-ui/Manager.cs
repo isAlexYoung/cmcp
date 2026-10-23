@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Claude MCP 连接管理")]
 [assembly: System.Reflection.AssemblyProduct("Claude MCP Portable Manager")]
-[assembly: System.Reflection.AssemblyVersion("3.3.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("3.3.3.0")]
+[assembly: System.Reflection.AssemblyVersion("4.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.0.0.0")]
 
 namespace ClaudeMcp {
     internal sealed class Target {
@@ -128,142 +128,51 @@ namespace ClaudeMcp {
         internal static string Script(string action) {
             switch (action) {
                 case "connect": return "start.ps1";
-                case "add": return "add-cloudpc.ps1";
+                case "add": case "edit": return "add-cloudpc.ps1";
+                case "remove": return "remove-cloudpc.ps1";
                 case "stop": return "stop.ps1";
                 case "open": return "manager-open.ps1";
                 default: throw new ArgumentException("Unknown action");
             }
         }
-        internal static string Command(string kit, string action, string name) {
+        internal static string Command(string kit, string action, string name, string initialUrl = "") {
             string command = "& " + Quote(Path.Combine(kit, Script(action)));
             if (action != "add") {
                 if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Select a cloud computer first");
                 command += " -TargetName " + Quote(name);
                 if (action == "connect" || action == "stop") command += " -RequestTime " + DateTime.UtcNow.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
+            if (action == "edit" && initialUrl.Length > 0) command += " -InitialUrl " + Quote(initialUrl);
             return command;
         }
-        internal static Process Start(string kit, string action, string name) {
+        internal static Process Start(string kit, string action, string name, string initialUrl = "") {
             string script = Path.Combine(kit, Script(action));
             if (!File.Exists(script)) throw new FileNotFoundException("缺少文件，请完整解压便携包。", script);
-            var command = Command(kit, action, name);
+            var command = Command(kit, action, name, initialUrl);
             string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
             return Process.Start(new ProcessStartInfo(ps, "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(command))) {
                 UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = kit, WindowStyle = ProcessWindowStyle.Hidden
             });
         }
     }
-    internal sealed class Manager : Form {
-        readonly string root = AppDomain.CurrentDomain.BaseDirectory;
-        readonly string kit = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app");
-        readonly string stateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeLocalMcp");
-        readonly bool preview;
-        readonly DataGridView grid = new DataGridView();
-        readonly Label status = new Label(), detail = new Label(), footer = new Label();
-        readonly Button connect = new Button(), add = new Button(), stop = new Button(), open = new Button();
-        readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-        sealed class PendingAction { internal Process Process; internal string Name, Action; }
-        readonly List<PendingAction> children = new List<PendingAction>();
-        List<Target> targets = new List<Target>();
-        string signature = "";
-        internal Manager(bool demo, string stateOverride = null) {
-            if (stateOverride != null) stateDirectory = stateOverride;
-            preview = demo; Text = "Claude MCP · 本机连接管理 · 3.3.3";
-            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            Font = new Font("Microsoft YaHei UI", 10F); BackColor = Color.FromArgb(245, 247, 251);
-            ClientSize = new Size(990, 690); MinimumSize = new Size(860, 660); StartPosition = FormStartPosition.CenterScreen;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            var header = new Panel { Dock = DockStyle.Top, Height = 118, BackColor = Color.FromArgb(25, 42, 66) };
-            header.Controls.Add(new Label { Text = "Claude MCP", Location = new Point(28, 18), Size = new Size(700, 42), ForeColor = Color.White, Font = new Font("Segoe UI", 23F, FontStyle.Bold) });
-            header.Controls.Add(new Label { Text = "连接云电脑，让 Claude 使用这台 Windows 电脑的文件与工具", Location = new Point(30, 74), Size = new Size(900, 28), ForeColor = Color.FromArgb(196, 212, 232) });
-            Controls.Add(header);
-            var body = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(26, 18, 26, 12), ColumnCount = 1, RowCount = 7 };
-            body.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); body.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-            body.RowStyles.Add(new RowStyle(SizeType.Absolute, 102)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 60)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            status.Dock = DockStyle.Fill; status.Font = new Font(Font, FontStyle.Bold); body.Controls.Add(status, 0, 0);
-            grid.Dock = DockStyle.Fill; grid.ReadOnly = true; grid.AllowUserToAddRows = false; grid.AllowUserToDeleteRows = false; grid.AllowUserToResizeRows = false;
-            grid.MultiSelect = false; grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect; grid.RowHeadersVisible = false; grid.AutoGenerateColumns = false;
-            grid.BackgroundColor = Color.White; grid.BorderStyle = BorderStyle.None; grid.EnableHeadersVisualStyles = false; grid.ColumnHeadersHeight = 38;
-            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(230, 236, 245), ForeColor = Color.FromArgb(42, 58, 78), Font = new Font(Font, FontStyle.Bold) };
-            grid.DefaultCellStyle.Padding = new Padding(8, 3, 8, 3); grid.RowTemplate.Height = 40;
-            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(220, 235, 252); grid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(25, 42, 66);
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "云电脑地址", FillWeight = 50 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "登录方式", FillWeight = 25 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "连接状态", FillWeight = 25 });
-            grid.SelectionChanged += delegate { UpdateDetail(); UpdateButtons(); }; body.Controls.Add(grid, 0, 1);
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 11, 0, 0), WrapContents = false };
-            SetupButton(connect, "启动连接", Color.FromArgb(35, 105, 190), Color.White); SetupButton(open, "打开云电脑", Color.White, Color.FromArgb(35, 80, 130));
-            SetupButton(add, "添加 / 修改", Color.White, Color.FromArgb(35, 80, 130)); SetupButton(stop, "停止连接", Color.White, Color.FromArgb(170, 65, 65));
-            buttons.Controls.AddRange(new Control[] { connect, open, add, stop }); body.Controls.Add(buttons, 0, 2);
-            connect.Click += delegate { Launch("connect"); }; open.Click += delegate { Launch("open"); }; add.Click += delegate { Launch("add"); };
-            stop.Click += delegate { var t = Selected; if (t != null && MessageBox.Show(this, "只停止这台云电脑的 MCP 连接？\r\n" + t.Url + "\r\n\r\n其他云电脑不受影响。", "停止所选连接", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) == DialogResult.OK) Launch("stop"); };
-            detail.Dock = DockStyle.Fill; detail.BackColor = Color.White; detail.Padding = new Padding(14, 10, 14, 8); detail.ForeColor = Color.FromArgb(65, 82, 104); body.Controls.Add(detail, 0, 3);
-            body.Controls.Add(new Label { Dock = DockStyle.Fill, Text = "权限说明：连接后，Claude 可按当前 Windows 账户权限读写文件、运行命令和操作桌面。\r\n启动／停止只作用于选中的云电脑；支持多台同时连接。本界面不显示密码。", ForeColor = Color.FromArgb(125, 86, 45), Padding = new Padding(0, 10, 0, 0) }, 0, 4);
-            var links = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-            AddLink(links, "查看日志文件夹", delegate { OpenLocal(stateDirectory); }); AddLink(links, "使用说明", delegate { OpenLocal(Path.Combine(root, "docs", "桌面版使用说明.md")); });
-            AddLink(links, "程序文件夹", delegate { OpenLocal(root); }); body.Controls.Add(links, 0, 5);
-            footer.Dock = DockStyle.Fill; footer.ForeColor = Color.FromArgb(100, 114, 134); footer.Text = "关闭窗口保留连接；停止所选项后，重启电脑也不会自动连接它。"; body.Controls.Add(footer, 0, 6);
-            Controls.Add(body); body.BringToFront();
-            timer.Interval = 2000; timer.Tick += delegate { RefreshState(); }; timer.Start();
-            FormClosed += delegate { timer.Stop(); timer.Dispose(); foreach (var p in children) p.Process.Dispose(); };
-            RefreshState();
-        }
-        void SetupButton(Button b, string text, Color back, Color fore) { b.Text = text; b.Size = new Size(138, 36); b.Margin = new Padding(0, 0, 12, 0); b.BackColor = back; b.ForeColor = fore; b.FlatStyle = FlatStyle.Flat; b.FlatAppearance.BorderColor = Color.FromArgb(208, 220, 235); }
-        void AddLink(FlowLayoutPanel panel, string title, Action action) { var link = new LinkLabel { Text = title, AutoSize = true, Margin = new Padding(0, 10, 24, 0), LinkColor = Color.FromArgb(35, 105, 190) }; link.LinkClicked += delegate { if (!preview) action(); }; panel.Controls.Add(link); }
-        Target Selected { get { return grid.SelectedRows.Count > 0 ? grid.SelectedRows[0].Tag as Target : null; } }
-        void UpdateDetail() { var t = Selected; detail.Text = t == null ? "还没有选择云电脑。点击“添加 / 修改”保存地址，再启动连接。" : t.Url + "\r\n" + t.Detail; }
-        void OpenLocal(string path) { try { if (!File.Exists(path) && !Directory.Exists(path)) { MessageBox.Show(this, "该位置尚不存在。首次连接后会生成日志。", Text); return; } Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { MessageBox.Show(this, "无法打开，请在资源管理器中查看程序文件夹。", Text); } }
-        void Launch(string action) {
-            if (preview) return;
-            if (action != "add" && Selected == null) return;
-            try { string name = Selected == null ? "" : Selected.Name; children.Add(new PendingAction { Process = Actions.Start(kit, action, name), Name = name, Action = action }); RefreshState(); }
-            catch { MessageBox.Show(this, "无法打开操作向导。请确认便携包完整，且 Windows PowerShell 可以运行。", Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
-        }
-        void RefreshState() {
-            children.RemoveAll(delegate(PendingAction p) { try { if (!p.Process.HasExited) return false; } catch { } p.Process.Dispose(); return true; });
-            Snapshot s = preview ? Demo() : LocalState.Load(stateDirectory);
-            status.Text = preview ? "界面预览 · 使用模拟状态，未连接 VPS" : s.ReadError ? "本地设置暂时无法完整读取，将自动刷新" : s.Stale ? "后台状态未更新，请检查连接" : s.Running ? "后台正在运行 · 已配置 " + s.Targets.Count + " 台 · 可分别启动和停止" : "后台尚未运行 · 打开本界面不会自动连接";
-            status.ForeColor = s.Running && !s.Stale ? Color.FromArgb(35, 125, 85) : Color.FromArgb(90, 104, 125);
-            string selected = Selected == null ? "" : Selected.Name;
-            string next = String.Join("\n", s.Targets.Select(t => t.Name + "|" + t.Url + "|" + t.Mode + "|" + t.State + "|" + t.Detail));
-            targets = s.Targets;
-            if (signature != next) {
-                signature = next; grid.Rows.Clear();
-                foreach (var t in targets) { int i = grid.Rows.Add(t.Url, t.Mode, LocalState.Caption(t.State)); grid.Rows[i].Tag = t; if (t.Name == selected) grid.Rows[i].Selected = true; }
-                UpdateDetail();
-            }
-            UpdateDetail();
-            UpdateButtons();
-        }
-        void UpdateButtons() {
-            var t = Selected;
-            bool selected = !preview && t != null;
-            connect.Enabled = selected && !children.Any(p => p.Name == t.Name && p.Action == "connect") && t.State != "connected";
-            stop.Enabled = selected && !children.Any(p => p.Name == t.Name && p.Action == "stop");
-            open.Enabled = selected;
-            add.Enabled = !preview && !children.Any(p => p.Action == "add");
-        }
-        internal bool TestIndependentButtons() {
-            if (grid.Rows.Count != 2) return false;
-            grid.Rows[0].Selected = true;
-            var process = Process.GetCurrentProcess();
-            var action = new PendingAction { Process = process, Name = Selected.Name, Action = "connect" };
-            try {
-                children.Add(action); UpdateButtons();
-                bool a = !connect.Enabled && stop.Enabled;
-                grid.Rows[1].Selected = true; UpdateButtons();
-                return a && connect.Enabled && stop.Enabled && open.Enabled;
-            } finally { children.Remove(action); process.Dispose(); }
-        }
-        internal static Snapshot Demo() { var s = new Snapshot { Running = true }; s.Targets.Add(new Target { Name = "preview-a", Url = "https://desktop1.example.com", Mode = "共享网页登录", State = "connected", Detail = LocalState.Detail("connected") }); s.Targets.Add(new Target { Name = "preview-b", Url = "https://desktop2.example.com", Mode = "共享网页登录", State = "stopped", Detail = LocalState.Detail("stopped") }); return s; }
-    }
     internal static class Program {
         [STAThread] static int Main(string[] args) {
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+#if CMCP_PREVIEW
+            // A separately compiled preview never reads personal connection
+            // state, prompts for a shortcut or starts the bridge, even renamed.
+            if (args.Length == 0) { Application.Run(new Manager(true)); return 0; }
+            return 64;
+#else
             if (args.Length == 2 && args[0] == "--self-test") return SelfTest(args[1]);
-            if (args.Length == 2 && args[0] == "--preview") {
-                using (var form = new Manager(true)) { form.Show(); Application.DoEvents(); using (var bmp = new Bitmap(form.Width, form.Height)) { form.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size)); bmp.Save(Path.GetFullPath(args[1]), System.Drawing.Imaging.ImageFormat.Png); } }
+            if (args.Length == 1 && args[0] == "--demo") { Application.Run(new Manager(true)); return 0; }
+            if (args.Length >= 2 && args[0] == "--preview") {
+                using (var form = new Manager(true)) {
+                    if(args.Length > 2) form.ClientSize=new Size(Int32.Parse(args[2]),args.Length>3?Int32.Parse(args[3]):720);
+                    form.Show();Application.DoEvents();if(args.Length>4&&args[4]=="dark")form.SetTheme(true);
+                    var first=form.Cards.Values.First();first.SetExpanded(true,false);first.TestHover(true);Application.DoEvents();
+                    using(var bmp=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bmp,new Rectangle(Point.Empty,bmp.Size));bmp.Save(Path.GetFullPath(args[1]),System.Drawing.Imaging.ImageFormat.Png);}
+                }
                 return 0;
             }
             if (args.Length == 2 && args[0] == "--preview-shortcut") {
@@ -280,6 +189,7 @@ namespace ClaudeMcp {
                 catch { MessageBox.Show("界面无法打开，请确认便携包完整。原有 BAT 入口仍可使用。", "Claude MCP", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
                 finally { mutex.ReleaseMutex(); }
             }
+#endif
         }
         static int SelfTest(string output) {
             var checks = new List<string>(); string temp = Path.Combine(Path.GetTempPath(), "claude-mcp-manager-test-" + Guid.NewGuid().ToString("N"));
@@ -322,6 +232,7 @@ namespace ClaudeMcp {
                 File.WriteAllText(file,"[{\"name\":\"A\",\"url\":\"https://a.invalid\"},{\"name\":\"B\",\"url\":\"https://b.invalid\"}]");
                 using (var form = new Manager(false,temp)) { form.Show(); Application.DoEvents(); check(form.TestIndependentButtons(), "waiting A leaves stop A and all B controls available"); }
                 using (var form = new Manager(true)) { form.Show(); Application.DoEvents(); check(form.Visible && form.Controls.Count > 0, "real WinForms preview starts with no connector"); }
+                DashboardTests.Run(temp, check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.Message + " / " + e.GetBaseException().Message, checks = checks }), Encoding.UTF8); return 1; }
             finally {

@@ -1,5 +1,6 @@
 # Portable binaries and installed dependencies are release assets, not source.
 /Claude-MCP.exe
+/CMCP-UI-Preview.exe
 /app/node_modules/
 /app/runtime/node.exe
 /app/build-info.json
@@ -21,6 +22,7 @@ link-status.json
 browser-entries.json
 target-controls.json
 manager-preferences.json
+dashboard-preferences.json
 stopped.flag
 node-extra-args.txt
 *.key

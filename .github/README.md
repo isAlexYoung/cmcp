@@ -1,6 +1,6 @@
 # CMCP
 
-让独立云电脑中的 Claude 使用本机 Windows 的文件、命令与桌面工具。当前版本 **3.3.3**，便携中文界面；未来 UI 重构使用 **4.x.x** 版本。
+让独立云电脑中的 Claude 使用本机 Windows 的文件、命令与桌面工具。公开稳定版 **3.3.3**；本开发分支正在实现 **4.0.0 卡片界面**，未发布新 Release。
 
 本项目为独立工具，与 Anthropic 无官方隶属关系。
 
@@ -54,4 +54,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\tests\target-contr
 
 编译后运行 `Claude-MCP.exe --self-test <输出 JSON 路径>`，测试使用独立临时目录；不会在真实桌面创建快捷方式、修改用户连接或访问真实 VPS。
 
-第三方图标、Node.js 与依赖授权见 [THIRD_PARTY_NOTICES](../docs/THIRD_PARTY_NOTICES.md)。3.3.3 不包含设置按钮，后续 UI 重构另行实施。
+第三方图标、Node.js 与依赖授权见 [THIRD_PARTY_NOTICES](../docs/THIRD_PARTY_NOTICES.md)。4.0.0 开发界面的设置和更新入口暂时禁用。界面布局参考 [CC Switch](https://github.com/farion1231/cc-switch)，使用本项目原生 WinForms 重新实现，不引入 React、Tauri 或新的运行依赖。

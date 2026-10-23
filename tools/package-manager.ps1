@@ -11,6 +11,7 @@ $zip = $destination + '.zip'
 if ((Test-Path -LiteralPath $destination) -or (Test-Path -LiteralPath $zip)) { throw '输出位置已存在。请指定新的 OutputDirectory；不会覆盖或删除旧文件。' }
 $required = @('Claude-MCP.exe','app\server.mjs','app\start.ps1','app\manager-open.ps1','app\target-controls.ps1','app\target-connections.mjs','app\managed-target.mjs','app\cloudpc-connector.py','app\cloudpc-relay.py','app\runtime\node.exe','app\runtime\LICENSE','app\assets\claude-desktop.ico','app\node_modules\@modelcontextprotocol\server-filesystem\dist\index.js','app\node_modules\@modelcontextprotocol\sdk\package.json','app\package-lock.json','docs\桌面版使用说明.md','docs\THIRD_PARTY_NOTICES.md','tools\desktop-ui\Manager.cs','tools\desktop-ui\Shortcuts.cs','tools\desktop-ui\ShortcutTests.cs')
 $items = @('Claude-MCP.exe','app','docs','tools')
+$required += @('app\manager-targets.ps1','app\remove-cloudpc.ps1','tools\desktop-ui\Dashboard.cs','tools\desktop-ui\DashboardControls.cs','tools\desktop-ui\DashboardTests.cs','tools\desktop-ui\UiPreferences.cs')
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($item in $items) { Copy-Item -LiteralPath (Join-Path $projectRoot $item) -Destination $destination -Recurse }

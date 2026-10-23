@@ -182,7 +182,7 @@ function Complete-ProgressWindow([string]$heading, [bool]$success) {
 # 点"连接"后先检查地址，再验证密码；哪一项错了就在哪一项下面显示红字，用户改完再点连接。
 # $FixedUrl 不为空时地址不可修改（只需要重新输入密码，例如密码被修改后）。
 # 返回 @{ Url; Password }，用户取消时返回 $null。
-function Show-CredentialDialog([string]$FixedUrl = '', [string]$Intro = '请输入云电脑的连接信息：') {
+function Show-CredentialDialog([string]$FixedUrl = '', [string]$Intro = '请输入云电脑的连接信息：', [string]$InitialUrl = '') {
     $form = New-Object Windows.Forms.Form
     $form.Text = $script:UiTitle
     $form.Font = $script:UiFont
@@ -212,6 +212,7 @@ function Show-CredentialDialog([string]$FixedUrl = '', [string]$Intro = '请输�
     $urlBox.Size = New-Object Drawing.Size(460, 28)
     $urlBox.MaxLength = 300
     if ($FixedUrl) { $urlBox.Text = $FixedUrl; $urlBox.ReadOnly = $true }
+    elseif ($InitialUrl) { $urlBox.Text = $InitialUrl }
     Add-ChineseMenu $urlBox
     $form.Controls.Add($urlBox)
     $urlError = New-Object Windows.Forms.Label

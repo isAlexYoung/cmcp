@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 
-VERSION = "3.3.3"
+VERSION = "4.0.0"
 MAX_MESSAGE = 8 * 1024 * 1024
 MAX_RESPONSE = 40 * 1024 * 1024
 LINK_DIR = Path.home() / ".local" / "share" / "cloudpc-link"
