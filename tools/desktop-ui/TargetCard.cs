@@ -30,7 +30,7 @@ namespace ClaudeMcp {
 
         internal TargetCard(Target target,CardPreference preference) {
             Target=target;Preference=preference;DoubleBuffered=true;
-            SetStyle(ControlStyles.Selectable,true);TabStop=true;AllowDrop=true;Height=116;Cursor=Cursors.Hand;
+            SetStyle(ControlStyles.Selectable|ControlStyles.ResizeRedraw,true);TabStop=true;AllowDrop=true;Height=116;Cursor=Cursors.Hand;
             Controls.AddRange(new Control[]{Connect,Edit,Copy,Delete,Toggle,StatusText,Details});
             if(preference.icon.Length>0)icon=UiPreferences.DecodeIcon(preference.icon);
             Connect.Click+=delegate{if(ConnectRequested!=null)ConnectRequested(this);};
@@ -115,8 +115,9 @@ namespace ClaudeMcp {
         internal void UpdateActions() {
             bool connected=Target.State=="connected";
             bool connecting=BusyConnect||Target.State=="connecting"||Target.State=="configuring"||Target.State=="waiting-login";
+            Details.StatusOverride=BusyStop?"正在停止":BusyConnect&&Target.State=="stopped"?"连接中":"";
             Connect.Text=BusyStop?"正在停止":connected?"成功连接":connecting?"连接中":"未连接";
-            Connect.Glyph=connected?"check":connecting?"refresh":"play";
+            Connect.Glyph=connected?"check":connecting?"stop":"play";
             Connect.Primary=connected&&!BusyStop;Connect.Neutral=!Connect.Primary;
             Connect.Enabled=!BusyStop;
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
@@ -165,20 +166,28 @@ namespace ClaudeMcp {
         }
         protected override void OnMouseMove(MouseEventArgs e) {
             base.OnMouseMove(e);SetHover(true);
-            if(dragArmed&&e.Button==MouseButtons.Left&&(Math.Abs(e.X-dragStart.X)>5||Math.Abs(e.Y-dragStart.Y)>5)){
-                dragArmed=false;DoDragDrop(Target.Name,DragDropEffects.Move);
+            var list=Parent as CardList;
+            if(list==null)return;
+            if(dragArmed&&e.Button==MouseButtons.Left&&(Math.Abs(e.X-dragStart.X)>8||Math.Abs(e.Y-dragStart.Y)>8)){
+                dragArmed=false;Capture=true;list.BeginSort(this,list.PointToClient(PointToScreen(dragStart)).Y);
             }
+            if(list.Sorting&&Capture)list.MoveSort(list.PointToClient(PointToScreen(e.Location)).Y);
         }
         protected override void OnMouseUp(MouseEventArgs e) {
             base.OnMouseUp(e);
             if(e.Button!=MouseButtons.Left)return;
+            var list=Parent as CardList;
+            if(list!=null&&list.Sorting){list.EndSort(true);Capture=false;dragArmed=false;return;}
             bool grip=dragArmed;dragArmed=false;
             if(!grip&&e.Y<HeaderHeight&&e.X<Width-64){
-                if(e.Y>=62&&e.Y<=94&&e.X>110){if(OpenRequested!=null)OpenRequested(this);}
-                else SetExpanded(!Expanded,true);
+                SetExpanded(!Expanded,true);
             }
         }
+        protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);var list=Parent as CardList;if(!Capture&&list!=null&&list.Sorting)list.EndSort(false);}
+        internal void TestCardClick(int x,int y){OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,x,y,0));}
         protected override bool ProcessCmdKey(ref Message m,Keys keys) {
+            var list=Parent as CardList;
+            if(keys==Keys.Escape&&list!=null&&list.Sorting){list.EndSort(false);Capture=false;dragArmed=false;return true;}
             if(keys==(Keys.Alt|Keys.Up)||keys==(Keys.Alt|Keys.Down)){
                 if(MoveRequested!=null)MoveRequested(this,keys==(Keys.Alt|Keys.Up)?-1:1);return true;
             }

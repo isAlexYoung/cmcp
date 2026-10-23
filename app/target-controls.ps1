@@ -26,6 +26,10 @@ function Write-TargetStateFile([string]$File, [string]$Json) {
 }
 
 function Get-TargetControls {
+    # Read under the same account-scoped, reentrant mutex as replacement. A
+    # concurrent stop must not make the startup observer mistake a transient
+    # replacement window for a corrupt configuration. Validation stays strict.
+    Invoke-TargetStateLock {
     $file = Join-Path $script:StateDir 'target-controls.json'
     if (!(Test-Path -LiteralPath $file)) { return $null }
     if ((Get-Item -LiteralPath $file).Length -gt 262144) { throw '连接开关文件过大，请检查本机设置。' }
@@ -37,6 +41,7 @@ function Get-TargetControls {
         $seen[[string]$t.name] = $true
     }
     return $data
+    }
 }
 
 function Assert-TargetControlSupport {

@@ -1,18 +1,24 @@
-﻿param([string]$TargetName = '', [long]$RequestTime = 0)
+﻿param([string]$TargetName = '', [long]$RequestTime = 0, [switch]$ManagerMode)
 # BAT without a target explicitly stops all; the manager always passes a target.
 # 窗口出来之前的任何错误也用中文提示框显示（控制台是隐藏的）
 trap {
+    if ($ManagerMode) { [Console]::Error.WriteLine('Manager worker failed.'); exit 1 }
     Add-Type -AssemblyName System.Windows.Forms
     [void][Windows.Forms.MessageBox]::Show("程序运行出错。请重新解压完整的压缩包后再试。`r`n`r`n如果仍然不行，请把本文件夹加入杀毒软件的信任列表。", 'Claude 云电脑连接', 'OK', 'Error')
     exit 1
 }
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'ui.ps1')
+if ($ManagerMode) {
+    . (Join-Path $PSScriptRoot 'manager-events.ps1')
+    if (!$TargetName) { Send-ManagerEvent 'error' '必须选择一台云电脑。'; exit 1 }
+}
 try {
     Initialize-StateDir
     if ($TargetName) {
         Assert-TargetControlSupport
         $control = Set-TargetConnection $TargetName $false -RequestTime $RequestTime
+        if ($ManagerMode) { Send-ManagerEvent 'progress' '停止请求已保存，正在等待此台后台确认…' }
         $deadline = [DateTime]::UtcNow.AddSeconds(12)
         do {
             $status = Get-LinkStatus

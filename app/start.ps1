@@ -1,7 +1,8 @@
-﻿param([string]$TargetName = '', [long]$RequestTime = 0)
+﻿param([string]$TargetName = '', [long]$RequestTime = 0, [switch]$ManagerMode)
 # BAT without a target explicitly starts all; the manager always passes a target.
 # 窗口出来之前的任何错误也用中文提示框显示（控制台是隐藏的）
 trap {
+    if ($ManagerMode) { [Console]::Error.WriteLine('Manager worker failed.'); exit 1 }
     Add-Type -AssemblyName System.Windows.Forms
     [void][Windows.Forms.MessageBox]::Show("程序运行出错。请重新解压完整的压缩包后再试。`r`n`r`n如果仍然不行，请把本文件夹加入杀毒软件的信任列表。", 'Claude 云电脑连接', 'OK', 'Error')
     exit 1
@@ -9,6 +10,10 @@ trap {
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'cloud-api.ps1')
 . (Join-Path $PSScriptRoot 'ui.ps1')
+if ($ManagerMode) {
+    . (Join-Path $PSScriptRoot 'manager-events.ps1')
+    if (!$TargetName) { Send-ManagerEvent 'error' '必须选择一台云电脑。'; exit 1 }
+}
 $script:Step = '准备启动'
 
 function Test-Environment {
@@ -79,13 +84,14 @@ function Confirm-Targets {
             $plain = $null
             try { $plain = Unprotect-Text $t.password } catch {}
             if (!$plain) {
+                if ($ManagerMode) { throw '请在编辑页面更新旧版密码。' }
                 $cred = Show-CredentialDialog $t.url '保存的旧版云电脑密码无法读取，请重新输入：'
                 if (!$cred) { throw '已取消。' }
                 Save-CloudTarget $t.name $cred.Url $cred.Password $cred.AuthMode
             }
             Write-Ok ('已读取设置，登录协议由后台只读检查：' + $t.url)
         } catch {
-            if ($_.Exception.Message -match '^已取消') { throw }
+            if ($ManagerMode -or $_.Exception.Message -match '^已取消') { throw }
             Write-Warn ('暂时无法检查 ' + $t.url + '；后台会继续尝试，不会影响其它云电脑。')
         }
     }
@@ -189,6 +195,7 @@ function Wait-Connected($targets) {
 function Install-Connectors($targets) {
     $script:Step = '配置云电脑上的 Claude'
     Write-Step '[5/5] 正在检查云电脑上的 Claude 配置...'
+    if ($ManagerMode -and (Get-LinkStatus).controlProtocol -ne 1) { throw '后台不支持逐台取消，未执行旧版配置流程。' }
     if ((Get-LinkStatus).controlProtocol -eq 1) { Write-Ok '云端配置由各自的后台连接完成，停止所选项会取消该目标的配置。'; return $false }
     $restart = $false
     foreach ($t in $targets) {
@@ -215,7 +222,14 @@ try {
         Assert-TargetControlSupport
         $script:Control = Set-TargetConnection $TargetName $true -RequestTime $RequestTime
     }
-    try { $locked = $lock.WaitOne(60000) } catch [Threading.AbandonedMutexException] { $locked = $true }
+    $lockDeadline = [DateTime]::UtcNow.AddSeconds(60)
+    do {
+        try { $locked = $lock.WaitOne(250) } catch [Threading.AbandonedMutexException] { $locked = $true }
+        if ($TargetName) {
+            $wanted = @((Get-TargetControls).targets | Where-Object { $_.name -ceq $TargetName })
+            if (!$wanted.Count -or !$wanted[0].enabled -or $wanted[0].revision -ne $script:Control.revision) { throw '所选云电脑的启动已被停止或更改。' }
+        }
+    } while (!$locked -and [DateTime]::UtcNow -lt $lockDeadline)
     if (!$locked) { throw '已经有一个启动窗口正在运行，请等待它完成。' }
     Test-Environment
     $targets = Confirm-Targets
@@ -244,6 +258,11 @@ try {
 } finally {
     if ($locked) { $lock.ReleaseMutex() }
     $lock.Dispose()
+}
+if ($ManagerMode) {
+    if ($success) { Send-ManagerEvent 'complete' '连接准备完成，连接状态以后台确认为准。'; exit 0 }
+    if ($cancelled) { Send-ManagerEvent 'complete' '此云电脑的启动已取消。'; exit 0 }
+    exit 1
 }
 if ($TargetName -and ($success -or $cancelled)) {
     # Do not leave a completed wizard blocking the next selected start.

@@ -28,7 +28,10 @@ namespace ClaudeMcp {
     internal sealed class TargetEditorPage : UserControl {
         internal readonly ModernButton Back = new ModernButton { Glyph="back",AccessibleName="返回云电脑列表" };
         internal readonly ModernButton Save = new ModernButton { Glyph="check",Text="保存",Primary=true,AccessibleName="保存云电脑" };
-        internal readonly EditorInput NameInput = new EditorInput(), UrlInput = new EditorInput();
+        internal readonly EditorInput NameInput = new EditorInput(), UrlInput = new EditorInput(), PasswordInput = new EditorInput();
+        readonly Label passwordLabel=new Label();
+        internal bool IsNew { get { return TargetName.Length==0; } }
+        internal string Password { get { return PasswordInput.Box.Text; } }
         readonly ModernButton choose = new ModernButton { Text="选择图片…",Neutral=true }, reset = new ModernButton { Text="恢复默认" };
         readonly Label title = new Label(), nameLabel = new Label(), urlLabel = new Label(), help = new Label(), error = new Label();
         readonly PictureBox icon = new PictureBox { SizeMode=PictureBoxSizeMode.Zoom };
@@ -46,13 +49,16 @@ namespace ClaudeMcp {
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;
             header.Dock=DockStyle.Top;header.Height=78;header.Controls.Add(Back);header.Controls.Add(title);
-            Back.Bounds=new Rectangle(28,20,40,40);title.Text="编辑云电脑";title.Font=new Font(Font,FontStyle.Bold);title.Bounds=new Rectangle(84,21,300,38);
+            Back.Bounds=new Rectangle(28,20,40,40);title.Text=IsNew?"添加云电脑":"编辑云电脑";title.Font=new Font(Font,FontStyle.Bold);title.Bounds=new Rectangle(84,21,300,38);
             footer.Dock=DockStyle.Bottom;footer.Height=78;footer.Controls.Add(Save);
             viewport.Dock=DockStyle.Fill;viewport.AutoScroll=true;viewport.Padding=new Padding(28,16,28,24);
-            sheet.Dock=DockStyle.Top;sheet.Height=460;viewport.Controls.Add(sheet);
-            sheet.Controls.AddRange(new Control[]{icon,choose,reset,nameLabel,NameInput,urlLabel,UrlInput,help,error});
+            sheet.Dock=DockStyle.Top;sheet.Height=570;viewport.Controls.Add(sheet);
+            PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;
+            passwordLabel.Text="旧版密码（共享网页登录可留空）";
+            Save.Text=IsNew?"添加":"保存";
+            sheet.Controls.AddRange(new Control[]{icon,choose,reset,nameLabel,NameInput,urlLabel,UrlInput,passwordLabel,PasswordInput,help,error});
             nameLabel.Text="名称 / 备注";urlLabel.Text="云电脑地址";
-            help.Text="修改地址前请先停止此连接；保存后沿用原有地址验证向导。";
+            help.Text="保存时安全检查地址与协议；添加后不会自动连接。";
             error.AutoEllipsis=true;
             Controls.Add(viewport);Controls.Add(footer);Controls.Add(header);
             tips.SetToolTip(Back,"返回列表，不保存本次修改");tips.SetToolTip(choose,"选择 PNG、JPEG 或 ICO，最多 1 MiB");tips.SetToolTip(reset,"移除自定义图标，使用默认图标");tips.SetToolTip(Save,"保存这台云电脑的修改");
@@ -73,18 +79,20 @@ namespace ClaudeMcp {
             choose.Bounds=new Rectangle((sheet.ClientSize.Width-280)/2,117,148,40);reset.Bounds=new Rectangle(choose.Right+12,117,120,40);
             nameLabel.Bounds=new Rectangle(24,185,width,27);NameInput.Bounds=new Rectangle(24,218,width,44);
             urlLabel.Bounds=new Rectangle(24,286,width,27);UrlInput.Bounds=new Rectangle(24,319,width,44);
-            help.Bounds=new Rectangle(24,376,width,26);error.Bounds=new Rectangle(24,409,width,38);
+            passwordLabel.Bounds=new Rectangle(24,380,width,27);PasswordInput.Bounds=new Rectangle(24,413,width,44);
+            help.Bounds=new Rectangle(24,478,width,26);error.Bounds=new Rectangle(24,511,width,48);
         }
         internal bool LayoutFits { get { return NameInput.Right<=sheet.Width-20 && UrlInput.Right<=sheet.Width-20 && Save.Right<=footer.Width && Back.Right<title.Left; } }
         internal void Apply(Palette colors) {
             BackColor=header.BackColor=viewport.BackColor=footer.BackColor=colors.Page;
             sheet.BackColor=colors.Page;sheet.Colors=colors;sheet.ForeColor=colors.Text;
-            title.ForeColor=nameLabel.ForeColor=urlLabel.ForeColor=colors.Text;help.ForeColor=colors.Muted;error.ForeColor=colors.Danger;
-            nameLabel.BackColor=urlLabel.BackColor=help.BackColor=error.BackColor=icon.BackColor=colors.Surface;
+            title.ForeColor=nameLabel.ForeColor=urlLabel.ForeColor=passwordLabel.ForeColor=colors.Text;help.ForeColor=colors.Muted;error.ForeColor=colors.Danger;
+            nameLabel.BackColor=urlLabel.BackColor=passwordLabel.BackColor=help.BackColor=error.BackColor=icon.BackColor=colors.Surface;
             foreach(var b in new[]{Back,Save,choose,reset}){b.Colors=colors;b.BackColor=b==choose||b==reset?colors.Surface:colors.Page;b.Invalidate();}
-            NameInput.Apply(colors);UrlInput.Apply(colors);sheet.Invalidate();
+            NameInput.Apply(colors);UrlInput.Apply(colors);PasswordInput.Apply(colors);sheet.Invalidate();
         }
         internal void ShowError(string message) { error.Text=message; }
+        internal void SetBusy(bool busy){Save.Enabled=Back.Enabled=choose.Enabled=reset.Enabled=NameInput.Enabled=UrlInput.Enabled=PasswordInput.Enabled=!busy;}
         internal bool ValidateFields() {
             Uri parsed;
             if(DisplayName.Any(Char.IsControl)){ShowError("名称不能包含控制字符。");return false;}

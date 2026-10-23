@@ -106,3 +106,8 @@
 第三轮运行明确捕获 `System.ArgumentException: 'child' is not a child control of this parent`，栈为 `ControlCollection.SetChildIndexInternal` → `Manager.Arrange` → `SizeChanged`。保存时旧 `RebuildCard` 先把字典条目替换成新控件，再移除旧控件；移除引发原生尺寸／布局回调，新控件尚未加入列表，重排错误地对其调用 SetChildIndex。本机此前未触发这一顺序，CI 证明它是程序故障，不能归为测试误报。
 
 修复：不再销毁重建卡片，直接更新原控件的备注和图标；Arrange 对处于合法暂时脱离父容器状态的控件延后重排。新增原控件实例保留、控件暂时脱离期间重排两项回归。本机最终 85/0/0；保持原 60 秒时限及所有业务、安全断言。保留逐检查进度、stderr 与未捕获异常证据，不靠延长等待时间收敛失败。最终 CI 以修复后的固定 SHA 对应运行结果为准。
+
+
+## 后续调整
+
+本文件保留历次实现和失败证据。最新的添加页、无弹窗连接、取消、拖动动画、缩放重绘及 196 项检查见 [页内连接补充记录](UI_INLINE_CONNECTIONS.md)；此前关于继续打开旧向导的描述不再代表当前 GUI 行为。

@@ -9,6 +9,7 @@ namespace ClaudeMcp {
         internal static Action<string> Trace;
         internal static int? DarkCaptionResult, LightCaptionResult;
         static void Pump(){Application.DoEvents();}
+        static bool Until(Func<bool> condition,Manager form){var until=DateTime.UtcNow.AddSeconds(12);do{Pump();form.RefreshState();if(condition())return true;System.Threading.Thread.Sleep(30);}while(DateTime.UtcNow<until);return false;}
         internal static void Run(string temp,Action<bool,string> check){
             string directory=Path.Combine(temp,"dashboard");Directory.CreateDirectory(directory);
             var targets=Manager.Demo().Targets;var prefs=UiPreferences.Load(directory);
@@ -37,9 +38,18 @@ namespace ClaudeMcp {
                 a.Toggle.PerformClick();a.SetExpanded(false,false);Pump();check(!a.Details.Visible&&a.Height==116,"accordion collapse restores enlarged 116px header height");
                 a.SetExpanded(true,false);form.RefreshState();Pump();check(Object.ReferenceEquals(a,form.Cards["preview-a"])&&a.Expanded,"status polling preserves card instance and expanded state");
                 a.TestHover(false);check(!a.Edit.Visible&&!a.Copy.Visible&&!a.Delete.Visible,"secondary card actions hide outside hover");a.TestHover(true);check(a.Edit.Visible&&a.Copy.Visible&&a.Delete.Visible,"secondary card actions reveal on hover");
-                form.MoveCard("preview-b","preview-a");Pump();check(b.Top<a.Top,"reorder moves existing controls without reconnecting targets");
-                form.DropMove("preview-b","preview-a",true);Pump();check(a.Top<b.Top,"dragging onto lower half can move first card to end");
-                form.DropMove("preview-b","preview-a",false);Pump();check(b.Top<a.Top,"dragging onto upper half can move card to start");
+                form.MoveCard("preview-b","preview-a");check(form.list.Moving,"sorting starts a real position transition");form.list.FinishMotion();Pump();check(b.Top<a.Top,"reorder moves existing controls without reconnecting targets");
+                form.DropMove("preview-b","preview-a",true);form.list.FinishMotion();Pump();check(a.Top<b.Top,"dragging onto lower half can move first card to end");
+                form.DropMove("preview-b","preview-a",false);form.list.FinishMotion();Pump();check(b.Top<a.Top,"dragging onto upper half can move card to start");
+                var orderBefore=form.Preferences.Sort(targets).Select(t=>t.Name).ToArray();
+                form.list.BeginSort(b,b.Top+35);form.list.MoveSort(a.Bottom-10);
+                check(form.list.Sorting&&form.Preferences.Sort(targets).Select(t=>t.Name).SequenceEqual(orderBefore),"drag preview moves controls without saving preferences");
+                form.list.EndSort(false);form.list.FinishMotion();Pump();check(b.Top<a.Top,"cancelled drag restores original order");
+                form.list.BeginSort(b,b.Top+35);form.list.MoveSort(a.Bottom-10);form.list.EndSort(true);form.list.FinishMotion();Pump();check(a.Top<b.Top,"pointer drag commits new order on release");
+                bool oldExpanded=b.Expanded;int opens=0;b.OpenRequested+=delegate{opens++;};
+                b.TestCardClick(160,76);check(opens==0&&b.Expanded!=oldExpanded,"clicking card URL only toggles details, never opens cloud desktop");b.SetExpanded(false,false);
+                form.OpenAdd();Pump();check(form.Editor!=null&&form.Editor.IsNew&&form.Editor.Parent==form&&form.OwnedForms.Length==0,"add uses the same embedded page with no popup");
+                form.Editor.Back.PerformClick();Pump();check(form.Editor==null,"add back returns to unchanged card list");
                 b.BeginKeyboardNavigation();b.Focus();Pump();check(b.Selected&&b.Edit.Visible&&b.CanFocus,"keyboard focus selects card and reveals accessible actions");
                 check(form.Cards.Values.Count(c=>c.Selected)==1,"exactly one current card has selected styling");
                 foreach(var size in new[]{new Size(660,500),new Size(800,600),new Size(1100,720),new Size(1440,850)}){
@@ -90,6 +100,41 @@ namespace ClaudeMcp {
             string command=Actions.Command("C:\\app","edit","a'b","https://example.com/'");check(command.Contains("-TargetName 'a''b'")&&command.Contains("-InitialUrl 'https://example.com/'''"),"edit keeps stable ID and escapes both arguments literally");
             bool missing=false;try{Actions.Command("C:\\app","remove","");}catch(ArgumentException){missing=true;}check(missing,"delete cannot dispatch without an explicit target");
             if(File.Exists(UiPreferences.PathFor(directory)))File.Delete(UiPreferences.PathFor(directory));Directory.Delete(directory,false);
+            InlineTests(temp,check);
+        }
+        static void InlineTests(string temp,Action<bool,string> check){
+            string state=Path.Combine(temp,"inline"),kit=Path.Combine(state,"kit");Directory.CreateDirectory(kit);
+            string targets=Path.Combine(state,"cloudpc-targets.json");
+            string sender=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app","manager-events.ps1");
+            string pipeTest=Path.Combine(kit,"pipe.ps1"),completed=Path.Combine(kit,"pipe-completed");
+            File.WriteAllText(pipeTest,". '"+sender.Replace("'","''")+"'\r\nStart-Sleep -Milliseconds 500\r\nSend-ManagerEvent 'progress' '管道已关闭也继续操作'\r\n[IO.File]::WriteAllText('"+completed.Replace("'","''")+"','1')\r\n",System.Text.Encoding.UTF8);
+            var pipeInfo=new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+pipeTest+"\""){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true};
+            using(var child=System.Diagnostics.Process.Start(pipeInfo)){child.StandardOutput.Close();if(!child.WaitForExit(10000)){child.Kill();throw new Exception("Closed-pipe fixture timed out");}check(child.ExitCode==0&&File.Exists(completed),"closing progress reader cannot abort the production worker event sender");}
+            File.WriteAllText(targets,"[{\"name\":\"A\",\"url\":\"https://a.invalid\",\"authMode\":\"shared-browser\"},{\"name\":\"B\",\"url\":\"https://b.invalid\",\"authMode\":\"shared-browser\"}]");
+            string utf8="[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\r\n";
+            File.WriteAllText(Path.Combine(kit,"start.ps1"),"param([string]$TargetName,[long]$RequestTime,[switch]$ManagerMode)\r\n"+utf8+"if(!$ManagerMode -or !$TargetName -or $RequestTime -le 0){exit 9}\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"progress\",\"message\":\"正在等待网页登录\"}')\r\n$deadline=[DateTime]::UtcNow.AddSeconds(15)\r\nwhile(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot ('stop-'+$TargetName)))){if([DateTime]::UtcNow -gt $deadline){exit 8};Start-Sleep -Milliseconds 30}\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"error\",\"message\":\"过期进度不应覆盖\"}')\r\n",System.Text.Encoding.UTF8);
+            File.WriteAllText(Path.Combine(kit,"stop.ps1"),"param([string]$TargetName,[long]$RequestTime,[switch]$ManagerMode)\r\n"+utf8+"if(!$ManagerMode -or !$TargetName -or $RequestTime -le 0){exit 9}\r\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot ('stop-'+$TargetName)),'1')\r\n",System.Text.Encoding.UTF8);
+            File.WriteAllText(Path.Combine(kit,"manager-save.ps1"),utf8+"[Console]::InputEncoding=[Text.UTF8Encoding]::new($false)\r\n$r=[Console]::ReadLine()|ConvertFrom-Json\r\nif($r.password -ne 'TESTONLY123' -or $r.url -ne 'https://c.invalid'){exit 9}\r\n$f=Join-Path (Split-Path $PSScriptRoot -Parent) 'cloudpc-targets.json'\r\n$t=@([IO.File]::ReadAllText($f)|ConvertFrom-Json)\r\n$t+=@{name='C';url=$r.url;authMode='shared-browser'}\r\n[IO.File]::WriteAllText($f,(ConvertTo-Json -InputObject $t -Depth 4))\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"saved\",\"message\":\"已保存\",\"name\":\"C\"}')",System.Text.Encoding.UTF8);
+            using(var form=new Manager(false,state,kit)){
+                form.Show();Pump();var a=form.Cards["A"];var b=form.Cards["B"];
+                a.TestHover(true);a.Connect.PerformClick();
+                check(a.BusyConnect&&a.Expanded&&a.Details.Stop.Enabled&&form.OwnedForms.Length==0,"real GUI launches hidden inline worker and immediately exposes cancel");
+                b.TestHover(true);b.Connect.PerformClick();
+                check(Until(()=>a.Target.Detail=="正在等待网页登录"&&b.Target.Detail=="正在等待网页登录",form),"Unicode worker progress reaches each card inside the main window");
+                a.Details.Stop.PerformClick();
+                check(a.BusyStop&&b.BusyConnect&&b.Details.Stop.Enabled,"stop A dispatches immediately while B remains independently cancellable");
+                check(Until(()=>!a.BusyStop&&!a.BusyConnect&&a.Target.Detail=="此台连接已停止。",form)&&b.BusyConnect,"late cancelled progress cannot replace A stop result or stop B");
+                b.Details.Stop.PerformClick();check(Until(()=>!b.BusyStop&&!b.BusyConnect,form),"B can also cancel without a confirmation or progress popup");
+                form.OpenAdd();form.Editor.UrlInput.Box.Text="https://c.invalid";form.Editor.NameInput.Box.Text="第三台云电脑";form.Editor.PasswordInput.Box.Text="TESTONLY123";form.Editor.Save.PerformClick();
+                check(form.Editor!=null&&form.Editor.Password.Length==0&&!form.Editor.Save.Enabled,"save clears password from editor and prevents duplicate submissions");
+                check(Until(()=>form.Editor==null&&form.Cards.ContainsKey("C"),form)&&form.Cards["C"].Preference.label=="第三台云电脑","embedded add handles saved worker result and applies card metadata");
+                // Check real resize layout and repaint buffers over repeated cycles.
+                for(int i=0;i<12;i++){form.ClientSize=new Size(i%2==0?1380:680,650);Pump();}
+                check(form.LayoutFits()&&form.Cards.Values.All(c=>c.Left==0),"repeated live resizing retains one fitted card rectangle per target");
+                using(var image=new Bitmap(form.list.Width,form.list.Height)){form.list.DrawToBitmap(image,form.list.ClientRectangle);check(image.GetPixel(form.list.ClientSize.Width-2,5).ToArgb()==Palette.Create(false).Page.ToArgb(),"repaint clears the exposed list strip after repeated resizing");}
+            }
+            foreach(var file in new[]{"start.ps1","stop.ps1","manager-save.ps1","stop-A","stop-B","pipe.ps1","pipe-completed"})File.Delete(Path.Combine(kit,file));
+            Directory.Delete(kit,false);File.Delete(targets);File.Delete(UiPreferences.PathFor(state));Directory.Delete(state,false);
         }
     }
 }

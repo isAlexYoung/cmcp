@@ -68,7 +68,7 @@ namespace ClaudeMcp {
                 case "replaced": return "其他电脑或进程已接管连接。本机会停止竞争；需要时手动启动连接。";
                 case "stale": return "本地状态超过 30 秒未更新，暂不确认连接有效。此界面不会主动探测 VPS。";
                 case "stopped": return "此云电脑已停止。点击“启动连接”只连接这一台；其他云电脑保持原状。";
-                default: return "点击“启动连接”运行现有向导；连接或密码错误会在向导中显示。";
+                default: return "点击连接开始；进度会显示在此处，可随时停止。";
             }
         }
         internal static Snapshot Load(string directory) {
@@ -175,6 +175,8 @@ namespace ClaudeMcp {
                     var first=form.Cards.Values.First();
                     string page=args.Length>5?args[5]:"expanded";
                     if(page=="editor")form.OpenEditor(first.Target.Name);
+                    else if(page=="add")form.OpenAdd();
+                    else if(page=="progress"){first.BusyConnect=true;first.Target.State="waiting-login";first.Target.Detail="[4/5] 等待网页登录 · 请在打开的云电脑网页中输入密码，可随时停止。";first.RefreshTarget(first.Target);first.SetExpanded(true,false);first.TestHover(true);}
                     else {first.SetExpanded(page=="expanded",false);foreach(var card in form.Cards.Values)card.ClearPointer();if(page!="idle")first.TestHover(true);}
                     Application.DoEvents();
                     using(var bmp=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bmp,new Rectangle(Point.Empty,bmp.Size));bmp.Save(Path.GetFullPath(args[1]),System.Drawing.Imaging.ImageFormat.Png);}

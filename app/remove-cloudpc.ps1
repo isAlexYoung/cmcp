@@ -1,11 +1,13 @@
-﻿param([Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string]$TargetName)
+﻿param([Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string]$TargetName,[switch]$ManagerMode)
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'manager-targets.ps1')
 . (Join-Path $PSScriptRoot 'ui.ps1')
+if ($ManagerMode) { . (Join-Path $PSScriptRoot 'manager-events.ps1') }
 try {
     if (!@(Get-CloudTargets | Where-Object { $_.name -ceq $TargetName }).Count) { throw '所选云电脑已不存在。' }
     # Use the established selected stop entry, never the global BAT.
     $command = '& ' + "'" + (Join-Path $PSScriptRoot 'stop.ps1').Replace("'", "''") + "' -TargetName '" + $TargetName.Replace("'", "''") + "'"
+    if ($ManagerMode) { $command += ' -ManagerMode' }
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $exe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $child = Start-Process -FilePath $exe -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand ' + $encoded) -WindowStyle Hidden -PassThru

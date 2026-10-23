@@ -1,7 +1,11 @@
 ﻿# Only called after the user clicks Open in the local manager.
-param([string]$TargetName = '')
+param([string]$TargetName = '', [switch]$ManagerMode)
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'ui.ps1')
+if ($ManagerMode) {
+    . (Join-Path $PSScriptRoot 'manager-events.ps1')
+    if (!$TargetName) { Send-ManagerEvent 'error' '必须选择一台云电脑。'; exit 1 }
+}
 try {
     $target = @(Get-CloudTargets | Where-Object { $_.name -eq $TargetName }) | Select-Object -First 1
     if (!$target) { Show-Info '请先添加并选择一台云电脑。'; exit 1 }
