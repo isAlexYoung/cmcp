@@ -1,0 +1,86 @@
+name: Validate CMCP
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-regression:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/node-version.txt
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install locked build dependencies
+        shell: pwsh
+        run: |
+          npm --prefix app ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -LiteralPath (Get-Command node.exe).Source -Destination app/runtime/node.exe
+          New-Item -ItemType Directory -Path test-results -Force | Out-Null
+      - name: Parse PowerShell and verify versions
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem app -Filter '*.ps1') + @(Get-ChildItem tools -Filter '*.ps1') + @(Get-ChildItem app/tests -Filter '*.ps1')
+          foreach ($file in $files) {
+            $tokens = $null; $errors = $null
+            [void][Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)
+            if ($errors.Count) { throw ($errors.Message -join '; ') }
+          }
+          $package = Get-Content app/package.json -Raw | ConvertFrom-Json
+          $lock = Get-Content app/package-lock.json -Raw | ConvertFrom-Json
+          if ($package.version -ne $lock.version -or $package.version -ne $lock.packages.''.version) { throw 'Version mismatch' }
+      - name: Node authentication, reconnect and independent-target tests
+        shell: pwsh
+        run: |
+          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs | Tee-Object test-results/node.tap
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tap = Get-Content test-results/node.tap -Raw
+          if ($tap -notmatch '# pass 30' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
+      - name: Windows PowerShell 5.1 selected-target regression
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/target-controls.test.ps1 | Set-Content test-results/powershell.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/powershell.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 20 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete PowerShell regression' }
+      - name: Build and exercise real WinForms and Shell shortcuts
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build-manager.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $resultFile = Join-Path $PWD 'test-results/manager.json'
+          $p = Start-Process -FilePath (Join-Path $PWD 'Claude-MCP.exe') -ArgumentList ('--self-test "' + $resultFile + '"') -WindowStyle Hidden -PassThru
+          if (!$p.WaitForExit(60000)) { $p.Kill(); throw 'Manager self-test timed out' }
+          if ($p.ExitCode -ne 0) { Get-Content $resultFile; throw 'Manager self-test failed' }
+          $r = Get-Content $resultFile -Raw | ConvertFrom-Json
+          if ($r.passed -ne 32 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/package-manager.ps1 -OutputDirectory "$env:RUNNER_TEMP/cmcp-packages"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmcp-test-results-${{ github.sha }}
+          path: test-results/
+          if-no-files-found: error
+      - name: Preserve versioned package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmcp-windows-x64-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cmcp-packages/*.zip
+            ${{ runner.temp }}/cmcp-packages/*.sha256
+          if-no-files-found: error

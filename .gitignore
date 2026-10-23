@@ -1,0 +1,29 @@
+# Portable binaries and installed dependencies are release assets, not source.
+/Claude-MCP.exe
+/app/node_modules/
+/app/runtime/node.exe
+**/__pycache__/
+*.pyc
+*.log
+*.tmp
+/release/
+/build-results/
+/test-results/
+
+# Per-user connection state and credentials must never be published.
+.env
+.env.*
+config.json
+cloudpc-targets.json
+vps-targets.json
+link-status.json
+browser-entries.json
+target-controls.json
+manager-preferences.json
+stopped.flag
+node-extra-args.txt
+*.key
+*.pem
+*.pfx
+*.p12
+*.lnk
