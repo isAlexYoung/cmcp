@@ -157,6 +157,7 @@ namespace ClaudeMcp {
     }
     internal static class Program {
         [STAThread] static int Main(string[] args) {
+            if(args.Length==2&&args[0]=="--self-test")Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
 #if CMCP_PREVIEW
             // A separately compiled preview never reads personal connection
@@ -199,7 +200,11 @@ namespace ClaudeMcp {
             var checks = new List<string>(); string temp = Path.Combine(Path.GetTempPath(), "claude-mcp-manager-test-" + Guid.NewGuid().ToString("N"));
             try {
                 Directory.CreateDirectory(temp);
-                Action<bool, string> check = (ok, name) => { if (!ok) throw new Exception(name); checks.Add(name); };
+                Action<bool, string> check = (ok, name) => {
+                    if (!ok) throw new Exception(name);
+                    checks.Add(name);
+                    File.AppendAllText(output+".progress.txt",DateTime.UtcNow.ToString("o")+" "+checks.Count+" "+name+Environment.NewLine,Encoding.UTF8);
+                };
                 check(LocalState.Load(temp).Targets.Count == 0, "empty state does not create configuration");
                 ShortcutTests.Run(temp,check);
                 string file = Path.Combine(temp, "cloudpc-targets.json");
@@ -238,7 +243,7 @@ namespace ClaudeMcp {
                 using (var form = new Manager(true)) { form.Show(); Application.DoEvents(); check(form.Visible && form.Controls.Count > 0, "real WinForms preview starts with no connector"); }
                 DashboardTests.Run(temp, check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
-            } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.Message + " / " + e.GetBaseException().Message, checks = checks }), Encoding.UTF8); return 1; }
+            } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }
             finally {
                 // Remove only files created by this test; never recursively
                 // remove a computed path or any unexpected data in it.

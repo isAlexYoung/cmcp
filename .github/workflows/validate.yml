@@ -61,7 +61,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $resultFile = Join-Path $PWD 'test-results/manager.json'
           $p = Start-Process -FilePath (Join-Path $PWD 'Claude-MCP.exe') -ArgumentList ('--self-test "' + $resultFile + '"') -WindowStyle Hidden -PassThru
-          if (!$p.WaitForExit(60000)) { $p.Kill(); throw 'Manager self-test timed out' }
+          if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content $resultFile; throw 'Manager self-test failed' }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
           if ($r.passed -ne 83 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
