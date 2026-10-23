@@ -193,11 +193,12 @@ namespace ClaudeMcp {
                 return 0;
             }
             if (args.Length != 0) return 64;
+            BackendRestart.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app"));
             string account = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string key; using (var hash = SHA256.Create()) key = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(account.ToLowerInvariant()))).Replace("-", "").Substring(0, 20);
             bool created;
             using (var mutex = new Mutex(true, "Local\\ClaudeMcpManager-" + key, out created)) {
-                if (!created) { MessageBox.Show("连接管理界面已经打开，请从任务栏切换。", "Claude MCP"); return 0; }
+                if (!created) return 0;
                 try { ShortcutPrompt.AskBeforeManager(); Application.Run(new Manager(false)); return 0; }
                 catch { MessageBox.Show("界面无法打开，请确认便携包完整。原有 BAT 入口仍可使用。", "Claude MCP", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
                 finally { mutex.ReleaseMutex(); }
@@ -251,6 +252,7 @@ namespace ClaudeMcp {
                 using (var form = new Manager(false,temp)) { form.Show(); Application.DoEvents(); check(form.TestIndependentButtons(), "waiting A leaves stop A and all B controls available"); }
                 using (var form = new Manager(true)) { form.Show(); Application.DoEvents(); check(form.Visible && form.Controls.Count > 0, "real WinForms preview starts with no connector"); }
                 DashboardTests.Run(temp, check);
+                BackendRestart.Test(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }
             finally {

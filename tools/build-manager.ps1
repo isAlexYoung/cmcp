@@ -15,6 +15,7 @@ $editor = Join-Path $PSScriptRoot 'desktop-ui\TargetEditorPage.cs'
 $frame = Join-Path $PSScriptRoot 'desktop-ui\NativeFrame.cs'
 $inline = Join-Path $PSScriptRoot 'desktop-ui\InlineWorker.cs'
 $cardList = Join-Path $PSScriptRoot 'desktop-ui\CardList.cs'
+$restart = Join-Path $PSScriptRoot 'desktop-ui\BackendRestart.cs'
 $icon = Join-Path (Split-Path $PSScriptRoot -Parent) 'app\assets\claude-desktop.ico'
 $manifest = Join-Path $PSScriptRoot 'desktop-ui\app.manifest'
 $output = [IO.Path]::GetFullPath($OutputFile)
@@ -23,6 +24,6 @@ if ($PreviewOnly) {
     $defines += '/define:CMCP_PREVIEW'
     if (!$PSBoundParameters.ContainsKey('OutputFile')) { $output = Join-Path (Split-Path $PSScriptRoot -Parent) 'CMCP-UI-Preview.exe' }
 }
-& $compiler /nologo /target:winexe /platform:anycpu /optimize+ /utf8output /codepage:65001 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Core.dll "/win32manifest:$manifest" "/win32icon:$icon" "/out:$output" @defines $source $shortcuts $shortcutTests $dashboard $manager $preferences $dashboardTests $card $editor $frame $inline $cardList
+& $compiler /nologo /target:winexe /platform:anycpu /optimize+ /utf8output /codepage:65001 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Core.dll "/win32manifest:$manifest" "/win32icon:$icon" "/out:$output" @defines $source $shortcuts $shortcutTests $dashboard $manager $preferences $dashboardTests $card $editor $frame $inline $cardList $restart
 if ($LASTEXITCODE -ne 0) { throw "编译失败，退出码 $LASTEXITCODE" }
 Get-FileHash -LiteralPath $output -Algorithm SHA256 | Select-Object Path,Hash

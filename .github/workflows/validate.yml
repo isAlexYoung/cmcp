@@ -64,7 +64,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 113 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 116 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |
@@ -86,6 +86,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/shared-auto-save.json -Raw | ConvertFrom-Json
           if ($r.passed -ne 18 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete automatic login credential regression' }
+      - name: Silent manager backend restart and state preservation
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-restart.test.ps1 -EvidenceDirectory test-results/restart | Set-Content test-results/restart-stdout.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/restart/restart.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 15 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete silent backend restart regression' }
       - name: Real isolated browser shared automatic login
         shell: pwsh
         run: |

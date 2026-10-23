@@ -15,6 +15,7 @@ $required += @('app\manager-targets.ps1','app\remove-cloudpc.ps1','tools\desktop
 $required += @('tools\desktop-ui\TargetCard.cs','tools\desktop-ui\TargetEditorPage.cs','tools\desktop-ui\NativeFrame.cs')
 $required += @('app\manager-events.ps1','app\manager-save.ps1','tools\desktop-ui\InlineWorker.cs','tools\desktop-ui\CardList.cs')
 $required += @('app\shared-autofill.mjs')
+$required += @('app\manager-restart.ps1','tools\desktop-ui\BackendRestart.cs')
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($item in $items) { Copy-Item -LiteralPath (Join-Path $projectRoot $item) -Destination $destination -Recurse }

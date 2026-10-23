@@ -390,7 +390,20 @@ function Get-ServiceProcesses {
     return $result
 }
 
+function Invoke-LinkLifecycleLock([scriptblock]$Action) {
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { $key = ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($script:StateDir.ToLowerInvariant())))).Replace('-', '').Substring(0, 20) } finally { $hash.Dispose() }
+    $mutex = New-Object Threading.Mutex($false, ('Local\ClaudeMcpLifecycle-' + $key))
+    $owned = $false
+    try {
+        try { $owned = $mutex.WaitOne(90000) } catch [Threading.AbandonedMutexException] { $owned = $true }
+        if (!$owned) { throw 'Backend lifecycle operation busy' }
+        & $Action
+    } finally { if ($owned) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
+}
+
 function Stop-LinkService {
+    Invoke-LinkLifecycleLock {
     # Ask the service to stop itself before attempting process termination.
     # This also works for a 3.2.1+ service launched at a higher integrity level.
     [IO.File]::WriteAllText($script:StopFlag, 'stop', [Text.UTF8Encoding]::new($false))
@@ -425,6 +438,7 @@ function Stop-LinkService {
         $fresh = $false
         try { $fresh = ((Get-Date).ToUniversalTime() - [datetime]::Parse([string]$remaining.at).ToUniversalTime()).TotalSeconds -lt 20 } catch {}
         if ($fresh) { throw '旧后台服务仍在运行，当前窗口无法停止它。请右键 Start-Claude-MCP.bat 选择“以管理员身份运行”完成这次升级；新版以后可直接停止。' }
+    }
     }
 }
 
@@ -478,8 +492,10 @@ function Unregister-AutoStart {
 }
 
 function Start-LinkService {
-    $svc = Get-ServiceCommand
-    Start-Process -FilePath $svc.Exe -ArgumentList $svc.Arguments -WindowStyle Hidden
+    Invoke-LinkLifecycleLock {
+        $svc = Get-ServiceCommand
+        Start-Process -FilePath $svc.Exe -ArgumentList $svc.Arguments -WindowStyle Hidden
+    }
 }
 
 # 从网上下载的压缩包，解压出的文件带有"来自互联网"标记，可能被系统拦截或弹出安全警告：启动前统一解除
