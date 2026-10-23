@@ -19,6 +19,7 @@ using System.Windows.Forms;
 namespace ClaudeMcp {
     internal sealed class Target {
         public string Name, Url, Mode, State, Detail;
+        public bool AutoLogin, HasSavedPassword;
     }
     internal sealed class Snapshot {
         public bool Running, Stopped, ReadError, Stale;
@@ -62,6 +63,9 @@ namespace ClaudeMcp {
             switch (state) {
                 case "connected": return "后台已报告连接成功。可在云端 Claude 使用本机工具；新增配置后需完全退出并重新打开 Claude。";
                 case "waiting-login": return "点击“打开云电脑”，在共享网页入口输入桌面密码。MCP 将共用这次登录。";
+                case "password": return "保存的密码不正确或无法读取，已停止自动尝试。请停止此连接后编辑密码，或在共享网页手动登录。";
+                case "locked": return "登录暂时锁定，已停止自动尝试。请等待云电脑解除限制后再手动登录。";
+                case "expired": return "访问已过期，已停止自动尝试。请先更新云电脑的访问权限或密码。";
                 case "configuring": return "正在通过现有流程检查云端 Claude 配置，请等待。";
                 case "config-error": return "连接已建立，但 Claude 配置尚未确认。可查看日志，后台按原规则重试。";
                 case "offline": return "后台正在等待网络或云端恢复。共享模式不会自动抢回失效的网页登录。";
@@ -117,8 +121,9 @@ namespace ClaudeMcp {
                     else if (result.Running && !result.Stale && Text(Get(control, "revision")) != Text(Get(entry, "revision"))) state = "connecting";
                 }
                 string message = Text(Get(entry, "message"));
-                result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), Mode = Text(Get(d, "authMode")) == "shared-browser" ? "共享网页登录" : "自动识别 / 旧版", State = state,
-                    Detail = Detail(state) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "") });
+                bool auto=Text(Get(d,"authMode"))=="shared-browser"&&Object.Equals(Get(d,"autoLogin"),true);
+                result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"共享网页自动登录":"共享网页登录") : "自动识别 / 旧版", State = state,
+                    Detail = (auto&&state=="waiting-login"?"等待共享网页使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "") });
             }
             return result;
         }

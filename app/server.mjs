@@ -202,7 +202,7 @@ function powershell(script, args, { capture = false, timeoutMs = 60000, signal }
     child.stderr?.on('data', chunk => { err += chunk; });
     const timer = timeoutMs ? setTimeout(() => { log(`${script} timed out`); child.kill(); }, timeoutMs) : null;
     child.on('error', error => { clearTimeout(timer); signal?.removeEventListener('abort', abort); log(`${script} failed to start: ${error.message}`); resolve({ code: -1, out, err }); });
-    child.on('close', code => { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (code !== 0) log(`${script} exit ${code} ${err.trim().slice(0, 300)}`); resolve({ code, out, err }); });
+    child.on('close', code => { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (code !== 0) log(`${script} exit ${code}${script==='get-password.ps1'?'':' '+err.trim().slice(0, 300)}`); resolve({ code, out, err }); });
   });
 }
 
@@ -244,8 +244,8 @@ function startLinks() {
     status, onChange:writeBrowserEntries,
     create:managedTargetFactory({proxyFor, machine:machineId(stateDir), version:bridgeVersion,
       forward, askPassword, notify, log, session:sessionMode, onReplaced:sessionMode ? () => stop(4) : undefined,
-      passwordFor:async name => {
-        const r = await powershell('get-password.ps1', ['-Name', name], {capture:true, timeoutMs:45000});
+      passwordFor:async (name,signal) => {
+        const r = await powershell('get-password.ps1', ['-Name', name], {capture:true, timeoutMs:45000,signal});
         if (r.code !== 0 || !r.out.trim()) throw new Error('Cannot read saved password');
         return Buffer.from(r.out.trim(), 'base64').toString('utf8');
       },

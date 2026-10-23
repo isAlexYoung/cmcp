@@ -141,6 +141,11 @@ function Get-LinkStatus {
     $open=Spawn 'manager-open.ps1' 0 'open'
     Check ($open.WaitForExit(10000) -and $open.ExitCode -eq 1 -and [IO.File]::ReadAllText((Join-Path $temp 'open.out')) -match 'schema') 'explicit unavailable desktop open reports inline instead of modal'
     Check (!(Test-Path -LiteralPath $StopFlag)) 'all inline operations avoid global stop flag'
+    Update-ManagerCloudTarget 'A' 'https://a.invalid' 'TEST-ONLY-AUTO' 'shared-browser' $true
+    $beforeOldStart=[IO.File]::ReadAllText((Join-Path $temp 'target-controls.json'))
+    $oldStart=Spawn 'start.ps1' ([DateTime]::UtcNow.Ticks) 'old-auto-backend'
+    Check ($oldStart.WaitForExit(10000) -and $oldStart.ExitCode -eq 1 -and [IO.File]::ReadAllText((Join-Path $temp 'old-auto-backend.out')) -match '不支持自动登录') 'old backend cannot silently accept new automatic login mode'
+    Check ([IO.File]::ReadAllText((Join-Path $temp 'target-controls.json')) -ceq $beforeOldStart) 'unsupported backend refusal does not enable A or interrupt B'
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;not_executed=@('real VPS authentication and manual visual operation');checks=@($checks)} | ConvertTo-Json -Depth 4
 }catch{
     [pscustomobject]@{passed=$checks.Count;failed=1;skipped=0;error=$_.ToString();checks=@($checks);evidenceDirectory=$temp} | ConvertTo-Json -Depth 4
@@ -149,7 +154,7 @@ function Get-LinkStatus {
     foreach($child in $children){try{if(!$child.HasExited){$child.Kill()};$child.Dispose()}catch{}}
     if($EvidenceDirectory){
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($EvidenceDirectory))
-        foreach($name in @('init','cancel-init','waiting','cancel-wait','open')){foreach($suffix in @('.out','.err')){
+        foreach($name in @('init','cancel-init','waiting','cancel-wait','open','old-auto-backend')){foreach($suffix in @('.out','.err')){
             $file=Join-Path $temp ($name+$suffix)
             if(Test-Path -LiteralPath $file){Copy-Item -LiteralPath $file -Destination (Join-Path $EvidenceDirectory ($name+$suffix))}
         }}

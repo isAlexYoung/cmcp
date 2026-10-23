@@ -43,10 +43,10 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 30' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 40' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |
@@ -64,7 +64,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 106 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 113 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |
@@ -78,7 +78,21 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-inline.test.ps1 -EvidenceDirectory test-results/inline | Set-Content test-results/manager-inline.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/manager-inline.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 25 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete inline action regression' }
+          if ($r.passed -ne 27 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete inline action regression' }
+      - name: Shared automatic login encrypted save boundaries
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/shared-auto-save.test.ps1 | Set-Content test-results/shared-auto-save.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/shared-auto-save.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 18 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete automatic login credential regression' }
+      - name: Real isolated browser shared automatic login
+        shell: pwsh
+        run: |
+          node tools/test-shared-auto-browser.mjs test-results/shared-auto-browser | Set-Content test-results/shared-auto-browser-stdout.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/shared-auto-browser/browser.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 10 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete real browser automatic login regression' }
       - name: Capture real WinForms layouts
         shell: pwsh
         run: |

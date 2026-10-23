@@ -28,7 +28,8 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
       signal.throwIfAborted();
       if (!current()) throw Error('Target stopped');
       if (shared) {
-        record.gateway = await createSharedSessionGateway({name:t.name, baseUrl:t.url, agent:record.agent, diagnostic:message => log(`[${t.name}] ${message}`)});
+        record.gateway = await createSharedSessionGateway({name:t.name, baseUrl:t.url, agent:record.agent, diagnostic:message => log(`[${t.name}] ${message}`),
+          autoPassword:t.autoLogin===true ? async signal=>{if(!current()||signal.aborted)throw Error('Target stopped');const password=await passwordFor(t.name,signal);if(!current()||signal.aborted)throw Error('Target stopped');return password;} : undefined});
         if (!current()) { await record.gateway.close(); throw Error('Target stopped'); }
       }
       record.setup = async () => {
@@ -59,6 +60,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
           url:t.url, stamp:t.stamp, authMode:shared ? 'shared-browser' : 'legacy',
           getSessionId:() => record.gateway?.getSessionId(),
           getSessionAuth:() => record.gateway?.getSessionAuth(),
+          getLoginIssue:() => record.gateway?.getLoginIssue(),
           invalidateSession:id => record.gateway?.invalidateSession(id),
           password:() => passwordFor(t.name), proxy:() => proxyFor(t.url, signal),
         } : null,

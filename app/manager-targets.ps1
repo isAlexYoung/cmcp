@@ -10,17 +10,18 @@ function Assert-ManagerTargetStopped([string]$Name) {
         if ($entry -and $entry.state -ne 'stopped') { throw '后台尚未确认此连接已停止，请稍后重试。' }
     }
 }
-function Update-ManagerCloudTarget([string]$Name, [string]$Url, [string]$Password, [string]$AuthMode) {
+function Update-ManagerCloudTarget([string]$Name, [string]$Url, [string]$Password, [string]$AuthMode, [bool]$AutoLogin = $false) {
     if (!$Name) { throw '必须选择一台云电脑。' }
     $safe = Get-NormalizedUrl $Url
     if ($AuthMode -notin @('shared-browser','legacy')) { throw '登录方式无效。' }
+    if ($AutoLogin -and ($AuthMode -ne 'shared-browser' -or !$Password)) { throw '共享自动登录需要保存密码。' }
     Invoke-TargetStateLock {
         Assert-ManagerTargetStopped $Name
         $targets = @(Get-CloudTargets)
         if (@($targets | Where-Object { $_.name -cne $Name -and $_.url -eq $safe }).Count) { throw '该地址已被另一张卡片使用，不会覆盖它。' }
-        $cipher = if ($AuthMode -eq 'shared-browser') { $null } else { Protect-Text $Password }
+        $cipher = if ($AuthMode -eq 'shared-browser' -and !$AutoLogin) { $null } else { Protect-Text $Password }
         $updated = @($targets | ForEach-Object {
-            if ($_.name -ceq $Name) { [pscustomobject]@{ name = $Name; url = $safe; password = $cipher; authMode = $AuthMode; stamp = [DateTime]::UtcNow.ToString('o') } } else { $_ }
+            if ($_.name -ceq $Name) { [pscustomobject]@{ name = $Name; url = $safe; password = $cipher; authMode = $AuthMode; autoLogin = $AutoLogin; stamp = [DateTime]::UtcNow.ToString('o') } } else { $_ }
         })
         Write-TargetStateFile $script:TargetsFile (ConvertTo-Json -InputObject $updated -Depth 5)
     }

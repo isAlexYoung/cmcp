@@ -118,9 +118,10 @@ namespace ClaudeMcp {
             TargetCard card;if(!Cards.TryGetValue(editor.TargetName,out card)){editor.ShowError("所选云电脑已不存在，请返回列表。");return;}
             if(IsBusy(card.Target.Name)){editor.ShowError("此云电脑正在处理操作，请完成后重试。");return;}
             bool changed=!String.Equals(editor.Url.TrimEnd('/'),card.Target.Url,StringComparison.OrdinalIgnoreCase);
-            if((changed||editor.Password.Length>0)&&card.Target.State!="stopped"){editor.ShowError("请先停止此连接，再修改地址或密码；备注和图标可随时修改。");return;}
+            bool authChanged=editor.AutoLogin!=card.Target.AutoLogin;
+            if((changed||editor.Password.Length>0||authChanged)&&card.Target.State!="stopped"){editor.ShowError("请先停止此连接，再修改地址、密码或自动登录；备注和图标可随时修改。");return;}
             if(changed&&targets.Any(t=>t.Name!=card.Target.Name&&String.Equals(t.Url,editor.Url.TrimEnd('/'),StringComparison.OrdinalIgnoreCase))){editor.ShowError("该地址已经添加，未覆盖其他云电脑。");return;}
-            if(changed||editor.Password.Length>0){SaveConnection(editor,card);return;}
+            if(changed||editor.Password.Length>0||authChanged){SaveConnection(editor,card);return;}
             try{
                 string name=card.Target.Name,url=editor.Url;
                 Preferences.Set(name,editor.DisplayName,editor.IconData,targets);SavePreferences();Mark("editor-save preferences saved");card.UpdatePreference(Preferences.Get(name));Mark("editor-save card presentation updated");
@@ -131,7 +132,7 @@ namespace ClaudeMcp {
             if(preview){editor.ShowError("此预览不会访问网络或保存连接；请使用主程序添加。");return;}
             if(children.Any(p=>p.Action=="add"||p.Action=="edit")){editor.ShowError("正在校验另一项保存，请稍后重试。");return;}
             try{
-                var worker=new InlineWorker(kit,editor.IsNew?"add":"edit",editor.TargetName,editor.Url,editor.Password);
+                var worker=new InlineWorker(kit,editor.IsNew?"add":"edit",editor.TargetName,editor.Url,editor.Password,editor.AutoLogin);
                 children.Add(new PendingAction{Worker=worker,Process=worker.Process,Name=editor.TargetName,Action=editor.IsNew?"add":"edit",Label=editor.DisplayName,Icon=editor.IconData});
                 editor.PasswordInput.Box.Clear();editor.SetBusy(true);editor.ShowError("正在校验地址和登录协议…");
             }catch{editor.ShowError("无法启动校验，请确认便携包完整。");}
@@ -188,8 +189,9 @@ namespace ClaudeMcp {
                 card.BusyConnect=children.Any(p=>p.Name==target.Name&&p.Action=="connect"&&!p.Superseded);card.BusyStop=children.Any(p=>p.Name==target.Name&&(p.Action=="stop"||p.Action=="remove"));
                 string message;if(progress.TryGetValue(target.Name,out message)){
                     bool waiting=card.BusyConnect&&message.StartsWith("[4/5]")&&(target.State=="waiting-login"||target.State=="offline"||target.State=="configuring");
-                    target.Detail=waiting?LocalState.Caption(target.State)+" · "+LocalState.Detail(target.State):message;
+                    target.Detail=waiting?LocalState.Caption(target.State)+" · "+target.Detail:message;
                 }
+                if(target.AutoLogin&&(target.State=="password"||target.State=="locked"||target.State=="expired"))target.Detail=LocalState.Detail(target.State);
                 card.RefreshTarget(target);card.Edit.Enabled=card.Delete.Enabled=!IsBusy(target.Name);
             }
             toolbar.Add.Enabled=!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove");Arrange();ApplyTheme();

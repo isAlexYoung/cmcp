@@ -23,7 +23,7 @@ export const targetRevision = (target, controls) => controls?.get(target.name)?.
 export function createTargetConnections({readTargets, readControls, create, status, onChange = () => {}, interval = 250, retryMs = 10000}) {
   const slots = new Map();
   let closed = false;
-  const signature = (t, revision) => JSON.stringify([t.url, t.stamp, t.authMode, revision]);
+  const signature = (t, revision) => JSON.stringify([t.url, t.stamp, t.authMode, t.autoLogin===true, revision]);
   const snapshot = () => {
     const controls = readControls(), desired = new Map();
     for (const t of readTargets().slice(0, 100)) {

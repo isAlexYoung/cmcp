@@ -31,7 +31,7 @@ function Test-Environment {
     if (!$node) { throw '安装包不完整：缺少 runtime\node.exe。请重新解压完整的压缩包。' }
     $ver = (Invoke-Quiet $node @('-v')).Output.Trim()
     if ($ver -notmatch '^v\d+\.') { throw '内置运行环境无法启动，可能被杀毒软件拦截。请把本文件夹加入杀毒软件的信任列表后重试。' }
-    foreach ($f in @('node_modules\@modelcontextprotocol\server-filesystem\dist\index.js', 'node_modules\@modelcontextprotocol\sdk\package.json', 'node_modules\express\package.json', 'node_modules\ws\package.json', 'server.mjs', 'desktop-auth.mjs', 'shared-session-gateway.mjs', 'cloud-connector.mjs', 'detect-auth.mjs', 'link-client.mjs', 'terminal-link.mjs', 'cloudpc-relay.py', 'cloudpc-connector.py', 'target-controls.ps1', 'target-connections.mjs', 'managed-target.mjs')) {
+    foreach ($f in @('node_modules\@modelcontextprotocol\server-filesystem\dist\index.js', 'node_modules\@modelcontextprotocol\sdk\package.json', 'node_modules\express\package.json', 'node_modules\ws\package.json', 'server.mjs', 'desktop-auth.mjs', 'shared-session-gateway.mjs', 'shared-autofill.mjs', 'cloud-connector.mjs', 'detect-auth.mjs', 'link-client.mjs', 'terminal-link.mjs', 'cloudpc-relay.py', 'cloudpc-connector.py', 'target-controls.ps1', 'target-connections.mjs', 'managed-target.mjs')) {
         if (!(Test-Path -LiteralPath (Join-Path $KitDir $f))) { throw "安装包不完整：缺少 $f。请重新解压完整的压缩包。" }
     }
     Write-Ok ('运行环境正常（Windows ' + $os.Major + '.' + $os.Build + '，内置 Node.js ' + $ver + '）')
@@ -77,7 +77,7 @@ function Confirm-Targets {
             # an unreachable saved address delay opening a new shared desktop.
             $mode = $t.authMode
             if ($mode -eq 'shared-browser') {
-                if ($t.authMode -ne 'shared-browser' -or $t.password) { Save-CloudTarget $t.name $t.url '' 'shared-browser' }
+                if ($t.password -and $t.autoLogin -ne $true) { Save-CloudTarget $t.name $t.url '' 'shared-browser' }
                 Write-Ok ('共享网页登录：' + $t.url)
                 continue
             }
@@ -175,6 +175,7 @@ function Wait-Connected($targets) {
             }
             switch ($s.state) {
                 'connected' { }
+                'password' { throw '保存的密码未通过或无法读取；自动尝试已停止。请停止此连接后编辑密码，或在共享网页手动登录。' }
                 'outdated' { throw '云电脑版本过旧，不支持直连。请联系管理员更新云电脑。' }
                 'replaced' { throw '另一台电脑也在连接这台云电脑。请先在那台电脑上断开。' }
                 'expired' { throw $s.message }
@@ -220,6 +221,11 @@ try {
     Initialize-StateDir
     if ($TargetName) {
         Assert-TargetControlSupport
+        $chosen = @(Get-CloudTargets | Where-Object { $_.name -ceq $TargetName })
+        $running = Get-LinkStatus
+        if ($chosen.Count -eq 1 -and $chosen[0].autoLogin -eq $true -and $running -and $running.pid -and (Get-Process -Id ([int]$running.pid) -ErrorAction SilentlyContinue) -and $running.autoLoginProtocol -ne 1) {
+            throw '当前后台不支持网页自动登录。请在方便时手动停止旧后台并启动新版；程序不会自动中断其他云电脑。'
+        }
         $script:Control = Set-TargetConnection $TargetName $true -RequestTime $RequestTime
     }
     $lockDeadline = [DateTime]::UtcNow.AddSeconds(60)
@@ -252,7 +258,8 @@ try {
     if ($cancelled) { Write-Line '此云电脑的启动已取消，其他连接保持不变。' }
     else {
         Write-ErrorLog $script:Step $_
-        Write-Err ($script:Step + '失败：' + $message)
+        if ($ManagerMode -and $message -like '当前后台不支持网页自动登录*') { Send-ManagerEvent 'error' '当前后台为旧版，不支持自动登录。请在方便时手动停止旧后台并启动新版；其他连接不会被自动中断。' }
+        else { Write-Err ($script:Step + '失败：' + $message) }
         if ($message -ne '已取消。' -and $message -notmatch '^已取消') { Write-Line ('详细信息已记录到：' + $ErrorLog) 'DimGray' }
     }
 } finally {

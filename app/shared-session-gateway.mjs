@@ -4,6 +4,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { authHeaders, requestBuffered } from './desktop-auth.mjs';
+import {autoFillSource, injectAutoFill} from './shared-autofill.mjs';
 
 const SESSION_RE = /^[A-Za-z0-9._~-]{16,4096}$/;
 const HOP_HEADERS = new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade','host']);
@@ -46,7 +47,7 @@ function localError(res, status, message) {
   res.end(body);
 }
 
-export async function createSharedSessionGateway({ name, baseUrl, agent, onSession = () => {}, onInvalidate = () => {}, diagnostic = () => {} }) {
+export async function createSharedSessionGateway({ name, baseUrl, agent, onSession = () => {}, onInvalidate = () => {}, diagnostic = () => {}, autoPassword }) {
   const remote = new URL(baseUrl);
   const loopbackTest = remote.protocol === 'http:' && remote.hostname === '127.0.0.1';
   if ((!loopbackTest && remote.protocol !== 'https:') || remote.username || remote.password || remote.search || remote.hash || remote.pathname !== '/') throw new Error('共享会话只支持干净的 HTTPS 云电脑地址');
@@ -60,6 +61,8 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
   let sessionId = '';
   let remoteCookie;
   let passwordTag = null;
+  const autoMarker = 'cmcp-auto-'+randomBytes(32).toString('base64url');
+  let autoUsed = false, autoIssue = null;
   let loginQueue = Promise.resolve();
   let closed = false;
   let server;
@@ -152,7 +155,7 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
     if (status >= 200 && status < 300 && used === sessionId) return true;
     return null;
   }
-  async function processLogin(req, res, target, body, tag) {
+  async function processLogin(req, res, target, body, tag, automatic=false) {
     if (closed || res.destroyed) return;
     if (sessionId && passwordTag && safeEqual(tag, passwordTag)) {
       const valid = await validateSession().catch(() => null);
@@ -181,7 +184,15 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
       remoteCookie = candidate;
       if (!setSession(value?.sessionId)) return localError(res, 502, '云电脑未返回有效的共享会话');
       passwordTag = tag;
+      autoIssue = null;
+      // A manual login also consumes automatic login for this gateway. Later
+      // revocation must never make the saved credential take over again.
+      autoUsed = true;
       diagnostic(`browser login accepted; session cookie ${remoteCookie ? 'present' : 'absent'}`);
+    }
+    if(automatic){
+      const output=Buffer.from(JSON.stringify(result.status>=200&&result.status<300?{sessionId}:{error:result.status===401?'保存的密码不正确，已停止自动尝试，请在 CMCP 更新密码':'自动登录未通过，请手动登录或检查 CMCP 提示'}));
+      res.writeHead(result.status||502,{'content-type':'application/json; charset=utf-8','content-length':output.length,'cache-control':'no-store','x-content-type-options':'nosniff'});res.end(output);return;
     }
     let headersOut;
     try { headersOut = responseHeaders(result.headers, result.status); }
@@ -196,8 +207,32 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
     try { parsed = JSON.parse(body.toString('utf8')); } catch { return localError(res, 400, 'Invalid login request'); }
     const password = parsed && !Array.isArray(parsed) ? parsed.password : null;
     if (typeof password !== 'string' || password.length < 1 || password.length > 4096) return localError(res, 400, 'Invalid login request');
-    const tag = passwordDigest(password);
-    const operation = loginQueue.then(() => processLogin(req, res, target, body, tag));
+    if(typeof autoPassword==='function'&&password!==autoMarker&&/^cmcp-auto-[A-Za-z0-9_-]{43}$/.test(password)){
+      res.writeHead(409,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});return res.end(JSON.stringify({error:'自动填充占位已失效，请清空浏览器保存的此项后重新打开 CMCP 入口'}));
+    }
+    const operation = loginQueue.then(async () => {
+      if (password !== autoMarker) return processLogin(req, res, target, body, passwordDigest(password));
+      if (typeof autoPassword !== 'function') return localError(res,403,'未启用自动登录');
+      if (closed || res.destroyed) return;
+      if (sessionId) {
+        const valid=await validateSession().catch(()=>null);
+        if (valid===true) { res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});return res.end(JSON.stringify({sessionId})); }
+        if (valid===null) return localError(res,503,'暂时无法确认会话，请手动重试');
+      }
+      if (autoUsed) return localError(res,409,'本次自动登录已结束，请手动登录或停止后更新密码');
+      autoUsed=true; // Before awaiting decryption/POST: no concurrent duplicate.
+      let saved;
+      try { saved=await autoPassword(lifetime.signal); }
+      catch { autoIssue={state:'password',message:'无法读取保存的密码，已停止自动尝试；请停止此连接后编辑密码'}; return localError(res,409,'无法读取保存的密码，请在 CMCP 编辑后重试'); }
+      if (closed || lifetime.signal.aborted || res.destroyed) return;
+      if (typeof saved!=='string'||!saved.length||saved.length>256) {autoIssue={state:'password',message:'保存的密码无效，请停止此连接后编辑密码'};return localError(res,409,'保存的密码无效');}
+      // The browser never receives saved, only the ordinary session response.
+      const loginBody=Buffer.from(JSON.stringify({password:saved,remember:false}));
+      try { await processLogin(req,res,target,loginBody,passwordDigest(saved),true); }
+      catch {autoIssue={state:'waiting-login',message:'自动登录未完成，已停止自动尝试；可在网页手动登录'};throw Error('Automatic login unavailable');}
+      finally{loginBody.fill(0);saved=null;}
+      if (!sessionId && !closed) autoIssue={state:res.statusCode===401?'password':res.statusCode===429?'locked':res.statusCode===403?'expired':'waiting-login',message:'自动登录未通过，已停止自动尝试；请手动登录或停止后编辑密码'};
+    });
     loginQueue = operation.catch(() => {});
     try { await operation; } catch { localError(res, 502, '云电脑登录请求失败，请稍后重试'); }
   }
@@ -205,12 +240,21 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
     const target = upstreamUrl(local);
     if (req.method === 'POST' && local.pathname === '/api/auth/login') return void proxyLogin(req, res, target);
     const headers = requestHeaders(req, target);
+    const autoPage=typeof autoPassword==='function'&&(!autoUsed||sessionId)&&req.method==='GET'&&local.pathname==='/';
+    if(autoPage)headers['accept-encoding']='identity';
     const used = sessionId;
     const upstream = track(transport.request(target, { method: req.method, headers, agent, rejectUnauthorized: true, timeout: 60000 }, upstreamRes => {
       if (upstreamRes.statusCode === 401 && local.pathname === '/api/auth/session') clearSession(used);
       let outputHeaders;
       try { outputHeaders = responseHeaders(upstreamRes.headers, upstreamRes.statusCode); }
       catch { upstreamRes.resume(); return localError(res, 502, '云电脑返回了不安全的跳转'); }
+      if(autoPage&&upstreamRes.statusCode===200&&/^text\/html\b/i.test(String(outputHeaders['content-type']))&&!outputHeaders['content-encoding']){
+        const chunks=[];let size=0;
+        upstreamRes.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)upstreamRes.destroy(Error('HTML too large'));else chunks.push(chunk);});
+        upstreamRes.on('error',()=>localError(res,502,'无法加载自动登录页面，请手动重试'));
+        upstreamRes.on('end',()=>{const body=Buffer.from(injectAutoFill(Buffer.concat(chunks).toString('utf8')));delete outputHeaders['etag'];delete outputHeaders['content-md5'];outputHeaders['content-length']=body.length;res.writeHead(200,outputHeaders);res.end(body);});
+        return;
+      }
       res.writeHead(upstreamRes.statusCode || 502, outputHeaders);
       upstreamRes.on('error', () => res.destroy());
       upstreamRes.pipe(res);
@@ -243,6 +287,10 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
       const body = Buffer.from(BOOTSTRAP_HTML);
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' });
       return res.end(body);
+    }
+    if(local.pathname==='/__mcp/autofill.js'&&req.method==='GET'){
+      if(!gateOk(req)||typeof autoPassword!=='function')return localError(res,403,'Browser entry required');
+      const body=autoFillSource(autoMarker);res.writeHead(200,{'content-type':'application/javascript; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});return res.end(body);
     }
     if (local.pathname.startsWith('/__mcp/')) return localError(res, 404, 'Not found');
     if (!gateOk(req)) return localError(res, 403, 'Browser entry required');
@@ -310,6 +358,7 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
     getSessionAuth: () => sessionId ? {sessionId, ...(remoteCookie ? {cookie:remoteCookie} : {})} : null,
     invalidateSession: expected => clearSession(expected),
     hasSession: () => !!sessionId,
+    getLoginIssue: () => autoIssue,
     async close() {
       if (closed) return;
       closed = true;

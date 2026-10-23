@@ -210,12 +210,13 @@ function Get-CloudTargets {
     return @($list)
 }
 
-function Save-CloudTarget([string]$name, [string]$url, [string]$password, [string]$authMode = '') {
+function Save-CloudTarget([string]$name, [string]$url, [string]$password, [string]$authMode = '', [bool]$AutoLogin = $false) {
     if (!$authMode) { $authMode = Get-CloudAuthMode $url }
+    if ($AutoLogin -and ($authMode -ne 'shared-browser' -or !$password)) { throw '共享自动登录需要保存密码。' }
     Invoke-TargetStateLock {
     $targets = @(Get-CloudTargets | Where-Object { $_.name -ne $name })
-    $cipher = if ($authMode -eq 'shared-browser') { $null } else { Protect-Text $password }
-    $targets += [pscustomobject]@{ name = $name; url = $url; password = $cipher; authMode = $authMode; stamp = [DateTime]::UtcNow.ToString('o') }
+    $cipher = if ($authMode -eq 'shared-browser' -and !$AutoLogin) { $null } else { Protect-Text $password }
+    $targets += [pscustomobject]@{ name = $name; url = $url; password = $cipher; authMode = $authMode; autoLogin = $AutoLogin; stamp = [DateTime]::UtcNow.ToString('o') }
     Write-TargetStateFile $script:TargetsFile (ConvertTo-Json -InputObject @($targets) -Depth 5)
     }
 }

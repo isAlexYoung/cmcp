@@ -35,6 +35,8 @@ namespace ClaudeMcp {
         internal readonly ModernButton Back = new ModernButton { Glyph="back",AccessibleName="返回云电脑列表" };
         internal readonly ModernButton Save = new ModernButton { Glyph="check",Text="保存",Primary=true,AccessibleName="保存云电脑" };
         internal readonly EditorInput NameInput = new EditorInput(), UrlInput = new EditorInput(), PasswordInput = new EditorInput();
+        internal readonly CheckBox Remember = new CheckBox{Text="记住密码并自动登录（共享网页登录）",AutoSize=false};
+        internal bool AutoLogin {get{return Remember.Checked;}}
         readonly Label passwordLabel=new Label();
         internal bool IsNew { get { return TargetName.Length==0; } }
         internal string Password { get { return PasswordInput.Box.Text; } }
@@ -46,12 +48,15 @@ namespace ClaudeMcp {
         readonly ToolTip tips = new ToolTip();
         internal event Action BackRequested, SaveRequested;
         internal readonly string TargetName;
+        readonly string initialUrl;
+        readonly bool storedAutoPassword;
         internal string DisplayName { get { return NameInput.Box.Text.Trim(); } }
         internal string Url { get { return UrlInput.Box.Text.Trim(); } }
         internal string IconData;
 
         internal TargetEditorPage(Target target, CardPreference preference, Palette colors) {
             TargetName=target.Name;IconData=preference.icon;Dock=DockStyle.Fill;Font=new Font("Microsoft YaHei UI",11F);
+            initialUrl=target.Url;storedAutoPassword=target.AutoLogin&&target.HasSavedPassword;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;
@@ -59,16 +64,18 @@ namespace ClaudeMcp {
             Back.Bounds=new Rectangle(28,20,40,40);title.Text=IsNew?"添加云电脑":"编辑云电脑";title.Font=new Font(Font,FontStyle.Bold);title.Bounds=new Rectangle(84,21,300,38);
             footer.Dock=DockStyle.Bottom;footer.Height=78;footer.Controls.Add(Save);
             viewport.Dock=DockStyle.Fill;viewport.AutoScroll=true;viewport.Padding=new Padding(28,16,28,24);
-            sheet.Dock=DockStyle.Top;sheet.Height=570;viewport.Controls.Add(sheet);
+            sheet.Dock=DockStyle.Top;sheet.Height=654;viewport.Controls.Add(sheet);
             PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;
-            passwordLabel.Text="旧版密码（共享网页登录可留空）";
+            Remember.Checked=target.AutoLogin;
+            passwordLabel.Text=target.HasSavedPassword?"密码（已加密保存；同一地址留空保留）":"密码（手动共享网页登录可留空）";
             Save.Text=IsNew?"添加":"保存";
-            sheet.Controls.AddRange(new Control[]{icon,choose,reset,nameLabel,NameInput,urlLabel,UrlInput,passwordLabel,PasswordInput,help,error});
+            sheet.Controls.AddRange(new Control[]{icon,choose,reset,nameLabel,NameInput,urlLabel,UrlInput,passwordLabel,PasswordInput,Remember,help,error});
             nameLabel.Text="名称 / 备注";urlLabel.Text="云电脑地址";
-            help.Text="保存时安全检查地址与协议；添加后不会自动连接。";
+            help.Text="勾选后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。取消勾选会删除共享模式保存的密码。";
             error.AutoEllipsis=true;
             Controls.Add(viewport);Controls.Add(footer);Controls.Add(header);
             tips.SetToolTip(Back,"返回列表，不保存本次修改");tips.SetToolTip(choose,"选择 PNG、JPEG 或 ICO，最多 1 MiB");tips.SetToolTip(reset,"移除自定义图标，使用默认图标");tips.SetToolTip(Save,"保存这台云电脑的修改");
+            tips.SetToolTip(Remember,"仅用于共享网页登录。密码使用当前 Windows 账户加密，不会显示原密码；旧版仍沿用原有登录方式。");
             Back.Click+=delegate{if(BackRequested!=null)BackRequested();};
             Save.Click+=delegate{if(ValidateFields()&&SaveRequested!=null)SaveRequested();};
             choose.Click+=delegate{using(var picker=new OpenFileDialog{Filter="图标图片 (*.png;*.jpg;*.jpeg;*.ico)|*.png;*.jpg;*.jpeg;*.ico",CheckFileExists=true}){
@@ -87,7 +94,8 @@ namespace ClaudeMcp {
             nameLabel.Bounds=new Rectangle(24,185,width,27);NameInput.Bounds=new Rectangle(24,218,width,44);
             urlLabel.Bounds=new Rectangle(24,286,width,27);UrlInput.Bounds=new Rectangle(24,319,width,44);
             passwordLabel.Bounds=new Rectangle(24,380,width,27);PasswordInput.Bounds=new Rectangle(24,413,width,44);
-            help.Bounds=new Rectangle(24,478,width,26);error.Bounds=new Rectangle(24,511,width,48);
+            Remember.Bounds=new Rectangle(24,474,width,40);
+            help.Bounds=new Rectangle(24,524,width,64);error.Bounds=new Rectangle(24,594,width,48);
         }
         internal bool LayoutFits { get { return NameInput.Right<=sheet.Width-20 && UrlInput.Right<=sheet.Width-20 && Save.Right<=footer.Width && Back.Right<title.Left; } }
         internal void Apply(Palette colors) {
@@ -95,15 +103,17 @@ namespace ClaudeMcp {
             sheet.BackColor=colors.Page;sheet.Colors=colors;sheet.ForeColor=colors.Text;
             title.ForeColor=nameLabel.ForeColor=urlLabel.ForeColor=passwordLabel.ForeColor=colors.Text;help.ForeColor=colors.Muted;error.ForeColor=colors.Danger;
             nameLabel.BackColor=urlLabel.BackColor=passwordLabel.BackColor=help.BackColor=error.BackColor=icon.BackColor=colors.Surface;
+            Remember.BackColor=colors.Surface;Remember.ForeColor=colors.Text;
             foreach(var b in new[]{Back,Save,choose,reset}){b.Colors=colors;b.BackColor=b==choose||b==reset?colors.Surface:colors.Page;b.Invalidate();}
             NameInput.Apply(colors);UrlInput.Apply(colors);PasswordInput.Apply(colors);sheet.Invalidate();
         }
         internal void ShowError(string message) { error.Text=message; }
-        internal void SetBusy(bool busy){Save.Enabled=Back.Enabled=choose.Enabled=reset.Enabled=NameInput.Enabled=UrlInput.Enabled=PasswordInput.Enabled=!busy;}
+        internal void SetBusy(bool busy){Save.Enabled=Back.Enabled=choose.Enabled=reset.Enabled=NameInput.Enabled=UrlInput.Enabled=PasswordInput.Enabled=Remember.Enabled=!busy;}
         internal bool ValidateFields() {
             Uri parsed;
             if(DisplayName.Any(Char.IsControl)){ShowError("名称不能包含控制字符。");return false;}
             if(!Uri.TryCreate(Url,UriKind.Absolute,out parsed)||parsed.Scheme!="https"||parsed.UserInfo.Length>0||parsed.AbsolutePath!="/"||parsed.Query.Length>0||parsed.Fragment.Length>0){ShowError("请输入完整的 HTTPS 云电脑地址，不含路径或登录信息。");return false;}
+            if(AutoLogin&&Password.Length==0&&(!storedAutoPassword||!String.Equals(Url.TrimEnd('/'),initialUrl.TrimEnd('/'),StringComparison.OrdinalIgnoreCase))){ShowError("请填写自动登录密码；更换地址时需要重新填写。");return false;}
             ShowError("");return true;
         }
         void RefreshIcon() {

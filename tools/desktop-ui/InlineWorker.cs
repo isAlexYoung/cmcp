@@ -11,7 +11,7 @@ namespace ClaudeMcp {
     internal sealed class InlineWorker : IDisposable {
         internal readonly Process Process;
         readonly Queue<string> events = new Queue<string>();
-        internal InlineWorker(string kit,string action,string name,string url,string password) {
+        internal InlineWorker(string kit,string action,string name,string url,string password,bool autoLogin=false) {
             bool save=action=="add"||action=="edit";
             string file=save?"manager-save.ps1":Actions.Script(action);
             if(!File.Exists(Path.Combine(kit,file)))throw new FileNotFoundException(file);
@@ -30,7 +30,7 @@ namespace ClaudeMcp {
             Process.ErrorDataReceived+=delegate{};
             try {
                 Process.Start();Process.BeginOutputReadLine();Process.BeginErrorReadLine();
-                if(save){var text=new JavaScriptSerializer().Serialize(new{action=action,name=name,url=url,password=password});using(var input=new StreamWriter(Process.StandardInput.BaseStream,new UTF8Encoding(false))){input.WriteLine(text);}}
+                if(save){var text=new JavaScriptSerializer().Serialize(new{action=action,name=name,url=url,password=password,autoLogin=autoLogin});using(var input=new StreamWriter(Process.StandardInput.BaseStream,new UTF8Encoding(false))){input.WriteLine(text);}}
                 else Process.StandardInput.Close();
             }catch{Process.Dispose();throw;}
         }

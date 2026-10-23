@@ -98,9 +98,9 @@ namespace ClaudeMcp {
                 check(form.Text=="CMCP","native title contains only CMCP");
                 check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");
                 check(a.Font.Size==11F&&a.Connect.Height==40&&a.Edit.Width==36&&a.Connect.Width==136,"card text and interactive controls are enlarged together");
-                b.ClearPointer();form.RefreshState();Pump();check(b.StatusText.Visible&&b.StatusText.Text=="已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
+                b.ClearPointer();form.RefreshState();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
                 b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
-                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();check(b.StatusText.Visible&&b.StatusText.Text=="已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
+                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
                 b.TestHover(true);check(b.ActionsVisible&&!b.StatusText.Visible,"hover replaces idle status with full action set");
                 b.ClearPointer();for(int i=0;i<20;i++){b.TestHover(true);b.ClearPointer();b.UpdateActions();}
                 check(b.StatusText.Visible&&!b.ActionsVisible&&b.StatusText.Text.Length>0,"repeated hover exits and state updates never leave a blank status slot");
@@ -140,6 +140,18 @@ namespace ClaudeMcp {
             bool missing=false;try{Actions.Command("C:\\app","remove","");}catch(ArgumentException){missing=true;}check(missing,"delete cannot dispatch without an explicit target");
             if(File.Exists(UiPreferences.PathFor(directory)))File.Delete(UiPreferences.PathFor(directory));Directory.Delete(directory,false);
             InlineTests(temp,check);
+            using(var page=new TargetEditorPage(new Target{Name="",Url=""},new CardPreference(),Palette.Create(false))){
+                check(!page.AutoLogin,"new target never enables saved shared login implicitly");
+                page.UrlInput.Box.Text="https://auto.invalid";page.Remember.Checked=true;
+                check(!page.ValidateFields(),"checked auto login requires a password before launching validation");
+                page.PasswordInput.Box.Text=" exact 密码 '$() ";check(page.ValidateFields()&&page.Password==" exact 密码 '$() ","shared password input preserves exact text and supports explicit auto choice");
+            }
+            using(var page=new TargetEditorPage(new Target{Name="saved",Url="https://auto.invalid",AutoLogin=true,HasSavedPassword=true},new CardPreference(),Palette.Create(true))){
+                check(page.AutoLogin&&page.Password.Length==0,"editing remembered target shows checked option without exposing password");
+                check(page.ValidateFields(),"same-origin saved password may be left blank");page.UrlInput.Box.Text="https://other.invalid";
+                check(!page.ValidateFields(),"editor never forwards a saved secret to a changed origin");page.Remember.Checked=false;
+                check(page.ValidateFields(),"unchecking auto login permits manual shared mode without a secret");
+            }
         }
         static void InlineTests(string temp,Action<bool,string> check){
             string state=Path.Combine(temp,"inline"),kit=Path.Combine(state,"kit");Directory.CreateDirectory(kit);
@@ -153,7 +165,7 @@ namespace ClaudeMcp {
             string utf8="[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\r\n";
             File.WriteAllText(Path.Combine(kit,"start.ps1"),"param([string]$TargetName,[long]$RequestTime,[switch]$ManagerMode)\r\n"+utf8+"if(!$ManagerMode -or !$TargetName -or $RequestTime -le 0){exit 9}\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"progress\",\"message\":\"正在等待网页登录\"}')\r\n$deadline=[DateTime]::UtcNow.AddSeconds(15)\r\nwhile(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot ('stop-'+$TargetName)))){if([DateTime]::UtcNow -gt $deadline){exit 8};Start-Sleep -Milliseconds 30}\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"error\",\"message\":\"过期进度不应覆盖\"}')\r\n",System.Text.Encoding.UTF8);
             File.WriteAllText(Path.Combine(kit,"stop.ps1"),"param([string]$TargetName,[long]$RequestTime,[switch]$ManagerMode)\r\n"+utf8+"if(!$ManagerMode -or !$TargetName -or $RequestTime -le 0){exit 9}\r\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot ('stop-'+$TargetName)),'1')\r\n",System.Text.Encoding.UTF8);
-            File.WriteAllText(Path.Combine(kit,"manager-save.ps1"),utf8+"[Console]::InputEncoding=[Text.UTF8Encoding]::new($false)\r\n$r=[Console]::ReadLine()|ConvertFrom-Json\r\nif($r.password -ne 'TESTONLY123' -or $r.url -ne 'https://c.invalid'){exit 9}\r\n$f=Join-Path (Split-Path $PSScriptRoot -Parent) 'cloudpc-targets.json'\r\n$t=@([IO.File]::ReadAllText($f)|ConvertFrom-Json)\r\n$t+=@{name='C';url=$r.url;authMode='shared-browser'}\r\n[IO.File]::WriteAllText($f,(ConvertTo-Json -InputObject $t -Depth 4))\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"saved\",\"message\":\"已保存\",\"name\":\"C\"}')",System.Text.Encoding.UTF8);
+            File.WriteAllText(Path.Combine(kit,"manager-save.ps1"),utf8+"[Console]::InputEncoding=[Text.UTF8Encoding]::new($false)\r\n$r=[Console]::ReadLine()|ConvertFrom-Json\r\nif($r.password -ne 'TESTONLY123' -or $r.url -ne 'https://c.invalid' -or $r.autoLogin -ne $true){exit 9}\r\n$f=Join-Path (Split-Path $PSScriptRoot -Parent) 'cloudpc-targets.json'\r\n$t=@([IO.File]::ReadAllText($f)|ConvertFrom-Json)\r\n$t+=@{name='C';url=$r.url;authMode='shared-browser';autoLogin=$r.autoLogin;password='TEST-ONLY-CIPHER'}\r\n[IO.File]::WriteAllText($f,(ConvertTo-Json -InputObject $t -Depth 4))\r\n[Console]::WriteLine('{\"schema\":1,\"kind\":\"saved\",\"message\":\"已保存\",\"name\":\"C\"}')",System.Text.Encoding.UTF8);
             using(var form=new Manager(false,state,kit)){
                 form.Show();Pump();var a=form.Cards["A"];var b=form.Cards["B"];
                 a.TestHover(true);a.Connect.PerformClick();
@@ -164,9 +176,9 @@ namespace ClaudeMcp {
                 check(a.BusyStop&&b.BusyConnect&&b.Details.Stop.Enabled,"stop A dispatches immediately while B remains independently cancellable");
                 check(Until(()=>!a.BusyStop&&!a.BusyConnect&&a.Target.Detail=="此台连接已停止。",form)&&b.BusyConnect,"late cancelled progress cannot replace A stop result or stop B");
                 b.Details.Stop.PerformClick();check(Until(()=>!b.BusyStop&&!b.BusyConnect,form),"B can also cancel without a confirmation or progress popup");
-                form.OpenAdd();form.Editor.UrlInput.Box.Text="https://c.invalid";form.Editor.NameInput.Box.Text="第三台云电脑";form.Editor.PasswordInput.Box.Text="TESTONLY123";form.Editor.Save.PerformClick();
+                form.OpenAdd();form.Editor.UrlInput.Box.Text="https://c.invalid";form.Editor.NameInput.Box.Text="第三台云电脑";form.Editor.Remember.Checked=true;form.Editor.PasswordInput.Box.Text="TESTONLY123";form.Editor.Save.PerformClick();
                 check(form.Editor!=null&&form.Editor.Password.Length==0&&!form.Editor.Save.Enabled,"save clears password from editor and prevents duplicate submissions");
-                check(Until(()=>form.Editor==null&&form.Cards.ContainsKey("C"),form)&&form.Cards["C"].Preference.label=="第三台云电脑","embedded add handles saved worker result and applies card metadata");
+                check(Until(()=>form.Editor==null&&form.Cards.ContainsKey("C"),form)&&form.Cards["C"].Preference.label=="第三台云电脑"&&form.Cards["C"].Target.AutoLogin&&form.Cards["C"].Target.HasSavedPassword,"embedded add handles saved worker result and applies card metadata");
                 // Check real resize layout and repaint buffers over repeated cycles.
                 for(int i=0;i<12;i++){form.ClientSize=new Size(i%2==0?1380:680,650);Pump();}
                 check(form.LayoutFits()&&form.Cards.Values.All(c=>c.Left==0),"repeated live resizing retains one fitted card rectangle per target");

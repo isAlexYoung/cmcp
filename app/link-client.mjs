@@ -170,7 +170,7 @@ export class StatusBoard {
   // polls it every second; antivirus scans new files). Fall back to overwriting it in place;
   // the reader tolerates a half-written file and simply reads again a second later.
   write() {
-    const text = JSON.stringify({ pid: process.pid, controlProtocol: 1, at: new Date().toISOString(), targets: this.data }, null, 2);
+    const text = JSON.stringify({ pid: process.pid, controlProtocol: 1, autoLoginProtocol:1, at: new Date().toISOString(), targets: this.data }, null, 2);
     const tmp = this.file + '.tmp';
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
@@ -334,6 +334,8 @@ export function startLink({ name, target, machine, version, forward, askPassword
           await sleep(2000); continue;
         }
         if (!credential) {
+          const issue=settings.getLoginIssue?.();
+          if(issue){say(issue.state,issue.message);await sleep(1500);continue;}
           say('waiting-login', '请在 MCP 打开的云电脑网页中登录；MCP 会共用该会话');
           await sleep(1500); continue;
         }
