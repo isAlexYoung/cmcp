@@ -61,8 +61,17 @@ try{
   stage='browser startup';
   browser=spawn(executable,['--headless=new','--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--user-data-dir='+profile,'--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-extensions','--disable-component-update','--window-size=1100,720','about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
   browser.stderr.pipe(fs.createWriteStream(path.join(evidence,'browser.stderr.txt')));
-  await until(()=>fs.existsSync(path.join(profile,'DevToolsActivePort')));
-  const [port,wsPath]=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').trim().split(/\r?\n/);
+  // Chrome creates this file before it releases its Windows write lock.
+  // Wait for a complete readable endpoint, not merely the directory entry.
+  let endpoint;
+  await until(()=>{
+    try{
+      const [port,wsPath]=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').trim().split(/\r?\n/);
+      if(!/^\d{1,5}$/.test(port)||Number(port)<1||Number(port)>65535||!/^\/devtools\/browser\/[A-Za-z0-9-]+$/.test(wsPath||''))return false;
+      endpoint={port,wsPath};return true;
+    }catch(error){if(['ENOENT','EBUSY','EPERM'].includes(error.code))return false;throw error;}
+  });
+  const {port,wsPath}=endpoint;
   cdp=new WebSocket(`ws://127.0.0.1:${port}${wsPath}`);cdp.on('error',()=>{});await once(cdp,'open');let serial=0;const waiting=new Map();
   cdp.on('message',data=>{const msg=JSON.parse(data);if(msg.id){const w=waiting.get(msg.id);if(w){waiting.delete(msg.id);clearTimeout(w.timer);msg.error?w.reject(Error(msg.error.message)):w.resolve(msg.result);}}else if(msg.method==='Runtime.exceptionThrown')errors.push('browser exception');});
   const send=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial;const timer=setTimeout(()=>{waiting.delete(id);reject(Error('CDP command timeout: '+method))},15000);waiting.set(id,{resolve,reject,timer});cdp.send(JSON.stringify({id,method,params,...sessionId?{sessionId}:{}}));});
