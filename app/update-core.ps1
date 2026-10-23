@@ -64,14 +64,14 @@ function Get-CmcpFiles([string]$Root) {
 function Test-CmcpTree([string]$Root,[string]$Version='') {
     $full=[IO.Path]::GetFullPath($Root).TrimEnd('\');$file=Join-Path $full 'app\distribution-manifest.json'
     if (!(Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -gt 8388608) { throw 'Installation manifest required' }
-    $data=Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+    $data=Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($data.schema -ne 1 -or $data.platform -cne 'windows-x64' -or ($Version -and $data.version -cne $Version)) { throw 'Wrong distribution manifest' }
     $null=Get-CmcpVersion $data.version
     $inventory=@{};foreach($entry in $data.files){$null=Test-CmcpRelative $entry.path;if($entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $inventory.ContainsKey($entry.path)){throw 'Invalid manifest entry'};$inventory[$entry.path]=$entry.sha256}
     foreach($required in @('Claude-MCP.exe','app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
     $seen=@{};foreach($item in Get-CmcpFiles $full){$relative=$item.FullName.Substring($full.Length+1).Replace('\','/');if($relative -ceq 'app/distribution-manifest.json'){continue};if(!$inventory.ContainsKey($relative) -or (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inventory[$relative]){throw 'Installation contains unknown or modified files; download manually'};$seen[$relative]=$true}
     if($seen.Count -ne $inventory.Count){throw 'Installation file missing'}
-    if((Get-Content -LiteralPath (Join-Path $Root 'app\package.json') -Raw | ConvertFrom-Json).version -cne $data.version){throw 'Package version mismatch'}
+    if((Get-Content -LiteralPath (Join-Path $Root 'app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version -cne $data.version){throw 'Package version mismatch'}
     return $data
 }
 function Expand-CmcpPackage([string]$Zip,[string]$Destination,[string]$Version) {

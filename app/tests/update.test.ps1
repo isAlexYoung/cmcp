@@ -7,12 +7,12 @@ $temporary=Join-Path ([IO.Path]::GetTempPath()) ('cmcp-update-fixture-'+[guid]::
 $null=New-Item -ItemType Directory -Path $temporary
 function Write-Tree([string]$Directory,[string]$Version){
     $null=New-Item -ItemType Directory -Path (Join-Path $Directory 'app\runtime') -Force
-    $entries=@();foreach($path in @('Claude-MCP.exe','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1','app/package.json')){
+    $entries=@();foreach($path in @('Claude-MCP.exe','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1','app/package.json','docs/使用说明.md')){
         $content='fixture '+$Version;if($path -eq 'app/package.json'){$content='{"version":"'+$Version+'"}'}
-        $file=Join-Path $Directory $path.Replace('/','\');[IO.File]::WriteAllText($file,$content)
+        $file=Join-Path $Directory $path.Replace('/','\');$null=New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force;[IO.File]::WriteAllText($file,$content)
         $entries+=@{path=$path;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}
     }
-    @{schema=1;version=$Version;platform='windows-x64';files=$entries}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Directory 'app\distribution-manifest.json') -Encoding UTF8
+    [IO.File]::WriteAllText((Join-Path $Directory 'app\distribution-manifest.json'),(@{schema=1;version=$Version;platform='windows-x64';files=$entries}|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
 }
 try{
     Check ((Get-CmcpVersion 'v4.10.0') -gt (Get-CmcpVersion '4.9.9')) 'semantic versions compare numerically'
@@ -31,7 +31,7 @@ try{
     Reject {Test-CmcpChecksum $blob ($hash+'  wrong.zip') $name ''} 'checksum must name exact platform asset'
     Reject {Test-CmcpChecksum $blob ($hash+'  '+$name) $name ('sha256:'+('0'*64))} 'GitHub digest mismatch rejected'
     foreach($path in @('../evil','/absolute','a\b','a:stream','a/../b','a/CON.txt','a./file','a//b')){Reject {Test-CmcpRelative $path} ('unsafe path rejected: '+$path)}
-    $install=Join-Path $temporary 'portable';Write-Tree $install '4.1.0';Check ((Test-CmcpTree $install).version -eq '4.1.0') 'complete fixture manifest validates'
+    $install=Join-Path $temporary 'portable 中文';Write-Tree $install '4.1.0';Check ((Test-CmcpTree $install).version -eq '4.1.0') 'UTF8 manifest and Chinese file names validate without BOM'
     $unknown=Join-Path $install 'personal.txt';[IO.File]::WriteAllText($unknown,'preserve');Reject {Test-CmcpTree $install} 'unknown user file prevents update';Check ((Get-Content -LiteralPath $unknown -Raw) -eq 'preserve') 'unknown user file is not changed';Remove-Item -LiteralPath $unknown
     $program=Join-Path $install 'Claude-MCP.exe';[IO.File]::AppendAllText($program,'changed');Reject {Test-CmcpTree $install} 'modified installed code prevents update';Write-Tree $install '4.1.0'
     $git=Join-Path $install '.git';[IO.File]::WriteAllText($git,'gitdir: other');Reject {Assert-CmcpInstallRoot $install} 'git worktree source checkout is protected';Remove-Item -LiteralPath $git

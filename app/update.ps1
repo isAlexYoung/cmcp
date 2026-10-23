@@ -2,12 +2,12 @@
 $ErrorActionPreference='Stop';. (Join-Path $PSScriptRoot 'update-core.ps1')
 try{
     if(![Environment]::Is64BitOperatingSystem){throw 'Windows x64 is required'}
-    $current=(Get-Content -LiteralPath (Join-Path $InstallRoot 'app\package.json') -Raw | ConvertFrom-Json).version
+    $current=(Get-Content -LiteralPath (Join-Path $InstallRoot 'app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
     if($Action -eq 'prepare'){$InstallRoot=Assert-CmcpInstallRoot $InstallRoot}
     $updates=Join-Path $StateDirectory 'updates';$null=New-Item -ItemType Directory -Path $updates -Force
     $id=[guid]::NewGuid().ToString('N');$transaction=Join-Path $updates $id;$null=New-Item -ItemType Directory -Path $transaction
     $metadata=Join-Path $transaction 'release.json';Receive-CmcpFile 'https://api.github.com/repos/isAlexYoung/cmcp/releases/latest' $metadata 2097152
-    $release=Select-CmcpRelease (Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json) $current
+    $release=Select-CmcpRelease (Get-Content -LiteralPath $metadata -Raw -Encoding UTF8 | ConvertFrom-Json) $current
     if(!$release){[Console]::WriteLine('{"status":"current"}');exit 0}
     if($Action -eq 'check'){[Console]::WriteLine('{"status":"available"}');exit 0}
     $zip=Join-Path $transaction $release.name;$checksum=$zip+'.sha256'

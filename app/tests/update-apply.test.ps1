@@ -44,7 +44,7 @@ function Run-Case([string]$Name,[bool]$Healthy,[bool]$WrongPid){
     else{Check ($process.ExitCode -ne 0 -and (Test-CmcpTree $install).version -eq '4.1.0') 'external helper restores previous executable after failed startup';Check (Test-Path -LiteralPath (Join-Path $state '4.1.0.started')) 'external helper restarts the restored manager'}
 }
 try{
-    Run-Case 'success' $true $false
+    Run-Case 'success 中文' $true $false
     Run-Case 'rollback' $false $false
     Run-Case 'wrong-pid' $true $true
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks;not_executed=@('personal installation','real backend')}|ConvertTo-Json -Depth 4
