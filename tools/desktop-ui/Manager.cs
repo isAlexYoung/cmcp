@@ -158,6 +158,7 @@ namespace ClaudeMcp {
     internal static class Program {
         [STAThread] static int Main(string[] args) {
             if(args.Length==2&&args[0]=="--self-test")Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+            if(args.Length==2&&args[0]=="--self-test")AppDomain.CurrentDomain.UnhandledException+=delegate(object sender,UnhandledExceptionEventArgs e){try{File.WriteAllText(args[1]+".unhandled.txt",Convert.ToString(e.ExceptionObject),Encoding.UTF8);}catch{}};
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
 #if CMCP_PREVIEW
             // A separately compiled preview never reads personal connection
@@ -200,6 +201,7 @@ namespace ClaudeMcp {
             var checks = new List<string>(); string temp = Path.Combine(Path.GetTempPath(), "claude-mcp-manager-test-" + Guid.NewGuid().ToString("N"));
             try {
                 Directory.CreateDirectory(temp);
+                DashboardTests.Trace=message=>File.AppendAllText(output+".progress.txt",DateTime.UtcNow.ToString("o")+" "+message+Environment.NewLine,Encoding.UTF8);
                 Action<bool, string> check = (ok, name) => {
                     if (!ok) throw new Exception(name);
                     checks.Add(name);

@@ -17,6 +17,8 @@ namespace ClaudeMcp {
         readonly Label status = new Label(), count = new Label(), empty = new Label();
         readonly Panel content = new Panel();
         internal TargetEditorPage Editor;
+        internal Action<string> Trace;
+        void Mark(string message){if(Trace!=null)Trace(message);}
         int editorScroll;
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         sealed class PendingAction { internal Process Process; internal string Name, Action; }
@@ -92,6 +94,7 @@ namespace ClaudeMcp {
             foreach(var card in Cards.Values)card.ClearPointer();
         }
         void SaveEditor(){
+            Mark("editor-save begin");
             if(Editor==null)return;
             var editor=Editor;
             TargetCard card;if(!Cards.TryGetValue(editor.TargetName,out card)){editor.ShowError("所选云电脑已不存在，请返回列表。");return;}
@@ -101,8 +104,8 @@ namespace ClaudeMcp {
             if(changed&&targets.Any(t=>t.Name!=card.Target.Name&&String.Equals(t.Url,editor.Url.TrimEnd('/'),StringComparison.OrdinalIgnoreCase))){editor.ShowError("该地址已经添加，未覆盖其他云电脑。");return;}
             try{
                 string name=card.Target.Name,url=editor.Url;
-                Preferences.Set(name,editor.DisplayName,editor.IconData,targets);SavePreferences();RebuildCard(name);
-                CloseEditor();if(changed)Launch("edit",Cards[name],url);RefreshState();
+                Preferences.Set(name,editor.DisplayName,editor.IconData,targets);SavePreferences();Mark("editor-save preferences saved");RebuildCard(name);Mark("editor-save card rebuilt");
+                CloseEditor();Mark("editor-save returned to list");if(changed)Launch("edit",Cards[name],url);RefreshState();Mark("editor-save complete");
             }catch{if(Editor!=null)Editor.ShowError("无法保存界面偏好，未更改连接信息。");else Error("无法保存界面偏好，未更改连接信息。");}
         }
         void DeleteCard(TargetCard card){Select(card);if(preview){targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,"删除这台云电脑的本地配置并停止它的连接？\r\n"+card.Target.Url+"\r\n不会删除 VPS 或本机文件，其他连接保持不变。","删除云电脑",MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK)Launch("remove",card,"");}
@@ -113,7 +116,7 @@ namespace ClaudeMcp {
         internal void MoveCard(string from,string before){try{Preferences.Move(from,before,targets);SavePreferences();Arrange();}catch{Error("排序未能保存，请检查界面偏好文件。");}}
         internal void DropMove(string from,string hit,bool after){if(from==hit)return;var ordered=Preferences.Sort(targets).Where(t=>t.Name!=from).ToList();int index=ordered.FindIndex(t=>t.Name==hit);if(index<0)return;MoveCard(from,after?(index+1<ordered.Count?ordered[index+1].Name:""):hit);}
         void MoveByKeyboard(TargetCard card,int direction){var ordered=Preferences.Sort(targets);int index=ordered.FindIndex(t=>t.Name==card.Target.Name);if(index+direction<0||index+direction>=ordered.Count)return;MoveCard(card.Target.Name,direction<0?ordered[index-1].Name:index+2<ordered.Count?ordered[index+2].Name:"");}
-        void RebuildCard(string name){TargetCard old;if(!Cards.TryGetValue(name,out old))return;bool expanded=old.Expanded;var card=CreateCard(old.Target);Cards[name]=card;list.Controls.Remove(old);old.Dispose();list.Controls.Add(card);card.SetExpanded(expanded,false);ApplyTheme();Arrange();}
+        void RebuildCard(string name){TargetCard old;if(!Cards.TryGetValue(name,out old))return;bool expanded=old.Expanded;Mark("rebuild create");var card=CreateCard(old.Target);Cards[name]=card;Mark("rebuild remove old");list.Controls.Remove(old);Mark("rebuild dispose old");old.Dispose();Mark("rebuild add new");list.Controls.Add(card);Mark("rebuild resize");card.SetExpanded(expanded,false);Mark("rebuild theme");ApplyTheme();Mark("rebuild arrange");Arrange();Mark("rebuild complete");}
         internal void RefreshState(){
             foreach(var pending in children.ToArray()){try{if(!pending.Process.HasExited)continue;if(pending.Process.ExitCode!=0)Error("上次操作未完成，请查看向导或日志；其他连接不受影响。");}catch{}pending.Process.Dispose();children.Remove(pending);}
             var snapshot=preview?new Snapshot{Running=true,Targets=!previewInitialized?Demo().Targets:targets}:LocalState.Load(stateDirectory);targets=snapshot.Targets;previewInitialized=true;

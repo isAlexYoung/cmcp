@@ -6,6 +6,7 @@ using System.Windows.Forms;
 
 namespace ClaudeMcp {
     internal static class DashboardTests {
+        internal static Action<string> Trace;
         internal static int? DarkCaptionResult, LightCaptionResult;
         static void Pump(){Application.DoEvents();}
         internal static void Run(string temp,Action<bool,string> check){
@@ -26,6 +27,7 @@ namespace ClaudeMcp {
             File.WriteAllText(UiPreferences.PathFor(directory),new string('x',UiPreferences.MaxBytes+1));check(UiPreferences.Load(directory).ReadError,"presentation file has a fixed size bound");File.Delete(UiPreferences.PathFor(directory));
             var many=new UiPreferences();for(int i=0;i<101;i++)many.cards.Add(new CardPreference{name="item-"+i});bool capped=false;try{many.Save(directory);}catch(IOException){capped=true;}check(capped,"presentation entries capped at 100");
             using(var form=new Manager(true)){
+                form.Trace=Trace;
                 form.Show();Pump();var a=form.Cards["preview-a"];var b=form.Cards["preview-b"];
                 check(form.LayoutFits(),"real wide WinForms cards and toolbar fit inside window");
                 check(a.Connect.Text=="成功连接"&&a.Connect.Primary&&b.Connect.Text=="未连接"&&!b.Connect.Primary,"connection pill reflects confirmed versus disconnected state");
