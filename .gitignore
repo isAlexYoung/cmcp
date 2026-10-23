@@ -6,6 +6,7 @@
 /CMCP-UI-Preview-v4.exe
 /CMCP-UI-Preview-v5.exe
 /app/node_modules/
+/tests/browser-fixture/node_modules/
 /app/runtime/node.exe
 /app/build-info.json
 **/__pycache__/

@@ -19,11 +19,15 @@ jobs:
         with:
           node-version-file: app/node-version.txt
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            tests/browser-fixture/package-lock.json
       - name: Install locked build dependencies
         shell: pwsh
         run: |
           npm --prefix app ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix tests/browser-fixture ci --ignore-scripts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item -LiteralPath (Get-Command node.exe).Source -Destination app/runtime/node.exe
           New-Item -ItemType Directory -Path test-results -Force | Out-Null
@@ -99,7 +103,7 @@ jobs:
           node tools/test-shared-auto-browser.mjs test-results/shared-auto-browser | Set-Content test-results/shared-auto-browser-stdout.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/shared-auto-browser/browser.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 10 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete real browser automatic login regression' }
+          if ($r.passed -ne 12 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete real browser automatic login regression' }
       - name: Capture real WinForms layouts
         shell: pwsh
         run: |

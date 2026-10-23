@@ -10,6 +10,7 @@ import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 import {managedTargetFactory} from '../app/managed-target.mjs';
 import {createTargetConnections} from '../app/target-connections.mjs';
+import {reactFixture} from '../tests/browser-fixture/build.mjs';
 const {WebSocket,WebSocketServer}=createRequire(new URL('../app/package.json',import.meta.url))('ws');
 const evidence=path.resolve(process.argv[2]||'build-results/shared-auto-browser');fs.mkdirSync(evidence,{recursive:true});
 const checks=[],errors=[];
@@ -28,11 +29,12 @@ const r=await fetch('/api/auth/login',{method:'POST',headers:{'content-type':'ap
 if(r.ok&&result.sessionId){window.fixtureSession=result.sessionId;const valid=await fetch('/api/auth/session',{headers:{'X-Desktop-Session':result.sessionId}});if(valid.ok){document.body.innerHTML='<h1>已自动登录测试桌面</h1>';document.body.dataset.ready='true';}}
 else{document.querySelector('#error').textContent=result.error||'失败';field.value='';state='';button.disabled=true;}});`;
 const servers=[];
-async function desktop(password){
+const react=reactFixture();
+async function desktop(password,{lateHydration=false,realReact=false}={}){
   const s={posts:0,upgrades:0,session:'',sockets:[]};
   const server=http.createServer(async(req,res)=>{
-    if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'self'; script-src 'nonce-fixtureAutoNonce123'; connect-src 'self'"});return res.end(html);}
-    if(req.url==='/login-fixture.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(formScript);}
+    if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'self'; script-src 'nonce-fixtureAutoNonce123'; connect-src 'self'"});return res.end(realReact?react.html:lateHydration?html.replace('autocomplete="current-password" disabled','autocomplete="current-password"'):html);}
+    if(req.url==='/login-fixture.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(realReact?react.script:lateHydration?'setTimeout(()=>{'+formScript+'\nfield.value="";window.fixtureHydrated=true;},1000);':formScript);}
     const chunks=[];for await(const c of req)chunks.push(c);res.setHeader('content-type','application/json');
     if(req.url==='/api/auth/login'){
       s.posts++;if(JSON.parse(Buffer.concat(chunks)).password!==password){res.writeHead(401);return res.end('{"error":"wrong"}');}
@@ -47,7 +49,7 @@ async function desktop(password){
 }
 let browser,cdp,manager,stage='fixture setup',failureSnapshot;const profile=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-auto-browser-'));
 try{
-  const a=await desktop('正确 密码 A1'),b=await desktop('right-B');
+  const a=await desktop('正确 密码 A1',{realReact:true}),b=await desktop('right-B');
   const states=new Map(),reads={A:0,B:0};const desired=new Map(['A','B'].map(name=>[name,{enabled:true,revision:name+'1'}]));
   const targets=[{name:'A',url:a.url,authMode:'shared-browser',autoLogin:true},{name:'B',url:b.url,authMode:'shared-browser',autoLogin:true}];
   manager=createTargetConnections({readTargets:()=>targets,readControls:()=>desired,interval:20,status:{set:(name,state,message)=>states.set(name,{state,message})},
@@ -71,6 +73,8 @@ try{
   const pageA=await page(gateA().launchUrl);
   failureSnapshot=async()=>({states:Object.fromEntries(states),reads,posts:{A:a.s.posts,B:b.s.posts},upgrades:{A:a.s.upgrades,B:b.s.upgrades},page:await evaluate(pageA,`({ready:document.readyState,desktop:document.body?.dataset.ready==='true',passwordFields:document.querySelectorAll('input[type="password"]').length,fieldDisabled:document.querySelector('input')?.disabled,hasPlaceholder:document.querySelector('input')?.value.startsWith('cmcp-auto-'),buttonDisabled:document.querySelector('button')?.disabled,scripts:[...document.scripts].map(s=>new URL(s.src,location.href).pathname)})`)});
   await until(async()=>states.get('A')?.state==='connected'&&await evaluate(pageA,"document.body.dataset.ready==='true'"));
+  check(await evaluate(pageA,"window.fixtureBeforeHydration?.clock==='--:--'&&!window.fixtureBeforeHydration.hasValue&&!window.fixtureBeforeHydration.hasPlaceholder"),'editable SSR input stays empty before real React hydration');
+  check(await evaluate(pageA,'window.fixtureReactReady===true'),'real React controlled form hydrates before automatic login');
   check(a.s.posts===1&&reads.A===1,'real browser controlled unlock form auto-submits exactly once');
   check(await evaluate(pageA,'window.fixtureSession')===gateA().getSessionId(),'browser and production MCP target share the same session and HTTP cookie');
   check(b.s.posts===0&&reads.B===0,'A browser login does not decrypt or log in B');
