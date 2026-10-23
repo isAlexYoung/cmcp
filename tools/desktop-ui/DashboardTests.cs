@@ -10,6 +10,43 @@ namespace ClaudeMcp {
         internal static int? DarkCaptionResult, LightCaptionResult;
         static void Pump(){Application.DoEvents();}
         static bool Until(Func<bool> condition,Manager form){var until=DateTime.UtcNow.AddSeconds(12);do{Pump();form.RefreshState();if(condition())return true;System.Threading.Thread.Sleep(30);}while(DateTime.UtcNow<until);return false;}
+        // Keep the previous painted pixels and repaint ONLY the regions WinForms
+        // invalidates during a real resize. DrawToBitmap alone forces a full
+        // repaint, which masked the user's stale-border bug in earlier tests.
+        sealed class RetainedSurface : IDisposable {
+            readonly Control control;
+            readonly Bitmap pixels=new Bitmap(2200,900);
+            readonly int oldWidth;
+            Rectangle dirty=Rectangle.Empty;
+            readonly InvalidateEventHandler invalidated;
+            static readonly System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+            internal RetainedSurface(Control item){
+                control=item;oldWidth=item.Width;Paint(item.ClientRectangle);
+                invalidated=delegate(object sender,InvalidateEventArgs e){dirty=dirty.IsEmpty?e.InvalidRect:Rectangle.Union(dirty,e.InvalidRect);};control.Invalidated+=invalidated;
+            }
+            void Paint(Rectangle clip){
+                if(clip.IsEmpty)return;
+                using(var g=Graphics.FromImage(pixels)){
+                    g.SetClip(clip);var e=new PaintEventArgs(g,clip);
+                    typeof(Control).GetMethod("OnPaintBackground",flags).Invoke(control,new object[]{e});
+                    typeof(Control).GetMethod("OnPaint",flags).Invoke(control,new object[]{e});
+                }
+            }
+            internal bool Cleared(){
+                Paint(Rectangle.Intersect(control.ClientRectangle,dirty));
+                Color expected=control is RoundedSheet?((RoundedSheet)control).Colors.Surface:control.BackColor;
+                return control.Width>oldWidth+30&&pixels.GetPixel(oldWidth-2,control.Height/2).ToArgb()==expected.ToArgb();
+            }
+            public void Dispose(){control.Invalidated-=invalidated;pixels.Dispose();}
+        }
+        static System.Collections.Generic.IEnumerable<Control> Descendants(Control parent){foreach(Control c in parent.Controls){yield return c;foreach(var child in Descendants(c))yield return child;}}
+        static void TestEditorResize(Manager form,Action<bool,string> check,bool adding,bool dark){
+            form.SetTheme(dark);if(adding)form.OpenAdd();else form.OpenEditor("preview-a");
+            form.ClientSize=new Size(800,720);Pump();form.Editor.NameInput.Box.Focus();Pump();
+            var surfaces=Descendants(form.Editor).Where(c=>c is EditorInput||c is RoundedSheet).Select(c=>new RetainedSurface(c)).ToArray();
+            try{form.ClientSize=new Size(1320,720);Pump();check(surfaces.All(s=>s.Cleared()),(adding?"add":"edit")+" "+(dark?"dark":"light")+" resize repaints retained input and outer sheet borders");}
+            finally{foreach(var surface in surfaces)surface.Dispose();form.CloseEditor();}
+        }
         internal static void Run(string temp,Action<bool,string> check){
             string directory=Path.Combine(temp,"dashboard");Directory.CreateDirectory(directory);
             var targets=Manager.Demo().Targets;var prefs=UiPreferences.Load(directory);
@@ -87,6 +124,8 @@ namespace ClaudeMcp {
                 parent.Controls.Remove(a);
                 try{form.RefreshState();Pump();check(a.Parent==null&&!a.IsDisposed&&b.Parent==parent,"layout reentry never indexes a temporarily detached card");}
                 finally{parent.Controls.Add(a);form.RefreshState();Pump();}
+                TestEditorResize(form,check,true,false);TestEditorResize(form,check,false,false);
+                TestEditorResize(form,check,true,true);TestEditorResize(form,check,false,true);
             }
             string manyFile=Path.Combine(directory,"cloudpc-targets.json");
             var records=Enumerable.Range(0,30).Select(i=>new {name="entry-"+i,url="https://desktop"+i+".invalid",authMode="shared-browser"}).ToArray();

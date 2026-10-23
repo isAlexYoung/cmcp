@@ -62,3 +62,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File F:\CMCP\app\tests\manage
 `CMCP-UI-Preview-v3.exe` 仅供安全预览：不读取真实连接数据、不联网，启停为模拟；真实页内连接进度需要使用正式开发 EXE。不发布 4.0.0 稳定版，不操作真实 VPS。
 
 关闭进度管道后仍完成操作的生产事件发送器另有真实子进程回归；关闭管理界面不会因输出管道断开而中止连接准备。
+
+## 添加／编辑页缩放补修
+
+上表保留上一轮 `17f219fa4a0784db792fd5966fecdfb4ede73ccd` 的 196 项结果。用户随后在添加／编辑页发现输入框和外层面板也会残留旧边框。这些控件原来只有双缓冲，没有启用完整尺寸重绘；上一轮列表检查没有覆盖它们。
+
+本次将 `RoundedSheet`、`EditorInput`、页头、滚动容器和页脚统一使用 `ResizePanel`，启用 ResizeRedraw、双缓冲和对子控件的尺寸重绘；编辑页本身也启用尺寸重绘。输入框获得／失去焦点时重绘边框。没有修改认证、浏览器打开、自动重连或逐台停止逻辑。
+
+新增测试保存旧像素，仅按实际 Invalidated 区域重画，不用强制整页截图掩盖残留。修复前 `build-results/editor-before-fix.json` 为 88 passed / 1 failed，复现添加页旧边框残留；修复后的浅／深色添加和编辑共四种场景均通过，每种检查三个输入框及外层面板。中间的 `editor-after-fix.json` 为 90/1，原因是测试将深色面板内部颜色误按页背景比较；改为正确的面板表面色，保留像素断言。
+
+本机最终 `build-results/editor-final-strict.json`：106 passed / 0 failed / 0 skipped（原 102 项全部保留，新增 4 项）。CI 对当前提交重新执行，完整预期数为 200（106 + 25 + 30 + 20 + 19），以本提交对应实际运行结果为准，不将上一轮 CI 当成本轮结果。新增 `CMCP-UI-Preview-v4.exe` 方便审查；正式程序仍为 `Claude-MCP.exe`。未连接或更改任何真实 VPS，未中断旧目录运行中的 MCP。实际鼠标连续缩放的观感仍需用户打开新版确认。
+
+为复核像素测试自身，使用基线编辑页源码配合最终严格测试重新编译，uild-results/editor-baseline-strict.json 再次为 88/1，失败在浅色添加页；修复源码配合同一测试为 106/0。基线编译仅使用独立测试副本，没有临时回退实际源码或运行中的程序。

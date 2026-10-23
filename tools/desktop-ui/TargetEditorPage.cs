@@ -5,7 +5,13 @@ using System.Linq;
 using System.Windows.Forms;
 
 namespace ClaudeMcp {
-    internal sealed class RoundedSheet : Panel {
+    // Every custom-painted editor surface must discard its retained pixels
+    // when resized, including the input hosts and the scrollable parent.
+    internal class ResizePanel : Panel {
+        internal ResizePanel(){DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);}
+        protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);Invalidate(true);}
+    }
+    internal sealed class RoundedSheet : ResizePanel {
         internal Palette Colors = Palette.Create(false);
         internal RoundedSheet() { DoubleBuffered = true; }
         protected override void OnPaint(PaintEventArgs e) {
@@ -15,10 +21,10 @@ namespace ClaudeMcp {
         }
     }
 
-    internal sealed class EditorInput : Panel {
+    internal sealed class EditorInput : ResizePanel {
         internal readonly TextBox Box = new TextBox { BorderStyle=BorderStyle.None };
         internal Palette Colors = Palette.Create(false);
-        internal EditorInput() { DoubleBuffered=true;Height=44;Controls.Add(Box); }
+        internal EditorInput() { Height=44;Controls.Add(Box);Box.GotFocus+=delegate{Invalidate();};Box.LostFocus+=delegate{Invalidate();}; }
         internal void Apply(Palette colors) { Colors=colors;BackColor=colors.Surface;Box.BackColor=colors.Surface;Box.ForeColor=colors.Text;Invalidate(); }
         protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e);Box.Bounds=new Rectangle(14,(Height-Box.PreferredHeight)/2,Math.Max(1,Width-28),Box.PreferredHeight); }
         protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;PaintUi.Box(e.Graphics,new Rectangle(1,1,Width-3,Height-3),9,Colors.Surface,Box.Focused?Colors.SelectionBorder:Colors.Border); }
@@ -35,7 +41,7 @@ namespace ClaudeMcp {
         readonly ModernButton choose = new ModernButton { Text="选择图片…",Neutral=true }, reset = new ModernButton { Text="恢复默认" };
         readonly Label title = new Label(), nameLabel = new Label(), urlLabel = new Label(), help = new Label(), error = new Label();
         readonly PictureBox icon = new PictureBox { SizeMode=PictureBoxSizeMode.Zoom };
-        readonly Panel header = new Panel(), viewport = new Panel(), footer = new Panel();
+        readonly ResizePanel header = new ResizePanel(), viewport = new ResizePanel(), footer = new ResizePanel();
         readonly RoundedSheet sheet = new RoundedSheet();
         readonly ToolTip tips = new ToolTip();
         internal event Action BackRequested, SaveRequested;
@@ -46,6 +52,7 @@ namespace ClaudeMcp {
 
         internal TargetEditorPage(Target target, CardPreference preference, Palette colors) {
             TargetName=target.Name;IconData=preference.icon;Dock=DockStyle.Fill;Font=new Font("Microsoft YaHei UI",11F);
+            DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;
             header.Dock=DockStyle.Top;header.Height=78;header.Controls.Add(Back);header.Controls.Add(title);
