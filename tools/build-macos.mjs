@@ -4,6 +4,7 @@ import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {validateBundle} from '../macos/update-transaction.mjs';
 
 if(process.platform!=='darwin')throw Error('Build the native application on macOS');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -35,11 +36,12 @@ const plist=`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Ap
 fs.writeFileSync(path.join(contents,'Info.plist'),plist);
 execFileSync('/usr/bin/xcrun',['swiftc','-swift-version','5','-O','-target',`${arch==='x64'?'x86_64':'arm64'}-apple-macos13.0`,'-framework','AppKit','-framework','WebKit','-framework','ServiceManagement','-framework','ApplicationServices',path.join(root,'macos/native/CMCP.swift'),'-o',path.join(executable,'CMCP')],{stdio:'inherit'});
 const files=[];
-function visit(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isSymbolicLink()||!entry.isFile()&&!entry.isDirectory())throw Error('Special file in package');if(entry.isDirectory())visit(file);else{const name=path.relative(bundle,file).split(path.sep).join('/');if(/^\.env|^(?:targets|status|manager-instance|application-preferences|target-controls)\.json$/.test(entry.name)||['.log','.pem','.key','.p12'].includes(path.extname(entry.name)))throw Error('Private file in package');files.push({path:name,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex')});}}}
+function visit(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isSymbolicLink()||!entry.isFile()&&!entry.isDirectory())throw Error('Special file in package');if(entry.isDirectory())visit(file);else{const name=path.relative(bundle,file).split(path.sep).join('/');if(/^\.env|^(?:targets|status|manager-instance|application-preferences|target-controls)\.json$/.test(entry.name)||['.log','.pem','.key','.p12'].includes(path.extname(entry.name)))throw Error('Private file in package');files.push(name==='Contents/MacOS/CMCP'?{path:name,codeSignature:true}:{path:name,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex')});}}}
 visit(bundle);const commit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 fs.writeFileSync(path.join(resources,'distribution-manifest.json'),JSON.stringify({schema:1,version,platform:'macos-'+arch,sourceCommit:commit,files},null,2));
 execFileSync('/usr/bin/codesign',['--force','--sign','-',bundle],{stdio:'inherit'});
 execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',bundle],{stdio:'inherit'});
+validateBundle(bundle,{version,arch});
 const smoke=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-bundle-smoke-')));
 const module=JSON.stringify(new URL('file://'+path.join(resources,'macos/manager.mjs')).href);
 execFileSync(path.join(resources,'runtime/node'),['--use-system-ca','--input-type=module','-e',`import {createManager} from ${module}; const m=await createManager({directory:${JSON.stringify(smoke)}}); await m.close(); console.log('Bundled backend smoke passed');`],{stdio:'inherit'});

@@ -44,3 +44,11 @@ test('ZIP inspection rejects traversal, symlinks and local-header mismatches',()
   assert.equal(inspectZip(zip('CMCP.app/Contents/file')).count,1);
   for(const bytes of [zip('../bad'),zip('CMCP.app/../../bad'),zip('CMCP.app/Contents/file','../../outside'),zip('CMCP.app/Contents/link',undefined,0o120777),zip('CMCP.app/Contents/fifo',undefined,0o010600),Buffer.from('invalid')])assert.throws(()=>inspectZip(bytes));
 });
+
+test('signature verification cannot replace resource hashes or bypass verification on another OS',t=>{
+  const d=directory(t),app=bundle(d,'4.1.1'),file=path.join(app,'Contents/Resources/distribution-manifest.json');
+  const manifest=JSON.parse(fs.readFileSync(file));
+  const native=manifest.files.find(f=>f.path==='Contents/MacOS/CMCP');delete native.sha256;native.codeSignature=true;
+  fs.writeFileSync(file,JSON.stringify(manifest));assert.throws(()=>validateBundle(app));
+  native.path='Contents/Info.plist';fs.writeFileSync(file,JSON.stringify(manifest));assert.throws(()=>validateBundle(app),/Invalid manifest/);
+});

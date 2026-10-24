@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {runFile,privateDir,safeFile} from './platform.mjs';
 
 const hash=data=>createHash('sha256').update(data).digest('hex');
@@ -33,11 +34,18 @@ export function validateBundle(bundle,{version,arch}={}){
   const manifest=JSON.parse(fs.readFileSync(manifestFile,'utf8'));
   if(manifest.schema!==1||!/^\d+\.\d+\.\d+$/.test(manifest.version)||!['macos-arm64','macos-x64'].includes(manifest.platform)||version&&manifest.version!==version||arch&&manifest.platform!=='macos-'+arch||!Array.isArray(manifest.files)||manifest.files.length>20000)throw Error('Wrong distribution manifest');
   const expected=new Map(),caseNames=new Set();
-  for(const file of manifest.files){if(typeof file.path!=='string'||!file.path.startsWith('Contents/')||file.path.includes('\\')||file.path.includes(':')||file.path.split('/').some(p=>p==='..'||p==='.'||!p)||!/^[a-f0-9]{64}$/.test(file.sha256)||caseNames.has(file.path.normalize('NFD').toLowerCase()))throw Error('Invalid manifest path');expected.set(file.path,file.sha256);caseNames.add(file.path.normalize('NFD').toLowerCase());}
+  for(const file of manifest.files){if(typeof file.path!=='string'||!file.path.startsWith('Contents/')||file.path.includes('\\')||file.path.includes(':')||file.path.split('/').some(p=>p==='..'||p==='.'||!p)||!(file.codeSignature===true&&file.path==='Contents/MacOS/CMCP'&&file.sha256===undefined||file.codeSignature===undefined&&/^[a-f0-9]{64}$/.test(file.sha256))||caseNames.has(file.path.normalize('NFD').toLowerCase()))throw Error('Invalid manifest path');expected.set(file.path,file.codeSignature===true?null:file.sha256);caseNames.add(file.path.normalize('NFD').toLowerCase());}
   const actual=new Set();
-  function visit(directory){for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,entry.name),relative=path.relative(bundle,file).split(path.sep).join('/');if(entry.isSymbolicLink()||!entry.isDirectory()&&!entry.isFile())throw Error('Special file in application');if(entry.isDirectory())visit(file);else if(relative!=='Contents/Resources/distribution-manifest.json'&&!relative.startsWith('Contents/_CodeSignature/')){actual.add(relative);if(expected.get(relative)!==hash(fs.readFileSync(file)))throw Error('Modified or extra application file');}}}
+  function visit(directory){for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,entry.name),relative=path.relative(bundle,file).split(path.sep).join('/');if(entry.isSymbolicLink()||!entry.isDirectory()&&!entry.isFile())throw Error('Special file in application');if(entry.isDirectory())visit(file);else if(relative!=='Contents/Resources/distribution-manifest.json'&&!relative.startsWith('Contents/_CodeSignature/')){actual.add(relative);if(!expected.has(relative)||expected.get(relative)!==null&&expected.get(relative)!==hash(fs.readFileSync(file)))throw Error('Modified or extra application file');}}}
   visit(bundle);if(actual.size!==expected.size)throw Error('Missing application files');
   for(const required of ['Contents/Info.plist','Contents/MacOS/CMCP','Contents/Resources/runtime/node','Contents/Resources/macos/desktop.mjs'])if(!actual.has(required))throw Error('Incomplete application');
+  // Bundle signing changes the main Mach-O executable. Its code signature covers
+  // both that binary and the sealed resources (including this manifest), avoiding
+  // a circular hash dependency. Every other payload retains an exact SHA-256.
+  if(expected.get('Contents/MacOS/CMCP')===null){
+    if(process.platform!=='darwin')throw Error('macOS code-signature verification required');
+    execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',bundle],{stdio:'pipe',timeout:30000});
+  }
   return manifest;
 }
 export async function replaceBundle({installRoot,staged,version,arch,launch,healthy,stopFailed,run=runFile}){
