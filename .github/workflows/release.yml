@@ -1,0 +1,110 @@
+name: Publish unified CMCP release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version shared by Windows and macOS, for example 4.1.2'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check versions and release notes
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          from pathlib import Path
+          v=os.environ['RELEASE_VERSION']
+          assert re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)',v), 'Use a single canonical version'
+          for folder in ('app','macos'):
+              assert json.loads(Path(folder+'/package.json').read_text())['version']==v
+              lock=json.loads(Path(folder+'/package-lock.json').read_text())
+              assert lock['version']==v and lock['packages']['']['version']==v
+          assert re.search(r"export const VERSION = '([^']+)'",Path('macos/platform.mjs').read_text()).group(1)==v
+          for filename in ('app/cloudpc-connector.py','macos/cloudpc-connector.py'):
+              assert re.search(r'(?m)^VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)',Path(filename).read_text(encoding='utf-8')).group(1)==v
+          assert Path('.github/RELEASE_'+v+'.md').read_text(encoding='utf-8-sig').strip(), 'Release notes are required'
+          PY
+      - name: Check package validation boundaries
+        run: python3 -m unittest discover -s tests -p test_release_packages.py -v
+      - name: Reject an already published version
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        with:
+          script: |
+            try {
+              await github.rest.repos.getReleaseByTag({...context.repo,tag:'v'+process.env.RELEASE_VERSION});
+              throw Error('Version is already published; use the next shared version');
+            } catch (error) { if (error.status !== 404) throw error; }
+  windows:
+    needs: version
+    uses: ./.github/workflows/validate.yml
+  macos:
+    needs: version
+    uses: ./.github/workflows/macos.yml
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: cmcp-windows-x64-${{ github.sha }}
+          path: incoming/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: cmcp-macos-arm64-${{ github.sha }}
+          path: incoming/arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cmcp-macos-x64-${{ github.sha }}
+          path: incoming/x64
+      - name: Verify a common source and stage every platform
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python3 tools/prepare-release.py --packages incoming --output release-packages --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmcp-unified-${{ inputs.version }}-${{ github.sha }}
+          path: release-packages/
+      - name: Publish one version with all platform assets
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        with:
+          script: |
+            const fs = require('fs'), crypto = require('crypto');
+            const version = process.env.RELEASE_VERSION, tag = 'v' + version;
+            const {owner, repo} = context.repo;
+            try { await github.rest.repos.getReleaseByTag({owner,repo,tag}); throw Error('Release already exists; refusing to replace it'); }
+            catch (error) { if (error.status !== 404) throw error; }
+            try {
+              const {data: ref} = await github.rest.git.getRef({owner,repo,ref:'tags/'+tag});
+              if (ref.object.type !== 'commit' || ref.object.sha !== context.sha) throw Error('Tag points to a different source');
+            } catch (error) { if (error.status !== 404) throw error; }
+            const body = fs.readFileSync('.github/RELEASE_'+version+'.md','utf8').replace(/^\uFEFF/,'');
+            const {data: release} = await github.rest.repos.createRelease({owner,repo,tag_name:tag,target_commitish:context.sha,name:'CMCP '+version,body,draft:true,prerelease:false,make_latest:'false'});
+            const files = fs.readdirSync('release-packages').sort();
+            if (files.length !== 8) throw Error('Expected four archives and four checksums');
+            for (const name of files) {
+              const data = fs.readFileSync('release-packages/'+name);
+              const hash = crypto.createHash('sha256').update(data).digest('hex');
+              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id:release.id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':'text/plain','content-length':data.length}});
+              if (asset.state !== 'uploaded' || asset.size !== data.length || asset.digest !== 'sha256:'+hash) throw Error('Asset verification failed: '+name);
+            }
+            await github.rest.repos.updateRelease({owner,repo,release_id:release.id,draft:false,prerelease:false,make_latest:'true'});
+            core.notice('Published '+release.html_url);
