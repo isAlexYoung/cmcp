@@ -1,5 +1,5 @@
 {
-  "name": "claude-mcp-mac",
+  "name": "cmcp-mac",
   "version": "4.1.1",
   "description": "macOS outbound MCP bridge with native and terminal transports",
   "private": true,

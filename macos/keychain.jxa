@@ -30,7 +30,7 @@ function run() {
     query.setObjectForKey(data, $.kSecValueData);
     // Use the normal macOS login keychain. kSecAttrAccessible requires the
     // Data Protection keychain and app entitlements; osascript is not our signed app.
-    query.setObjectForKey($('Claude MCP Mac cloud password'), $.kSecAttrLabel);
+    query.setObjectForKey($('CMCP Mac cloud password'), $.kSecAttrLabel);
     status = $.SecItemAdd(query, null);
   }
   return JSON.stringify({ok:status === 0,status:Number(status)});

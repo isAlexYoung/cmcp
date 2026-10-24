@@ -9,7 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 
-namespace ClaudeMcp {
+namespace CMCP {
     // Presentation only. The connector's names, credentials and switches never
     // enter this file. Corrupt/unknown data is refused, never silently replaced.
     internal sealed class CardPreference {

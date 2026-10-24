@@ -68,7 +68,8 @@ function Test-CmcpTree([string]$Root,[string]$Version='') {
     if ($data.schema -ne 1 -or $data.platform -cne 'windows-x64' -or ($Version -and $data.version -cne $Version)) { throw 'Wrong distribution manifest' }
     $null=Get-CmcpVersion $data.version
     $inventory=@{};foreach($entry in $data.files){$null=Test-CmcpRelative $entry.path;if($entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $inventory.ContainsKey($entry.path)){throw 'Invalid manifest entry'};$inventory[$entry.path]=$entry.sha256}
-    foreach($required in @('Claude-MCP.exe','app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
+    $managerName=if($inventory.ContainsKey('CMCP.exe')){'CMCP.exe'}else{'Claude-MCP.exe'}
+    foreach($required in @($managerName,'app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
     $seen=@{};foreach($item in Get-CmcpFiles $full){$relative=$item.FullName.Substring($full.Length+1).Replace('\','/');if($relative -ceq 'app/distribution-manifest.json'){continue};if(!$inventory.ContainsKey($relative) -or (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inventory[$relative]){throw 'Installation contains unknown or modified files; download manually'};$seen[$relative]=$true}
     if($seen.Count -ne $inventory.Count){throw 'Installation file missing'}
     if((Get-Content -LiteralPath (Join-Path $Root 'app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version -cne $data.version){throw 'Package version mismatch'}
@@ -102,4 +103,9 @@ function Invoke-CmcpSwap([string]$Install,[string]$Staged,[string]$Backup,[scrip
     $placed=$false;$process=$null
     try{[IO.Directory]::Move($Staged,$Install);$placed=$true;$process=& $Start $Install;if(!(& $Healthy $process)){throw 'New application did not become healthy'};return $true}
     catch{if($process){try{& $StopFailed $process}catch{}};if($placed){[IO.Directory]::Move($Install,$Staged)};[IO.Directory]::Move($Backup,$Install);$null=& $Start $Install;throw}
+}
+
+function Get-CmcpManagerPath([string]$Root) {
+    $name=if(Test-Path -LiteralPath (Join-Path $Root 'CMCP.exe')){'CMCP.exe'}else{'Claude-MCP.exe'}
+    return Join-Path $Root $name
 }

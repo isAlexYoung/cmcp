@@ -12,7 +12,7 @@ export async function createDispatcher({roots,filesystem:injected}) {
   if(!filesystem){
     const local=path.join(KIT,'node_modules/@modelcontextprotocol/server-filesystem/dist/index.js');
     const transport=new StdioClientTransport({command:process.execPath,args:[fs.existsSync(local)?local:path.join(KIT,'../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'),...roots],stderr:'ignore'});
-    filesystem=new Client({name:'claude-mcp-mac',version:VERSION});await filesystem.connect(transport);
+    filesystem=new Client({name:'cmcp-mac',version:VERSION});await filesystem.connect(transport);
   }
   let definitions=compatibleToolDefinitions(await filesystem.listTools()).tools;
   definitions=[...definitions,...mac.definitions,...binary.definitions];

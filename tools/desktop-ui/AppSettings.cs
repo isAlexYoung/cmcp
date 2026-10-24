@@ -6,7 +6,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal sealed class AppSettings {
         public string language="zh-CN",theme="";
         public bool autoStart,closeToTray=true;
@@ -53,7 +53,7 @@ namespace ClaudeMcp {
             string exe=Path.GetFullPath(executable);if(!File.Exists(exe))throw new IOException("程序路径不存在。");
             using(var key=Registry.CurrentUser.CreateSubKey(keyPath)){
                 string existing=key.GetValue(Name) as string;
-                if(existing!=null&&!existing.EndsWith("\\Claude-MCP.exe\" --startup",StringComparison.OrdinalIgnoreCase)&&existing!="\""+exe+"\" --startup")throw new IOException("开机启动项不属于 CMCP，未覆盖。");
+                if(existing!=null&&!existing.EndsWith("\\Claude-MCP.exe\" --startup",StringComparison.OrdinalIgnoreCase)&&!existing.EndsWith("\\CMCP.exe\" --startup",StringComparison.OrdinalIgnoreCase)&&existing!="\""+exe+"\" --startup")throw new IOException("开机启动项不属于 CMCP，未覆盖。");
                 string legacy=key.GetValue(LegacyName) as string;
                 try{
                 if(enabled)key.SetValue(Name,"\""+exe+"\" --startup",RegistryValueKind.String);else key.DeleteValue(Name,false);

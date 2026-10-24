@@ -437,7 +437,7 @@ function Stop-LinkService {
     if ($remaining -and $remaining.pid -and (Get-Process -Id ([int]$remaining.pid) -ErrorAction SilentlyContinue)) {
         $fresh = $false
         try { $fresh = ((Get-Date).ToUniversalTime() - [datetime]::Parse([string]$remaining.at).ToUniversalTime()).TotalSeconds -lt 20 } catch {}
-        if ($fresh) { throw '旧后台服务仍在运行，当前窗口无法停止它。请右键 Start-Claude-MCP.bat 选择“以管理员身份运行”完成这次升级；新版以后可直接停止。' }
+        if ($fresh) { throw '旧后台服务仍在运行，当前窗口无法停止它。请右键 Start-CMCP.bat 选择“以管理员身份运行”完成这次升级；新版以后可直接停止。' }
     }
     }
 }
@@ -467,11 +467,11 @@ function Register-AutoStart {
             $options = Get-Content -LiteralPath $preferences -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($options.schema -ne 1 -or $options.autoStart -isnot [bool]) { throw 'Invalid application preferences' }
             if (!$options.autoStart) { Unregister-AutoStart; return 'disabled' }
-            $manager = Join-Path (Split-Path $script:KitDir -Parent) 'Claude-MCP.exe'
+            $manager = Join-Path (Split-Path $script:KitDir -Parent) 'CMCP.exe'
             if (!(Test-Path -LiteralPath $manager)) { throw 'CMCP manager is missing' }
             if (!(Test-Path -LiteralPath $script:RunKey)) { New-Item -Path $script:RunKey | Out-Null }
             $existing = (Get-ItemProperty -LiteralPath $script:RunKey -ErrorAction Stop).CMCPManager
-            if ($existing -and $existing -notmatch '\\Claude-MCP\.exe" --startup$') { throw 'Unrelated startup entry preserved' }
+            if ($existing -and $existing -notmatch '\\(?:CMCP|Claude-MCP)\.exe" --startup$') { throw 'Unrelated startup entry preserved' }
             New-ItemProperty -LiteralPath $script:RunKey -Name 'CMCPManager' -Value ('"'+$manager+'" --startup') -PropertyType String -Force | Out-Null
             Unregister-AutoStart
             return 'manager'

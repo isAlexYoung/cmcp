@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal sealed class SettingsPage : UserControl {
         internal readonly EditorViewport Viewport=new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(28,12,28,24)};
         internal readonly ModernButton Back=new ModernButton{Glyph="back",AccessibleName="返回"};
@@ -46,7 +46,7 @@ namespace ClaudeMcp {
                 Label("关闭窗口时",458,false);
                 Button("直接退出程序",500,24,240,delegate{Commit(s=>s.closeToTray=false);},!settings.closeToTray);Button("隐藏到系统托盘",500,276,240,delegate{Commit(s=>s.closeToTray=true);},settings.closeToTray);
                 Label("直接退出会断开全部云电脑；隐藏到系统托盘会保留已连接的云电脑。",558,true);
-                Label("桌面快捷方式",650,false);Label("为当前程序创建 Claude-MCP 桌面快捷方式。",690,true);Button("创建快捷方式",748,24,240,delegate{action("shortcut");},false);
+                Label("桌面快捷方式",650,false);Label("为当前程序创建 CMCP 桌面快捷方式。",690,true);Button("创建快捷方式",748,24,240,delegate{action("shortcut");},false);
                 sheet.Height=890;
             }else{
                 Label("CMCP",24,false);Label(L.Text("版本")+"  "+System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3)+"  ·  Windows x64",66,true);

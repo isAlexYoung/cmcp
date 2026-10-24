@@ -6,7 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class ShortcutTests {
         static void PromptChoice(DialogResult choice, bool remember, Action<DialogResult,bool> verify) {
             using (var form = new ShortcutPrompt()) {
@@ -18,7 +18,7 @@ namespace ClaudeMcp {
         internal static void Run(string testRoot, Action<bool,string> check) {
             string root = Path.Combine(testRoot,"shortcut-tests"), desktop = Path.Combine(root,"Desktop"), state = Path.Combine(root,"state"), moved = Path.Combine(root,"中文 folder's"), app = Path.Combine(root,"app");
             Directory.CreateDirectory(desktop); Directory.CreateDirectory(app); Directory.CreateDirectory(moved);
-            string exe = Path.Combine(app,"Claude-MCP.exe"), movedExe = Path.Combine(moved,"Claude-MCP.exe"), shortcut = Path.Combine(desktop,"Claude-MCP.lnk");
+            string exe = Path.Combine(app,"CMCP.exe"), movedExe = Path.Combine(moved,"CMCP.exe"), shortcut = Path.Combine(desktop,"CMCP.lnk");
             File.Copy(Application.ExecutablePath,exe); File.Copy(Application.ExecutablePath,movedExe);
             try {
                 check(StartupPreferences.ShouldPrompt(state),"fresh account asks about desktop shortcut");
@@ -35,7 +35,7 @@ namespace ClaudeMcp {
                 check(!StartupPreferences.ShouldPrompt(state,exe,Path.Combine(root,"missing-desktop"),desktop),"desktop detection accepts a later desktop location and ignores missing locations");
                 var properties = DesktopShortcut.Read(shortcut);
                 check(String.Equals(properties[0],exe,StringComparison.OrdinalIgnoreCase) && String.Equals(properties[1],app,StringComparison.OrdinalIgnoreCase),"shortcut points at current EXE with portable working directory");
-                check(properties[2].Trim('"').EndsWith("Claude-MCP.exe,0",StringComparison.OrdinalIgnoreCase) && properties[3]=="", "shortcut uses embedded Claude icon and no startup arguments");
+                check(properties[2].Trim('"').EndsWith("CMCP.exe,0",StringComparison.OrdinalIgnoreCase) && properties[3]=="", "shortcut uses embedded Claude icon and no startup arguments");
                 using (var icon = Icon.ExtractAssociatedIcon(exe)) check(icon!=null && icon.Width>0,"Claude icon is embedded and available without Claude installation");
                 StartupPreferences.Apply(true,true,exe,desktop,state);
                 check(!StartupPreferences.ShouldPrompt(state),"Yes with checkbox persists suppression");

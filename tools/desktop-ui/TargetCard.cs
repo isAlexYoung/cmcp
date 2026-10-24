@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal sealed class TargetCard : Panel {
         internal Target Target;
         internal CardPreference Preference;

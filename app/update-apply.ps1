@@ -14,13 +14,13 @@ try{
     if($request.schema -ne 1 -or $request.staged -cne $stage -or $request.backup -cne $backup -or $request.token -cnotmatch '^[a-f0-9]{32}$' -or (Get-CmcpVersion $request.version) -le (Get-CmcpVersion $request.oldVersion)){throw 'Invalid update transaction'}
     $null=Test-CmcpTree $stage $request.version
     $manager=Get-Process -Id $request.managerPid -ErrorAction SilentlyContinue
-    if($manager){if($manager.Path -ine (Join-Path $install 'Claude-MCP.exe') -or $manager.StartTime.ToUniversalTime().Ticks.ToString() -cne $request.managerStart){throw 'Manager process identity changed'};if(!$manager.WaitForExit(60000)){throw 'Manager still running'}}
+    if($manager){if($manager.Path -ine (Get-CmcpManagerPath $install) -or $manager.StartTime.ToUniversalTime().Ticks.ToString() -cne $request.managerStart){throw 'Manager process identity changed'};if(!$manager.WaitForExit(60000)){throw 'Manager still running'}}
     $canRecover=$true
     # Stop only the known CMCP backend, preserving target enable switches and passwords.
     . (Join-Path $install 'app\common.ps1');Stop-LinkService
     if(@(Get-ServiceProcesses).Count){throw 'Backend did not stop'}
     $null=Test-CmcpTree $install $request.oldVersion
-    $launch={param($root) Start-Process -FilePath (Join-Path $root 'Claude-MCP.exe') -ArgumentList @('--updated',$Transaction) -PassThru}
+    $launch={param($root) Start-Process -FilePath (Get-CmcpManagerPath $root) -ArgumentList @('--updated',$Transaction) -PassThru}
     $healthy={param($process) $deadline=[DateTime]::UtcNow.AddSeconds(180);while([DateTime]::UtcNow -lt $deadline){if($process.HasExited){return $false};$ready=Join-Path $directory 'ready.json';if(Test-Path -LiteralPath $ready){try{$ack=Get-Content -LiteralPath $ready -Raw -Encoding UTF8|ConvertFrom-Json;if($ack.token -ceq $request.token -and $ack.pid -eq $process.Id){return $true}}catch{}};Start-Sleep -Milliseconds 250};return $false}
     $stopFailed={param($process)try{if(!$process.HasExited){$process.Kill()}}catch{if(!$process.HasExited){throw}};$process.WaitForExit(10000)|Out-Null;Stop-LinkService}
     $null=Invoke-CmcpSwap $install $stage $backup $launch $healthy $stopFailed
@@ -30,8 +30,8 @@ try{
     $oldRestored=$false
     if($canRecover){try{$oldRestored=(Test-CmcpTree $install).version -ceq $request.oldVersion}catch{}}
     if($oldRestored){
-        $running=@(Get-Process -Name 'Claude-MCP' -ErrorAction SilentlyContinue | Where-Object {$_.Path -ieq (Join-Path $install 'Claude-MCP.exe')})
-        if(!$running.Count){Start-Process -FilePath (Join-Path $install 'Claude-MCP.exe') -ArgumentList @('--updated',$Transaction)}
+        $running=@(Get-Process -Name 'CMCP','Claude-MCP' -ErrorAction SilentlyContinue | Where-Object {$_.Path -ieq (Get-CmcpManagerPath $install)})
+        if(!$running.Count){Start-Process -FilePath (Get-CmcpManagerPath $install) -ArgumentList @('--updated',$Transaction)}
     }
     exit 1
 }finally{if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}

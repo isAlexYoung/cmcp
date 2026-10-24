@@ -5,7 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     // Every custom-painted editor surface must discard its retained pixels
     // when resized, including the input hosts and the scrollable parent.
     internal class ResizePanel : Panel {

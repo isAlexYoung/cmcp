@@ -152,7 +152,7 @@ export async function login(baseUrl, password, agent, remember = true, signal) {
   throw new LoginError('url', '该地址不是云电脑连接地址', 0, `HTTP ${res.status} ${res.text.slice(0, 200)}`);
 }
 
-/* ---------------- Status file read by Start-Claude-MCP ---------------- */
+/* ---------------- Status file read by Start-CMCP ---------------- */
 
 export class StatusBoard {
   constructor(file) {
@@ -353,7 +353,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
           say('connecting', '正在读取保存的密码');
           password = await settings.password();
         } catch (error) {
-          say('error', '无法读取保存的云电脑密码，请重新双击 Start-Claude-MCP.bat', error.message);
+          say('error', '无法读取保存的云电脑密码，请重新双击 Start-CMCP.bat', error.message);
           await sleep(30000); continue;
         }
         if (stopped) break;
@@ -438,7 +438,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
         // shared browser session intact and stop competing with the new link.
         say('replaced', result.reason === 'reconnected' ? '本机另一个连接已接管，当前连接已停止，避免重复抢占' : '另一台电脑已连接到这台云电脑，本机已停止连接');
         if (onReplaced) return onReplaced();
-        notify('云电脑连接已切换', '另一台电脑已连接到这台云电脑。如需改回本机，请双击 Start-Claude-MCP.bat。');
+        notify('云电脑连接已切换', '另一台电脑已连接到这台云电脑。如需改回本机，请双击 Start-CMCP.bat。');
         return;
       }
       if (result.error && !result.welcomed) {

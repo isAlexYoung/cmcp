@@ -47,7 +47,7 @@ function Get-TargetControls {
 function Assert-TargetControlSupport {
     $s = Get-LinkStatus
     if ($s -and $s.pid -and (Get-Process -Id ([int]$s.pid) -ErrorAction SilentlyContinue) -and $s.controlProtocol -ne 1) {
-        throw '旧版后台仍在运行，不支持逐台控制。请先使用 app\Stop-Claude-MCP.bat 停止全部旧连接一次，再用新界面启动。不会自动中断其他云电脑。'
+        throw '旧版后台仍在运行，不支持逐台控制。请先使用 app\Stop-CMCP.bat 停止全部旧连接一次，再用新界面启动。不会自动中断其他云电脑。'
     }
 }
 

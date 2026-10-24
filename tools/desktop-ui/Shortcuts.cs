@@ -11,7 +11,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class DesktopShortcut {
         [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink { }
         // Explicit Unicode Shell API; no Windows Script Host or PowerShell.
@@ -49,7 +49,7 @@ namespace ClaudeMcp {
         internal static string Create(string executable, string desktop) {
             string exe = Path.GetFullPath(executable);
             if (!File.Exists(exe) || String.IsNullOrWhiteSpace(desktop) || !Directory.Exists(desktop)) throw new IOException("程序或桌面目录不存在。");
-            string destination = Path.Combine(desktop, "Claude-MCP.lnk");
+            string destination = Path.Combine(desktop, "CMCP.lnk");
             byte[] original = null;
             if (Directory.Exists(destination)) throw new IOException("桌面存在同名文件夹，请先改名。");
             if (File.Exists(destination)) {
@@ -81,7 +81,7 @@ namespace ClaudeMcp {
                     try {
                         var link=Read(file);string target=link[0];
                         if(link[3].Length!=0||target.Length<3||target[1]!=':'||target[2]!='\\')continue;
-                        bool owned=link[4]==Description&&String.Equals(Path.GetFileName(target),"Claude-MCP.exe",StringComparison.OrdinalIgnoreCase);
+                        bool owned=link[4]==Description&&(String.Equals(Path.GetFileName(target),"CMCP.exe",StringComparison.OrdinalIgnoreCase)||String.Equals(Path.GetFileName(target),"Claude-MCP.exe",StringComparison.OrdinalIgnoreCase));
                         if((owned||String.Equals(Path.GetFullPath(target),exe,StringComparison.OrdinalIgnoreCase))&&File.Exists(target))return true;
                     }catch{}
                 }}catch{}
@@ -134,12 +134,12 @@ namespace ClaudeMcp {
         readonly CheckBox remember = new CheckBox();
         internal bool Remember { get { return remember.Checked; } }
         internal ShortcutPrompt() {
-            Text = "Claude-MCP"; Font = new Font("Microsoft YaHei UI",10F);
+            Text = "CMCP"; Font = new Font("Microsoft YaHei UI",10F);
             ClientSize = new Size(460,208); FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
             Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             Controls.Add(new Label { Text = L.Text("是否创建桌面快捷方式？"), Location = new Point(24,22), AutoSize = true, Font = new Font(Font,FontStyle.Bold) });
-            Controls.Add(new Label { Text = L.Text("名称：Claude-MCP\r\n快捷方式将打开本机连接管理界面。"), Location = new Point(24,57), Size = new Size(410,49) });
+            Controls.Add(new Label { Text = L.Text("名称：CMCP\r\n快捷方式将打开本机连接管理界面。"), Location = new Point(24,57), Size = new Size(410,49) });
             remember.Text = L.Text("下次不再提示"); remember.Location = new Point(24,115); remember.AutoSize = true; Controls.Add(remember);
             var yes = new Button { Text = L.Text("是"), DialogResult = DialogResult.Yes, Location = new Point(237,160), Size = new Size(90,32) };
             var no = new Button { Text = L.Text("否"), DialogResult = DialogResult.No, Location = new Point(339,160), Size = new Size(90,32) };
@@ -154,7 +154,7 @@ namespace ClaudeMcp {
                     StartupPreferences.Apply(result == DialogResult.Yes,prompt.Remember,Application.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),state);
                 } catch (Exception error) {
                     string detail = error is IOException ? error.Message : "请检查桌面和本机设置目录是否允许写入。";
-                    MessageBox.Show("快捷方式或提示偏好未能保存：\r\n" + detail + "\r\n\r\n仍可继续使用连接管理界面。","Claude-MCP",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                    MessageBox.Show("快捷方式或提示偏好未能保存：\r\n" + detail + "\r\n\r\n仍可继续使用连接管理界面。","CMCP",MessageBoxButtons.OK,MessageBoxIcon.Information);
                 }
             }
         }

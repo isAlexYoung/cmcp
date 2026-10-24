@@ -14,7 +14,7 @@ function New-Package([string]$Root,[string]$Version,[string]$State,[string]$Id,[
     $behavior=if($Healthy){'File.WriteAllText(@"'+$ready+'", "{\"token\":\"'+$Token+'\",\"pid\":"+Process.GetCurrentProcess().Id+"}");Thread.Sleep(6000);'}else{'return 3;'}
     $source='using System;using System.IO;using System.Diagnostics;using System.Threading;class Fixture {static int Main(string[] args){File.WriteAllText(@"'+$marker+'","started");'+$behavior+'return 0;}}'
     $sourceFile=Join-Path $temporary ('fixture-'+[guid]::NewGuid().ToString('N')+'.cs');Put-File $sourceFile $source
-    & (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo /target:winexe ('/out:'+(Join-Path $Root 'Claude-MCP.exe')) $sourceFile |Out-Null
+    & (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo /target:winexe ('/out:'+(Join-Path $Root 'CMCP.exe')) $sourceFile |Out-Null
     if($LASTEXITCODE -ne 0){throw 'Fake manager compilation failed'}
     Put-File (Join-Path $Root 'app\package.json') ('{"version":"'+$Version+'"}')
     foreach($file in @('runtime\node.exe','update.ps1','update-core.ps1','update-apply.ps1','manager-restart.ps1')){Put-File (Join-Path $Root ('app\'+$file)) 'fake, never executed'}
@@ -50,7 +50,7 @@ try{
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks;not_executed=@('personal installation','real backend')}|ConvertTo-Json -Depth 4
 }finally{
     $prefix=[IO.Path]::GetFullPath($temporary).TrimEnd('\')+'\'
-    foreach($process in Get-Process -Name 'Claude-MCP' -ErrorAction SilentlyContinue){if($process.Path -and $process.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){$process.Kill();$process.WaitForExit(10000)|Out-Null}}
+    foreach($process in Get-Process -Name 'CMCP' -ErrorAction SilentlyContinue){if($process.Path -and $process.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){$process.Kill();$process.WaitForExit(10000)|Out-Null}}
     $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
     if($prefix.StartsWith($parent,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($temporary) -match '^cmcp-apply-fixture-[a-f0-9]{32}$'){Remove-Item -LiteralPath $temporary -Recurse -Force}
 }

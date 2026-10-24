@@ -1,4 +1,5 @@
 # Portable binaries and installed dependencies are release assets, not source.
+/CMCP.exe
 /Claude-MCP.exe
 /CMCP-UI-Preview.exe
 /CMCP-UI-Preview-v2.exe

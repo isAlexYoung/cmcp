@@ -45,7 +45,7 @@ def inspect_package(file, version, commit, platform):
             expected.add(prefix + 'Contents/_CodeSignature/CodeResources')
         if actual != expected:
             raise ValueError('Unexpected package files')
-        required = ('Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs') if platform.startswith('macos-') else ('Claude-MCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json')
+        required = ('Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs') if platform.startswith('macos-') else ('CMCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json')
         if any(prefix + name not in actual for name in required):
             raise ValueError('Required application files are missing')
         forbidden = {'.env', 'targets.json', 'cloudpc-targets.json', 'target-controls.json', 'browser-entries.json', 'session.json', 'manager-instance.json'}

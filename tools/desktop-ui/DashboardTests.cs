@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class DashboardTests {
         internal static Action<string> Trace;
         internal static int? DarkCaptionResult, LightCaptionResult;

@@ -244,7 +244,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     }
     func createShortcut() throws {
         if hasShortcut() { return }
-        let destination = desktop().appendingPathComponent("Claude-MCP.app")
+        let destination = desktop().appendingPathComponent("CMCP.app")
         if FileManager.default.fileExists(atPath: destination.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: destination.path)) != nil { throw NSError(domain: "CMCP", code: 3) }
         try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: bundle.bundleURL)
     }

@@ -1,5 +1,5 @@
 ﻿# Local build only: no package installation, network, autostart, or VPS access.
-param([string]$OutputFile = (Join-Path (Split-Path $PSScriptRoot -Parent) 'Claude-MCP.exe'), [switch]$PreviewOnly)
+param([string]$OutputFile = (Join-Path (Split-Path $PSScriptRoot -Parent) 'CMCP.exe'), [switch]$PreviewOnly)
 $ErrorActionPreference = 'Stop'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (!(Test-Path -LiteralPath $compiler)) { throw '需要 Windows 自带的 .NET Framework 4.x C# 编译器。' }

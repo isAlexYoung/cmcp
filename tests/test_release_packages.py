@@ -19,7 +19,7 @@ class UnifiedReleaseTests(unittest.TestCase):
     def package(self, platform='macos-arm64', change=None):
         mac = platform.startswith('macos-')
         prefix = 'CMCP.app/' if mac else 'CMCP-4.1.1-windows-x64/'
-        names = ['Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs'] if mac else ['Claude-MCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json']
+        names = ['Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs'] if mac else ['CMCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json']
         payload = {prefix + name: b'content' for name in names}
         files = [{'path': name, 'sha256': hashlib.sha256(b'content').hexdigest()} for name in names]
         manifest = {'schema': 1, 'version': '4.1.1', 'sourceCommit': COMMIT, 'platform': platform, 'files': files}

@@ -36,7 +36,7 @@ try {
     Unregister-AutoStart
     Stop-LinkService
     if (Test-Path -LiteralPath $StatusFile) { Remove-Item -LiteralPath $StatusFile -Force }
-    Show-Info "已断开与云电脑的连接，开机自动连接也已关闭。`r`n`r`n需要重新连接时，请双击 Start-Claude-MCP.bat。"
+    Show-Info "已断开与云电脑的连接，开机自动连接也已关闭。`r`n`r`n需要重新连接时，请双击 Start-CMCP.bat。"
     exit 0
 } catch {
     Write-ErrorLog '断开连接' $_

@@ -1,4 +1,4 @@
-﻿# 双击 Uninstall-Claude-MCP.bat 运行：断开连接、移除云电脑上的 Claude 配置、删除本机保存的设置。
+﻿# 双击 Uninstall-CMCP.bat 运行：断开连接、移除云电脑上的 Claude 配置、删除本机保存的设置。
 # 窗口出来之前的任何错误也用中文提示框显示（控制台是隐藏的）
 trap {
     Add-Type -AssemblyName System.Windows.Forms

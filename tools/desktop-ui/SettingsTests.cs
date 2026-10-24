@@ -5,7 +5,7 @@ using System.Linq;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class SettingsTests {
         internal static void Run(string directory,Action<bool,string> check){
             string state=Path.Combine(directory,"settings-test");Directory.CreateDirectory(state);

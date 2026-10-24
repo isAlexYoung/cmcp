@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class BackendRestart {
         // Demo, screenshots and self-tests never enter the live launch path.
         internal static bool Run(string kit,string entry="manager-restart.ps1") {

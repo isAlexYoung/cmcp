@@ -10,7 +10,7 @@ try{
     $env:LOCALAPPDATA=$temporary;. (Join-Path $app 'common.ps1')
     $script:RunKey=$registry;$script:StartupLink='';$script:KitDir=Join-Path $temporary 'kit\app'
     $null=New-Item -ItemType Directory -Path $script:KitDir -Force;$null=New-Item -ItemType Directory -Path $script:StateDir -Force
-    $manager=Join-Path (Split-Path $script:KitDir -Parent) 'Claude-MCP.exe';[IO.File]::WriteAllText($manager,'fixture, never executed')
+    $manager=Join-Path (Split-Path $script:KitDir -Parent) 'CMCP.exe';[IO.File]::WriteAllText($manager,'fixture, never executed')
     $preferences=Join-Path $script:StateDir 'application-preferences.json'
     [IO.File]::WriteAllText($preferences,'{"schema":1,"autoStart":false}')
     $null=New-Item -Path $registry

@@ -17,7 +17,7 @@ try{
     $manifest=Expand-CmcpPackage $zip $stage $release.version
     # Recheck current package after download and preserve the exact process identity.
     $null=Test-CmcpTree $InstallRoot $current;$manager=Get-Process -Id $ManagerPid
-    if($manager.Path -ine (Join-Path $InstallRoot 'Claude-MCP.exe')){throw 'Wrong manager process'}
+    if($manager.Path -ine (Get-CmcpManagerPath $InstallRoot)){throw 'Wrong manager process'}
     $request=[ordered]@{schema=1;installRoot=$InstallRoot;staged=$stage;backup=$backup;version=$release.version;oldVersion=$current;managerPid=$ManagerPid;managerStart=$manager.StartTime.ToUniversalTime().Ticks.ToString();token=[guid]::NewGuid().ToString('N');zipHash=$hash}
     foreach($name in @('update-core.ps1','update-apply.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $transaction $name)}
     [IO.File]::WriteAllText((Join-Path $transaction 'request.json'),($request|ConvertTo-Json),[Text.UTF8Encoding]::new($false))

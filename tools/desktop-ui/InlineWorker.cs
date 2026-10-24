@@ -5,7 +5,7 @@ using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
 
-namespace ClaudeMcp {
+namespace CMCP {
     // Each action owns only its PowerShell observer. The shared Node backend is
     // never killed by this class; stop uses the existing per-target switch.
     internal sealed class InlineWorker : IDisposable {

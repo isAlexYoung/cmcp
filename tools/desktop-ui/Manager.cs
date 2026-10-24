@@ -11,12 +11,12 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-[assembly: System.Reflection.AssemblyTitle("Claude MCP 连接管理")]
-[assembly: System.Reflection.AssemblyProduct("Claude MCP Portable Manager")]
+[assembly: System.Reflection.AssemblyTitle("CMCP")]
+[assembly: System.Reflection.AssemblyProduct("CMCP")]
 [assembly: System.Reflection.AssemblyVersion("4.1.1.0")]
 [assembly: System.Reflection.AssemblyFileVersion("4.1.1.0")]
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal sealed class Target {
         public string Name, Url, Mode, State, Detail;
         public bool AutoLogin, HasSavedPassword;
@@ -211,7 +211,7 @@ namespace ClaudeMcp {
                         Application.Run(form);
                     }return 0;
                 }
-                catch { MessageBox.Show("界面无法打开，请确认便携包完整。原有 BAT 入口仍可使用。", "Claude MCP", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+                catch { MessageBox.Show("界面无法打开，请确认便携包完整。原有 BAT 入口仍可使用。", "CMCP", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
                 finally { mutex.ReleaseMutex(); }
             }
 #endif

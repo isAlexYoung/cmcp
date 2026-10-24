@@ -20,7 +20,7 @@ function Test-Environment {
     $script:Step = '检查运行环境'
     Write-Step '[1/5] 正在检查运行环境...'
     if ($KitDir -match '\\AppData\\Local\\Temp\\' -or $KitDir -match '\.zip\\') {
-        throw '请先把压缩包完整解压到一个固定文件夹（例如 D:\Claude-MCP），再双击运行。不要在压缩包里直接运行。'
+        throw '请先把压缩包完整解压到一个固定文件夹（例如 D:\CMCP），再双击运行。不要在压缩包里直接运行。'
     }
     $os = [Environment]::OSVersion.Version
     if ($os.Major -lt 10) { throw '需要 Windows 10 或更新版本。' }
@@ -124,7 +124,7 @@ function Start-Background {
     $script:Step = '启动后台连接服务'
     Start-LinkService
     if ($how -eq 'none') {
-        Write-Warn '后台服务已启动，但开机自动连接设置失败（可能被安全软件拦截）。电脑重启后需要再次双击 Start-Claude-MCP.bat。'
+        Write-Warn '后台服务已启动，但开机自动连接设置失败（可能被安全软件拦截）。电脑重启后需要再次双击 Start-CMCP.bat。'
     } elseif ($how -eq 'disabled') {
         Write-Ok '后台服务已启动；按设置保留开机自启关闭。'
     } else {
@@ -252,7 +252,7 @@ try {
     Write-Line ('Claude 现在可以使用本机的文件、命令和已安装程序（盘符：' + ($config.roots -join ', ') + '）。')
     if ($restart) { Write-Warn '首次安装或更新：请在云电脑上完全退出 Claude 并重新打开一次。' }
     Write-Line '现在可以关闭此窗口。共享模式重启电脑后，请用 Open-CloudPC.bat 打开网页并登录。网络中断只重连，不会重复登录。'
-    Write-Line '在管理界面选中云电脑后停止，只断开该目标；Stop-Claude-MCP.bat 是停止全部连接。'
+    Write-Line '在管理界面选中云电脑后停止，只断开该目标；Stop-CMCP.bat 是停止全部连接。'
     $success = $true
 } catch {
     $message = Get-ChineseError $_

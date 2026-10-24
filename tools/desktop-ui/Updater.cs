@@ -8,7 +8,7 @@ using System.Windows.Forms;
 using System.Web.Script.Serialization;
 using System.Runtime.InteropServices;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class ManagerSignal {
         [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterWindowMessage(string name);
         [DllImport("user32.dll")]static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);

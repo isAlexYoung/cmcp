@@ -4,7 +4,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     // Explicit vertical layout avoids FlowLayoutPanel's partial resize paints.
     // Sorting uses short eased translations; preferences change only on drop.
     internal sealed class CardList : EditorViewport {

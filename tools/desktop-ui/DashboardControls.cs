@@ -4,7 +4,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal sealed class Palette {
         internal bool Dark;
         internal Color Page, Surface, Subtle, Border, Text, Muted, Blue, Selected, SelectionBorder, Danger, Success;

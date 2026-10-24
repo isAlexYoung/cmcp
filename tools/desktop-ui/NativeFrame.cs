@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
 
-namespace ClaudeMcp {
+namespace CMCP {
     internal static class NativeFrame {
         internal static int? LastDarkModeResult, LastCaptionResult, LastTextResult;
         [DllImport("dwmapi.dll")]
