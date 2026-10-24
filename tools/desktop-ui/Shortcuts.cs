@@ -137,7 +137,7 @@ namespace CMCP {
             Text = "CMCP"; Font = new Font("Microsoft YaHei UI",10F);
             ClientSize = new Size(460,208); FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
-            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Program.ExecutablePath);
             Controls.Add(new Label { Text = L.Text("是否创建桌面快捷方式？"), Location = new Point(24,22), AutoSize = true, Font = new Font(Font,FontStyle.Bold) });
             Controls.Add(new Label { Text = L.Text("名称：CMCP\r\n快捷方式将打开本机连接管理界面。"), Location = new Point(24,57), Size = new Size(410,49) });
             remember.Text = L.Text("下次不再提示"); remember.Location = new Point(24,115); remember.AutoSize = true; Controls.Add(remember);
@@ -147,11 +147,11 @@ namespace CMCP {
         }
         internal static void AskBeforeManager() {
             string state = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp");
-            if (!StartupPreferences.ShouldPrompt(state,Application.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory))) return;
+            if (!StartupPreferences.ShouldPrompt(state,Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory))) return;
             using (var prompt = new ShortcutPrompt()) {
                 var result = prompt.ShowDialog();
                 try {
-                    StartupPreferences.Apply(result == DialogResult.Yes,prompt.Remember,Application.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),state);
+                    StartupPreferences.Apply(result == DialogResult.Yes,prompt.Remember,Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),state);
                 } catch (Exception error) {
                     string detail = error is IOException ? error.Message : "请检查桌面和本机设置目录是否允许写入。";
                     MessageBox.Show("快捷方式或提示偏好未能保存：\r\n" + detail + "\r\n\r\n仍可继续使用连接管理界面。","CMCP",MessageBoxButtons.OK,MessageBoxIcon.Information);

@@ -14,7 +14,7 @@ try{
     if($request.schema -ne 1 -or $request.staged -cne $stage -or $request.backup -cne $backup -or $request.token -cnotmatch '^[a-f0-9]{32}$' -or (Get-CmcpVersion $request.version) -le (Get-CmcpVersion $request.oldVersion)){throw 'Invalid update transaction'}
     $null=Test-CmcpTree $stage $request.version
     $manager=Get-Process -Id $request.managerPid -ErrorAction SilentlyContinue
-    if($manager){if($manager.Path -ine (Get-CmcpManagerPath $install) -or $manager.StartTime.ToUniversalTime().Ticks.ToString() -cne $request.managerStart){throw 'Manager process identity changed'};if(!$manager.WaitForExit(60000)){throw 'Manager still running'}}
+    if($manager){if(!(Test-CmcpManagerPath $install $manager.Path) -or $manager.StartTime.ToUniversalTime().Ticks.ToString() -cne $request.managerStart){throw 'Manager process identity changed'};if(!$manager.WaitForExit(60000)){throw 'Manager still running'}}
     $canRecover=$true
     # Stop only the known CMCP backend, preserving target enable switches and passwords.
     . (Join-Path $install 'app\common.ps1');Stop-LinkService
@@ -30,7 +30,7 @@ try{
     $oldRestored=$false
     if($canRecover){try{$oldRestored=(Test-CmcpTree $install).version -ceq $request.oldVersion}catch{}}
     if($oldRestored){
-        $running=@(Get-Process -Name 'CMCP','Claude-MCP' -ErrorAction SilentlyContinue | Where-Object {$_.Path -ieq (Get-CmcpManagerPath $install)})
+        $running=@(Get-Process -Name 'CMCP','Claude-MCP' -ErrorAction SilentlyContinue | Where-Object {(Test-CmcpManagerPath $install $_.Path)})
         if(!$running.Count){Start-Process -FilePath (Get-CmcpManagerPath $install) -ArgumentList @('--updated',$Transaction)}
     }
     exit 1

@@ -161,6 +161,7 @@ namespace CMCP {
         }
     }
     internal static class Program {
+        internal static string ExecutablePath {get{string canonical=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMCP.exe");return File.Exists(canonical)?canonical:Application.ExecutablePath;}}
         [STAThread] static int Main(string[] args) {
             if(args.Length==2&&args[0]=="--self-test")Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             if(args.Length==2&&args[0]=="--self-test")AppDomain.CurrentDomain.UnhandledException+=delegate(object sender,UnhandledExceptionEventArgs e){try{File.WriteAllText(args[1]+".unhandled.txt",Convert.ToString(e.ExceptionObject),Encoding.UTF8);}catch{}};
@@ -182,6 +183,7 @@ namespace CMCP {
                     if(page=="editor")form.OpenEditor(first.Target.Name);
                     else if(page=="add")form.OpenAdd();
                     else if(page=="settings"||page=="settings-en"||page=="about"){if(page=="settings-en"){var options=form.Options.Copy();options.language="en";form.ChangeSettings(options);}form.OpenSettings();if(page=="about")form.Settings.ShowAbout();}
+                    else if(page.StartsWith("update")){var update=new UpdateProgress{Stage=page=="update-failed"?"failed":"download",Code="network",Received=14680064,Total=41037076};form.SetUpdateProgress(update);if(page=="update-about"){form.OpenSettings();form.Settings.ShowAbout();form.Settings.SetUpdateProgress(update);}}
                     else if(page=="progress"){first.BusyConnect=true;first.Target.State="waiting-login";first.Target.Detail="[4/5] 等待网页登录 · 请在打开的云电脑网页中输入密码，可随时停止。";first.RefreshTarget(first.Target);first.SetExpanded(true,false);first.TestHover(true);}
                     else {first.SetExpanded(page=="expanded",false);foreach(var card in form.Cards.Values)card.ClearPointer();if(page!="idle")first.TestHover(true);}
                     Application.DoEvents();
@@ -265,6 +267,7 @@ namespace CMCP {
                 DashboardTests.Run(temp, check);
                 BackendRestart.Test(temp,check);
                 SettingsTests.Run(temp,check);
+                UpdateProgressTests.Run(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }
             finally {

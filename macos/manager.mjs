@@ -28,7 +28,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
       install:install||((target,auth,agent,signal)=>new Cloud(target.url,auth,agent,signal).install())})});
-  let origin='',closing=false,updates={state:'unchecked',version:null};
+  let origin='',closing=false,updates={state:'unchecked',version:null},updating=false;
   const snapshot=()=>({...store.view(states),version,platform:'macos-'+arch,updates});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
@@ -44,8 +44,8 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/targets/order':input=>store.serial(()=>{store.reorder(input.ids);return {saved:true};}),
     '/api/targets/open':async input=>({url:await entry(input.id)}),
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
-    '/api/update/check':async()=>{try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates={state:'error',version:null};}return updates;},
-    '/api/update/download':async()=>({directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory})}),
+    '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates={state:'error',version:null};}return updates;},
+    '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',...value};}})};}catch(error){updates={state:'failed',code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},
   };
   const server=http.createServer(async(req,res)=>{
     try{

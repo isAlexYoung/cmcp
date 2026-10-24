@@ -17,6 +17,7 @@ namespace CMCP {
         internal readonly CardList list = new CardList();
         readonly Label status = new Label(), count = new Label(), empty = new Label();
         readonly Panel content = new Panel();
+        internal readonly UpdateProgressView UpdateView=new UpdateProgressView{Dock=DockStyle.Top,Visible=false};
         internal TargetEditorPage Editor;
         internal SettingsPage Settings;
         internal AppSettings Options;
@@ -47,7 +48,7 @@ namespace CMCP {
             ExitBackend=isolated?(Func<bool>)(()=>true):(()=>BackendRestart.Run(kit,"manager-exit.ps1"));
             Options=demo?new AppSettings():AppSettings.Load(stateDirectory,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
-            Icon=System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            Icon=System.Drawing.Icon.ExtractAssociatedIcon(Program.ExecutablePath);
             Font=new Font("Microsoft YaHei UI",11F);AutoScaleMode=AutoScaleMode.Dpi;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw,true);
             ClientSize=new Size(1100,720);MinimumSize=new Size(660,500);StartPosition=FormStartPosition.CenterScreen;
@@ -57,10 +58,10 @@ namespace CMCP {
             status.Bounds=new Rectangle(0,34,850,24);status.Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top;heading.Controls.Add(status);
             list.Dock=DockStyle.Fill;list.AutoScroll=true;list.Sorted+=MoveCard;
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有云电脑\r\n点击右上角「添加云电脑」，保存地址后即可连接。";empty.Margin=new Padding(0,30,0,0);
-            content.Controls.Add(list);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
+            content.Controls.Add(list);content.Controls.Add(UpdateView);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
             toolbar.Add.Click+=delegate{OpenAdd();};toolbar.Theme.Click+=delegate{SetTheme(!Preferences.dark);};
             toolbar.Settings.Click+=delegate{OpenSettings();};
-            updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();});
+            updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();},SetUpdateProgress);
             toolbar.UpdateButton.MouseEnter+=delegate{updates.Check(false);};toolbar.UpdateButton.Click+=delegate{RunUpdate();};
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
@@ -71,6 +72,7 @@ namespace CMCP {
         void ApplyTheme(){
             BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);
             status.ForeColor=colors.Muted;count.ForeColor=empty.ForeColor=colors.Text;
+            UpdateView.Apply(colors);
             foreach(var card in Cards.Values){card.Selected=card.Target.Name==selected;card.Apply(colors);}
             if(Editor!=null)Editor.Apply(colors);
             if(Settings!=null)Settings.Apply(colors);
@@ -85,20 +87,21 @@ namespace CMCP {
         internal void SetTheme(bool dark){try{var next=Options.Copy();next.theme=dark?"dark":"light";ChangeSettings(next);}catch{Error("设置未能保存，请检查本机文件和注册表权限。");}}
         internal void ChangeSettings(AppSettings next){
             bool startupChanged=next.autoStart!=Options.autoStart;
-            if(startupChanged&&!isolated)StartupRegistration.Set(Application.ExecutablePath,next.autoStart);
-            try{if(!preview)next.Save(stateDirectory);}catch{if(startupChanged&&!isolated)StartupRegistration.Set(Application.ExecutablePath,Options.autoStart);throw;}
+            if(startupChanged&&!isolated)StartupRegistration.Set(Program.ExecutablePath,next.autoStart);
+            try{if(!preview)next.Save(stateDirectory);}catch{if(startupChanged&&!isolated)StartupRegistration.Set(Program.ExecutablePath,Options.autoStart);throw;}
             Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
             foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
         }
-        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();}
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();}
         internal void CloseSettings(){if(Settings==null)return;var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;}
         void SettingsAction(string name){try{
             if(name=="update"){RunUpdate();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
-            if(name=="shortcut"){DesktopShortcut.Create(Application.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
+            if(name=="shortcut"){DesktopShortcut.Create(Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
             else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
         void RunUpdate(){updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
         void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.UpdateTip(message);if(Settings!=null)Settings.SetUpdateStatus(message);else if(updateNotice){notice=message;status.Text=L.Text(message);}}
+        internal void SetUpdateProgress(UpdateProgress value){if(IsDisposed)return;UpdateView.Set(value);UpdateView.Apply(colors);if(Settings!=null)Settings.SetUpdateProgress(value);}
         internal void HideToTray(){
             if(tray==null){var menu=new ContextMenuStrip();menu.Items.Add(L.Text("打开主界面"),null,delegate{RestoreManager();});menu.Items.Add(L.Text("退出程序"),null,delegate{ExitApplication();});tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=menu};tray.DoubleClick+=delegate{RestoreManager();};}
             TrayVisible=true;if(tray!=null){tray.ContextMenuStrip.Items[0].Text=L.Text("打开主界面");tray.ContextMenuStrip.Items[1].Text=L.Text("退出程序");tray.Visible=!isolated;}Hide();

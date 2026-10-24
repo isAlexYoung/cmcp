@@ -23,6 +23,24 @@ test('download verifies checksum and asset digest before staging a file',async t
   const update=await downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch});assert.equal(fs.readFileSync(update.zip,'utf8'),'zip');
   r.assets[0].digest='sha256:'+'0'.repeat(64);await assert.rejects(downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch}));
 });
+test('download reports phase and byte progress before verification and restart',async t=>{
+  const d=directory(t),r=release(),bytes=Buffer.from('zip'),events=[];
+  const fetch=async(url,options)=>{
+    if(url.endsWith('/latest'))return Buffer.from(JSON.stringify(r));
+    if(url.endsWith('.sha256'))return Buffer.from(hash(bytes)+'  '+r.assets[0].name);
+    options.onProgress(0,3);options.onProgress(1,3);options.onProgress(3,3);return bytes;
+  };
+  await downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch,onProgress:value=>events.push(value)});
+  assert.equal(events[0].phase,'release');assert.equal(events.at(-1).phase,'restart');
+  assert.deepEqual(events.filter(v=>v.phase==='download').map(v=>v.received),[0,0,1,3]);
+  assert.ok(events.findIndex(v=>v.phase==='verify')>events.findIndex(v=>v.received===3));
+});
+test('download failures expose a safe reason and never stage corrupt bytes',async t=>{
+  const d=directory(t),r=release(),secret='DO-NOT-DISPLAY';
+  const fetch=async(url)=>url.endsWith('/latest')?Buffer.from(JSON.stringify(r)):url.endsWith('.sha256')?Buffer.from('0'.repeat(64)+'  '+r.assets[0].name):Buffer.from('zip');
+  await assert.rejects(downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch}),e=>e.code==='checksum'&&!e.message.includes(secret));
+  assert.equal(fs.readdirSync(d).filter(n=>n.startsWith('update-')).length,0);
+});
 function bundle(root,version){
   const app=path.join(root,'CMCP.app');fs.mkdirSync(app,{recursive:true});const files=[];
   for(const name of ['Contents/Info.plist','Contents/MacOS/CMCP','Contents/Resources/runtime/node','Contents/Resources/macos/desktop.mjs']){const file=path.join(app,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,version);files.push({path:name,sha256:hash(Buffer.from(version))});}

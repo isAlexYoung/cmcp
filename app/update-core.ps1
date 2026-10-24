@@ -18,7 +18,7 @@ function Select-CmcpRelease($Release,[string]$Current) {
     }
     return [pscustomobject]@{version=$version.ToString(3);name=$name;zip=$zip[0];checksum=$sum[0]}
 }
-function Receive-CmcpFile([string]$Url,[string]$Destination,[long]$Limit) {
+function Receive-CmcpFile([string]$Url,[string]$Destination,[long]$Limit,[scriptblock]$Progress=$null) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $uri = [uri]$Url
     for ($redirect=0; $redirect -le 5; $redirect++) {
@@ -32,7 +32,8 @@ function Receive-CmcpFile([string]$Url,[string]$Destination,[long]$Limit) {
             if ([int]$response.StatusCode -in @(301,302,303,307,308)) { $uri=New-Object uri($uri,$response.Headers['Location']); continue }
             if ([int]$response.StatusCode -ne 200 -or $response.ContentLength -gt $Limit) { throw 'Download response rejected' }
             $sourceStream=$response.GetResponseStream();$output=New-Object IO.FileStream($Destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-            try {$buffer=New-Object byte[] 65536;$total=0L;$deadline=[DateTime]::UtcNow.AddMinutes(8);while(($length=$sourceStream.Read($buffer,0,$buffer.Length)) -gt 0){$total+=$length;if($total -gt $Limit -or [DateTime]::UtcNow -gt $deadline){throw 'Download limit exceeded'};$output.Write($buffer,0,$length)};if($response.ContentLength -ge 0 -and $total -ne $response.ContentLength){throw 'Incomplete download'}} finally {$output.Dispose();$sourceStream.Dispose()}
+            $watch=[Diagnostics.Stopwatch]::StartNew();if($Progress){& $Progress 0 $response.ContentLength}
+            try {$buffer=New-Object byte[] 65536;$total=0L;$deadline=[DateTime]::UtcNow.AddMinutes(8);while(($length=$sourceStream.Read($buffer,0,$buffer.Length)) -gt 0){$total+=$length;if($total -gt $Limit -or [DateTime]::UtcNow -gt $deadline){throw 'Download limit exceeded'};$output.Write($buffer,0,$length);if($Progress -and $watch.ElapsedMilliseconds -ge 250){& $Progress $total $response.ContentLength;$watch.Restart()}};if($Progress){& $Progress $total $response.ContentLength};if($response.ContentLength -ge 0 -and $total -ne $response.ContentLength){throw 'Incomplete download'}} finally {$output.Dispose();$sourceStream.Dispose()}
             return
         } finally {$response.Dispose()}
     }
@@ -61,7 +62,7 @@ function Get-CmcpFiles([string]$Root) {
         }
     }
 }
-function Test-CmcpTree([string]$Root,[string]$Version='') {
+function Test-CmcpTree([string]$Root,[string]$Version='',[scriptblock]$Progress=$null) {
     $full=[IO.Path]::GetFullPath($Root).TrimEnd('\');$file=Join-Path $full 'app\distribution-manifest.json'
     if (!(Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -gt 8388608) { throw 'Installation manifest required' }
     $data=Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -70,12 +71,13 @@ function Test-CmcpTree([string]$Root,[string]$Version='') {
     $inventory=@{};foreach($entry in $data.files){$null=Test-CmcpRelative $entry.path;if($entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $inventory.ContainsKey($entry.path)){throw 'Invalid manifest entry'};$inventory[$entry.path]=$entry.sha256}
     $managerName=if($inventory.ContainsKey('CMCP.exe')){'CMCP.exe'}else{'Claude-MCP.exe'}
     foreach($required in @($managerName,'app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
-    $seen=@{};foreach($item in Get-CmcpFiles $full){$relative=$item.FullName.Substring($full.Length+1).Replace('\','/');if($relative -ceq 'app/distribution-manifest.json'){continue};if(!$inventory.ContainsKey($relative) -or (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inventory[$relative]){throw 'Installation contains unknown or modified files; download manually'};$seen[$relative]=$true}
+    $seen=@{};$watch=[Diagnostics.Stopwatch]::StartNew();if($Progress){& $Progress 0 $inventory.Count};foreach($item in Get-CmcpFiles $full){$relative=$item.FullName.Substring($full.Length+1).Replace('\','/');if($relative -ceq 'app/distribution-manifest.json'){continue};if(!$inventory.ContainsKey($relative) -or (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inventory[$relative]){throw 'Installation contains unknown or modified files; download manually'};$seen[$relative]=$true;if($Progress -and $watch.ElapsedMilliseconds -ge 250){& $Progress $seen.Count $inventory.Count;$watch.Restart()}}
+    if($Progress){& $Progress $seen.Count $inventory.Count}
     if($seen.Count -ne $inventory.Count){throw 'Installation file missing'}
     if((Get-Content -LiteralPath (Join-Path $Root 'app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version -cne $data.version){throw 'Package version mismatch'}
     return $data
 }
-function Expand-CmcpPackage([string]$Zip,[string]$Destination,[string]$Version) {
+function Expand-CmcpPackage([string]$Zip,[string]$Destination,[string]$Version,[scriptblock]$Progress=$null,[scriptblock]$ValidationProgress=$null) {
     if(Test-Path -LiteralPath $Destination){throw 'Staging path already exists'}
     Add-Type -AssemblyName System.IO.Compression.FileSystem,System.IO.Compression
     $archive=[IO.Compression.ZipFile]::OpenRead($Zip)
@@ -85,15 +87,17 @@ function Expand-CmcpPackage([string]$Zip,[string]$Destination,[string]$Version) 
         # Validate every entry before writing any bytes.
         foreach($entry in $archive.Entries){$path=$entry.FullName;if(!$path.StartsWith($prefix,[StringComparison]::Ordinal)){throw 'Wrong ZIP root'};$relative=$path.Substring($prefix.Length).TrimEnd('/');if(!$relative){continue};$null=Test-CmcpRelative $relative;if($seen.ContainsKey($relative)){throw 'Duplicate ZIP path'};$seen[$relative]=$true;$type=($entry.ExternalAttributes -shr 16) -band 0xF000;if($type -eq 0xA000 -or ($entry.ExternalAttributes -band 0x400)){throw 'ZIP links are forbidden'};$size+=$entry.Length;if($entry.Length -gt 268435456 -or $size -gt 1073741824){throw 'Uncompressed package limit'}}
         $null=New-Item -ItemType Directory -Path $Destination
-        foreach($entry in $archive.Entries){$relative=$entry.FullName.Substring($prefix.Length);if(!$relative){continue};$target=Join-Path $Destination $relative.Replace('/','\');if($relative.EndsWith('/')){$null=New-Item -ItemType Directory -Path $target -Force;continue};$null=New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force;$sourceStream=$entry.Open();$output=New-Object IO.FileStream($target,[IO.FileMode]::CreateNew);try{$sourceStream.CopyTo($output)}finally{$output.Dispose();$sourceStream.Dispose()}}
+        $done=0L;$watch=[Diagnostics.Stopwatch]::StartNew();if($Progress){& $Progress 0 $size}
+        foreach($entry in $archive.Entries){$relative=$entry.FullName.Substring($prefix.Length);if(!$relative){continue};$target=Join-Path $Destination $relative.Replace('/','\');if($relative.EndsWith('/')){$null=New-Item -ItemType Directory -Path $target -Force;continue};$null=New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force;$sourceStream=$entry.Open();$output=New-Object IO.FileStream($target,[IO.FileMode]::CreateNew);try{$sourceStream.CopyTo($output)}finally{$output.Dispose();$sourceStream.Dispose()};$done+=$entry.Length;if($Progress -and $watch.ElapsedMilliseconds -ge 250){& $Progress $done $size;$watch.Restart()}}
+        if($Progress){& $Progress $done $size}
     }finally{$archive.Dispose()}
-    return Test-CmcpTree $Destination $Version
+    return Test-CmcpTree $Destination $Version $ValidationProgress
 }
-function Assert-CmcpInstallRoot([string]$Root) {
+function Assert-CmcpInstallRoot([string]$Root,[scriptblock]$Progress=$null) {
     $full=[IO.Path]::GetFullPath($Root).TrimEnd('\')
     foreach($forbidden in @([IO.Path]::GetPathRoot($full).TrimEnd('\'),$env:USERPROFILE,$env:WINDIR,[Environment]::GetFolderPath('DesktopDirectory'),[Environment]::GetFolderPath('LocalApplicationData'))){if($forbidden -and $full -ieq $forbidden.TrimEnd('\')){throw 'Unsafe installation location'}}
     if(Test-Path -LiteralPath (Join-Path $full '.git')){throw 'Source checkout is protected'}
-    $null=Test-CmcpTree $full
+    $null=Test-CmcpTree $full '' $Progress
     return $full
 }
 function Invoke-CmcpSwap([string]$Install,[string]$Staged,[string]$Backup,[scriptblock]$Start,[scriptblock]$Healthy,[scriptblock]$StopFailed) {
@@ -108,4 +112,30 @@ function Invoke-CmcpSwap([string]$Install,[string]$Staged,[string]$Backup,[scrip
 function Get-CmcpManagerPath([string]$Root) {
     $name=if(Test-Path -LiteralPath (Join-Path $Root 'CMCP.exe')){'CMCP.exe'}else{'Claude-MCP.exe'}
     return Join-Path $Root $name
+}
+
+function Test-CmcpManagerPath([string]$Root,[string]$Executable) {
+    return ($Executable -ieq (Join-Path $Root 'CMCP.exe') -or $Executable -ieq (Join-Path $Root 'Claude-MCP.exe'))
+}
+function Get-CmcpUpdateFailureCode($Failure,[string]$Phase) {
+    $errorValue=$Failure.Exception
+    while($errorValue){
+        if($errorValue -is [UnauthorizedAccessException]){return 'permissions'}
+        if($errorValue -is [Net.WebException]){
+            if($errorValue.Status -eq [Net.WebExceptionStatus]::Timeout){return 'timeout'}
+            if($errorValue.Status -in @([Net.WebExceptionStatus]::TrustFailure,[Net.WebExceptionStatus]::SecureChannelFailure)){return 'tls'}
+            return 'network'
+        }
+        $errorValue=$errorValue.InnerException
+    }
+    switch($Phase){
+        'installed' {return 'installation'}
+        'release' {return 'release'}
+        'download' {return 'network'}
+        'checksum' {return 'checksum'}
+        'extract' {return 'package'}
+        'verify' {return 'package'}
+        'identity' {return 'identity'}
+        default {return 'prepare'}
+    }
 }

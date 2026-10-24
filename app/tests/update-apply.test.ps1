@@ -8,7 +8,7 @@ $null=New-Item -ItemType Directory -Path $temporary
 $checks=New-Object 'Collections.Generic.List[string]'
 function Check([bool]$Value,[string]$Name){if(!$Value){throw $Name};$checks.Add($Name)}
 function Put-File([string]$Path,[string]$Text){$null=New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force;[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($true))}
-function New-Package([string]$Root,[string]$Version,[string]$State,[string]$Id,[string]$Token,[bool]$Healthy){
+function New-Package([string]$Root,[string]$Version,[string]$State,[string]$Id,[string]$Token,[bool]$Healthy,[bool]$Legacy=$false){
     $null=New-Item -ItemType Directory -Path (Join-Path $Root 'app\runtime') -Force
     $marker=Join-Path $State ($Version+'.started');$ready=Join-Path (Join-Path (Join-Path $State 'updates') $Id) 'ready.json'
     $behavior=if($Healthy){'File.WriteAllText(@"'+$ready+'", "{\"token\":\"'+$Token+'\",\"pid\":"+Process.GetCurrentProcess().Id+"}");Thread.Sleep(6000);'}else{'return 3;'}
@@ -16,6 +16,10 @@ function New-Package([string]$Root,[string]$Version,[string]$State,[string]$Id,[
     $sourceFile=Join-Path $temporary ('fixture-'+[guid]::NewGuid().ToString('N')+'.cs');Put-File $sourceFile $source
     & (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo /target:winexe ('/out:'+(Join-Path $Root 'CMCP.exe')) $sourceFile |Out-Null
     if($LASTEXITCODE -ne 0){throw 'Fake manager compilation failed'}
+    if($Legacy){
+        if($Version -eq '4.1.0'){Move-Item -LiteralPath (Join-Path $Root 'CMCP.exe') -Destination (Join-Path $Root 'Claude-MCP.exe')}
+        else{& (Join-Path (Split-Path $app -Parent) 'tools/build-legacy-launcher.ps1') -OutputFile (Join-Path $Root 'Claude-MCP.exe') -Version $Version}
+    }
     Put-File (Join-Path $Root 'app\package.json') ('{"version":"'+$Version+'"}')
     foreach($file in @('runtime\node.exe','update.ps1','update-core.ps1','update-apply.ps1','manager-restart.ps1')){Put-File (Join-Path $Root ('app\'+$file)) 'fake, never executed'}
     $stopMarker=(Join-Path $State 'backend-stopped').Replace("'","''")
@@ -23,15 +27,17 @@ function New-Package([string]$Root,[string]$Version,[string]$State,[string]$Id,[
     $inventory=@();foreach($file in Get-ChildItem -LiteralPath $Root -File -Recurse){$inventory+=@{path=$file.FullName.Substring($Root.Length+1).Replace('\','/');sha256=(Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant()}}
     Put-File (Join-Path $Root 'app\distribution-manifest.json') (@{schema=1;version=$Version;platform='windows-x64';files=$inventory}|ConvertTo-Json -Depth 4)
 }
-function Run-Case([string]$Name,[bool]$Healthy,[bool]$WrongPid){
+function Run-Case([string]$Name,[bool]$Healthy,[bool]$WrongPid,[bool]$Legacy=$false){
     $parent=Join-Path $temporary $Name;$state=Join-Path $parent 'state';$null=New-Item -ItemType Directory -Path $state -Force
     $id=[guid]::NewGuid().ToString('N');$token=[guid]::NewGuid().ToString('N');$directory=Join-Path (Join-Path $state 'updates') $id;$install=Join-Path $parent 'portable';$stage=Join-Path $parent ('.cmcp-new-'+$id);$backup=Join-Path $parent ('.cmcp-backup-'+$id)
     $null=New-Item -ItemType Directory -Path $directory -Force
-    New-Package $install '4.1.0' $state $id $token $true;New-Package $stage '4.2.0' $state $id $token $Healthy
+    New-Package $install '4.1.0' $state $id $token $true $Legacy;New-Package $stage '4.2.0' $state $id $token $Healthy $Legacy
     $pidValue=2147483647;$start='0';if($WrongPid){$pidValue=$PID;$start=(Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks.ToString()}
     Put-File (Join-Path $directory 'request.json') (@{schema=1;installRoot=$install;staged=$stage;backup=$backup;version='4.2.0';oldVersion='4.1.0';managerPid=$pidValue;managerStart=$start;token=$token}|ConvertTo-Json)
-    Copy-Item -LiteralPath (Join-Path $app 'update-core.ps1') -Destination $directory
-    $helper=Get-Content -LiteralPath (Join-Path $app 'update-apply.ps1') -Raw
+    $core=if($Legacy){Join-Path $PSScriptRoot 'fixtures/legacy-update-core.ps1'}else{Join-Path $app 'update-core.ps1'}
+    $apply=if($Legacy){Join-Path $PSScriptRoot 'fixtures/legacy-update-apply.ps1'}else{Join-Path $app 'update-apply.ps1'}
+    Copy-Item -LiteralPath $core -Destination (Join-Path $directory 'update-core.ps1')
+    $helper=Get-Content -LiteralPath $apply -Raw
     $helper=$helper.Replace('$state=Join-Path ([Environment]::GetFolderPath(''LocalApplicationData'')) ''ClaudeLocalMcp''',('$state='''+$state.Replace("'","''")+''''))
     $helper=$helper.Replace('Local\CMCP-UpdateApply',('Local\CMCP-UpdateFixture-'+$id))
     Put-File (Join-Path $directory 'update-apply.ps1') $helper
@@ -47,10 +53,12 @@ try{
     Run-Case 'success 中文' $true $false
     Run-Case 'rollback' $false $false
     Run-Case 'wrong-pid' $true $true
+    Run-Case 'legacy-success' $true $false $true
+    Run-Case 'legacy-rollback' $false $false $true
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks;not_executed=@('personal installation','real backend')}|ConvertTo-Json -Depth 4
 }finally{
     $prefix=[IO.Path]::GetFullPath($temporary).TrimEnd('\')+'\'
-    foreach($process in Get-Process -Name 'CMCP' -ErrorAction SilentlyContinue){if($process.Path -and $process.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){$process.Kill();$process.WaitForExit(10000)|Out-Null}}
+    foreach($process in Get-Process -Name 'CMCP','Claude-MCP' -ErrorAction SilentlyContinue){if($process.Path -and $process.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){$process.Kill();$process.WaitForExit(10000)|Out-Null}}
     $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
     if($prefix.StartsWith($parent,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($temporary) -match '^cmcp-apply-fixture-[a-f0-9]{32}$'){Remove-Item -LiteralPath $temporary -Recurse -Force}
 }
