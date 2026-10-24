@@ -16,6 +16,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     var reportDirectory: URL?, testResults: [String] = []
     var updateRequest: URL?
     var testStderr = Data()
+    var crashTimes: [Date] = []
     let bundle = Bundle.main
     var stateDirectory: URL
     var resources: URL { bundle.resourceURL! }
@@ -78,6 +79,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         child.executableURL = resources.appendingPathComponent("runtime/node")
         child.arguments = ["--use-system-ca", resources.appendingPathComponent("macos/desktop.mjs").path]
         var environment = ProcessInfo.processInfo.environment
+        for name in ["NODE_OPTIONS", "NODE_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "LD_PRELOAD"] { environment.removeValue(forKey: name) }
+        environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         environment["CMCP_STATE_DIR"] = stateDirectory.path
         if testing { environment["CMCP_NATIVE_SELF_TEST"] = "1" }
         child.environment = environment; child.currentDirectoryURL = resources
@@ -94,11 +97,20 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             guard let self = self else { return }
             if self.exitPending || self.exitApproved { return }
             if !self.ready { self.fail("后台未能启动，请检查应用完整性。 status=" + String(child.terminationStatus)); return }
+            if child.terminationStatus != 0 && !self.testing {
+                self.crashTimes = self.crashTimes.filter { Date().timeIntervalSince($0) < 60 }
+                if self.crashTimes.count < 2 {
+                    self.crashTimes.append(Date()); self.ready = false; self.pendingOutput = Data()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.startBackend() }
+                    return
+                }
+                self.fail(self.tr("后台连续异常退出，请重新打开应用。", "The backend stopped repeatedly. Reopen the app.")); return
+            }
             self.exitApproved = true; NSApp.terminate(nil)
         } }
         process = child
         do { try child.run() } catch { fail("无法启动内置后台，请完整解压应用。"); return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in if self?.ready == false { self?.fail("后台启动超时。") } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in if self?.process === child && self?.ready == false { self?.fail("后台启动超时。") } }
     }
     func consume(_ bytes: Data) {
         pendingOutput.append(bytes)
@@ -264,7 +276,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func alert(_ text: String) { let alert = NSAlert(); alert.messageText = text; alert.runModal() }
     func fail(_ text: String) { if testing { finishTests(error: text) } else { if updateRequest == nil { alert(text) }; exitApproved = true; NSApp.terminate(nil) } }
     func runTests() {
-        let checks = ["document.querySelector('header h1').textContent === 'CMCP'", "document.querySelectorAll('.card').length === 2", "document.querySelectorAll('.state-label').length === 2", "window.cmcpTest.showSettings('dark','en'); document.documentElement.dataset.theme === 'dark'", "document.querySelector('header h2').textContent === 'Settings'", "window.cmcpTest.showEditor(); document.querySelectorAll('input[type=password]').length === 1", "document.querySelectorAll('header').length === 1"]
+        window.setContentSize(NSSize(width: 700, height: 580))
+        let checks = ["document.querySelector('.card-head').click(); document.querySelector('.card').classList.contains('expanded')", "document.querySelector('.card-head').click(); !document.querySelector('.card').classList.contains('expanded')", "document.querySelectorAll('.card.selected').length === 1", "getComputedStyle(document.documentElement,'::-webkit-scrollbar').display === 'none'", "document.body.scrollWidth <= window.innerWidth", "document.querySelector('header h1').textContent === 'CMCP'", "document.querySelectorAll('.card').length === 2", "document.querySelectorAll('.state-label').length === 2", "window.cmcpTest.showSettings('dark','en'); document.documentElement.dataset.theme === 'dark'", "document.querySelector('header h2').textContent === 'Settings'", "window.cmcpTest.showEditor(); document.querySelectorAll('input[type=password]').length === 1", "document.querySelectorAll('header').length === 1"]
         func next(_ index: Int) {
             if index == checks.count {
                 self.window.setContentSize(NSSize(width: 700, height: 580))

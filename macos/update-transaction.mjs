@@ -20,7 +20,7 @@ export function inspectZip(bytes){
     const localNameLength=bytes.readUInt16LE(local+26),localExtraLength=bytes.readUInt16LE(local+28);
     const compressed=bytes.readUInt32LE(position+20);
     if(!bytes.subarray(local+30,local+30+localNameLength).equals(raw)||bytes.readUInt16LE(local+6)!==flags||bytes.readUInt16LE(local+8)!==method||local+30+localNameLength+localExtraLength+compressed>offset)throw Error('ZIP local/central disagreement');
-    if(!Buffer.from(name).equals(raw)||!name.startsWith('CMCP.app/')||name.includes('\\')||name.includes(':')||/[\x00-\x1f\x7f]/.test(name)||name.split('/').some(p=>p==='..'||p==='.')||(flags&1)||![0,8].includes(method)||(mode&0o170000)===0o120000)throw Error('Unsafe ZIP member');
+    if(!Buffer.from(name).equals(raw)||!name.startsWith('CMCP.app/')||name.includes('\\')||name.includes(':')||/[\x00-\x1f\x7f]/.test(name)||name.split('/').some(p=>p==='..'||p==='.')||(flags&1)||![0,8].includes(method)||![0,0o100000,0o040000].includes(mode&0o170000))throw Error('Unsafe ZIP member');
     const key=name.normalize('NFD').toLowerCase().replace(/\/$/,'');if(names.has(key))throw Error('Duplicate ZIP path');names.add(key);
     total+=length;if(total>1024*1024*1024)throw Error('ZIP expansion too large');position+=46+n+extra+comment;
   }

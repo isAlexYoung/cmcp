@@ -22,10 +22,10 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const dispatcher=injected||await createDispatcher({roots:store.config.roots});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
   let machine;try{machine=fs.readFileSync(machineFile,'utf8').trim();if(!/^[a-f0-9-]{36}$/.test(machine))throw Error();}catch{machine=randomUUID();atomicWrite(machineFile,machine);}
-  const status={set(name,state,message){states[name]={state,message,at:new Date().toISOString()};}};
-  const log=text=>{try{const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text);fs.appendFileSync(path.join(directory,'service.log'),new Date().toISOString()+' '+(name?name[1]+' '+name[2]:'transport event')+'\n',{mode:0o600});}catch{}};
+  const status={set(name,state,message){if(state==='password')message='保存的密码不正确或不可用。请停止此连接后编辑密码。';states[name]={state,message,at:new Date().toISOString()};}};
+  const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+name[2]:'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
   const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
-    create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),version,forward:dispatcher.forward,
+    create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
       install:install||((target,auth,agent,signal)=>new Cloud(target.url,auth,agent,signal).install())})});
   let origin='',closing=false,updates={state:'unchecked',version:null};

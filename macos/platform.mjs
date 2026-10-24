@@ -109,15 +109,3 @@ export async function proxyFor() {
   }
   return parseScutil(await runFile('/usr/sbin/scutil', ['--proxy']));
 }
-export const xmlEscape = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
-export function launchPlist(node, app, state) {
-  const s = v => `<string>${xmlEscape(v)}</string>`;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>
-<key>Label</key>${s(LABEL)}<key>ProgramArguments</key><array>${s(node)}${s(path.posix.join(app,'service.mjs'))}</array>
-<key>WorkingDirectory</key>${s(app)}<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-<key>ThrottleInterval</key><integer>15</integer><key>ProcessType</key>${s('Interactive')}
-<key>Umask</key><integer>63</integer><key>ExitTimeOut</key><integer>10</integer>
-<key>StandardOutPath</key>${s(path.posix.join(state,'launchd.log'))}<key>StandardErrorPath</key>${s(path.posix.join(state,'launchd-error.log'))}
-<key>EnvironmentVariables</key><dict><key>PATH</key>${s('/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin')}</dict>
-</dict></plist>\n`;
-}

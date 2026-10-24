@@ -197,13 +197,13 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
-export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows' }) {
+export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions }) {
   let stopped = false;
   const controller = new AbortController();
   const sleep = ms => delay(ms, undefined, { signal: controller.signal }).catch(() => {});
   let socket = null;
   let lastLog = '';
-  const recovery = new RequestRecovery();
+  const recovery = new RequestRecovery(recoveryOptions);
   let recoveryAuth;
   const say = (state, message, detail = '') => {
     status.set(name, state, message);

@@ -6,9 +6,15 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ManagerState} from '../state.mjs';
 import {createManager} from '../manager.mjs';
+import {RequestRecovery} from '../../app/request-recovery.mjs';
 
 function fixture(t){const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-manager-')));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));const values=new Map(),calls=[];const secrets=async(op,id,password)=>{calls.push({op,id});if(op==='set')values.set(id,password);if(op==='delete')values.delete(id);if(op==='get')return values.get(id);};return {directory,secrets,values,calls};}
 const input=(url='https://first.invalid')=>({url,label:'Mac',password:'',autoLogin:false,icon:''});
+test('chunked transfer sessions can exceed 256 requests without duplicate execution',async()=>{
+  const cache=new RequestRecovery({limit:16384});let executed=0;
+  for(let i=0;i<1024;i++){const id=i.toString(16).padStart(32,'0');const result=await cache.handle(id,{chunk:i},'execute',async()=>{executed++;return {offset:i};});assert.equal(result.recovery.state,'done');}
+  assert.equal((await cache.handle('0'.repeat(32),undefined,'query')).msg.offset,0);assert.equal(executed,1024);
+});
 test('fresh manager defaults to tray and saves manual shared login without touching Keychain',async t=>{
   const f=fixture(t),state=new ManagerState(f.directory,f.secrets);
   assert.equal(state.preferences.closeAction,'tray');const id=await state.save(input(),async()=>true);

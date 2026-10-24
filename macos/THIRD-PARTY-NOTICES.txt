@@ -6,7 +6,7 @@ The complete Node.js license and bundled component notices are in runtime/NODE-L
 JavaScript dependencies and their license files are retained in node_modules.
 Declared package licenses below are an index; the license files control.
 
-The filesystem npm package omitted its referenced LICENSE. Its LICENSE is included from the upstream published gitHead:
+The filesystem npm package omitted its referenced LICENSE. Its LICENSE is preserved as FILESYSTEM-LICENSE.txt in the app resources, from the upstream published gitHead:
 https://github.com/modelcontextprotocol/servers/blob/a40bc270fb5ece62673f8a1196f57116d885c5eb/LICENSE
 That file describes the Apache-2.0 / MIT licensing transition and documentation licensing.
 No changes were made to the dependency source code.

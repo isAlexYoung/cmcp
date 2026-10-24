@@ -8,7 +8,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {createBinaryTools} from '../binary-tools.mjs';
 import {createMacTools} from '../mac-tools.mjs';
 import {createDispatcher} from '../dispatcher.mjs';
-import {normalizeUrl,parseScutil,keychain,atomicWrite,readConfig,launchPlist} from '../platform.mjs';
+import {normalizeUrl,parseScutil,keychain,atomicWrite,readConfig} from '../platform.mjs';
 import {shellQuote} from '../cloud-api.mjs';
 const sha=buf=>createHash('sha256').update(buf).digest('hex');
 function folder(t){const dir=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'mac-mcp-test-')));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));return dir;}
@@ -32,11 +32,6 @@ test('passwords travel only on stdin to a fixed keychain script',async()=>{
   });assert.ok(called);
   assert.equal(await keychain('get',id,undefined,async()=>JSON.stringify({ok:true,data:Buffer.from(secret).toString('base64')})),secret);
   await assert.rejects(keychain('get',id,undefined,async()=>'{"ok":false,"status":-25300}'),/钥匙串/);
-});
-test('launchd plist escapes XML metacharacters and uses argument arrays',()=>{
-  const xml=launchPlist('/a&b/node','/a<q>/kit','/a"b/state');
-  assert.ok(xml.includes('/a&amp;b/node'));assert.ok(xml.includes('/a&lt;q&gt;/kit/service.mjs'));
-  assert.ok(xml.includes('/a&quot;b/state/launchd.log'));assert.ok(!xml.includes('<key>UserName</key>'));
 });
 test('state writes are atomic and malformed configs are rejected',t=>{
   const dir=folder(t),file=path.join(dir,'targets.json');atomicWrite(file,'{"targets":[],"roots":["'+(process.platform==='win32'?'C:/':'/')+'"]}');

@@ -42,5 +42,5 @@ test('failed launch rolls back files and starts the previous application',async 
 function zip(name,localName=name,mode=0o100644){const a=Buffer.from(localName),b=Buffer.from(name),local=Buffer.alloc(30+a.length),central=Buffer.alloc(46+b.length),end=Buffer.alloc(22);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(a.length,26);a.copy(local,30);central.writeUInt32LE(0x02014b50);central.writeUInt16LE(b.length,28);central.writeUInt32LE((mode<<16)>>>0,38);b.copy(central,46);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(1,8);end.writeUInt16LE(1,10);end.writeUInt32LE(central.length,12);end.writeUInt32LE(local.length,16);return Buffer.concat([local,central,end]);}
 test('ZIP inspection rejects traversal, symlinks and local-header mismatches',()=>{
   assert.equal(inspectZip(zip('CMCP.app/Contents/file')).count,1);
-  for(const bytes of [zip('../bad'),zip('CMCP.app/../../bad'),zip('CMCP.app/Contents/file','../../outside'),zip('CMCP.app/Contents/link',undefined,0o120777),Buffer.from('invalid')])assert.throws(()=>inspectZip(bytes));
+  for(const bytes of [zip('../bad'),zip('CMCP.app/../../bad'),zip('CMCP.app/Contents/file','../../outside'),zip('CMCP.app/Contents/link',undefined,0o120777),zip('CMCP.app/Contents/fifo',undefined,0o010600),Buffer.from('invalid')])assert.throws(()=>inspectZip(bytes));
 });
