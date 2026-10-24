@@ -42,7 +42,7 @@ namespace CMCP {
         Palette colors=Palette.Create(false);
         readonly Timer animation=new Timer{Interval=60};
         int offset;
-        internal UpdateProgressView(){Height=128;DoubleBuffered=true;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);AccessibleRole=AccessibleRole.ProgressBar;animation.Tick+=delegate{offset=(offset+8)%Math.Max(1,Width);Invalidate();};}
+        internal UpdateProgressView(){Height=128;DoubleBuffered=true;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);AccessibleRole=AccessibleRole.ProgressBar;animation.Tick+=delegate{offset=(offset+8)%Math.Max(1,Width);Invalidate();};}
         internal void Set(UpdateProgress value){Value=value;Visible=value!=null&&value.Visible;AccessibleName=value==null?"":value.Title+" "+value.Detail;if(Visible&&value.Percent<0&&value.Stage!="failed"&&value.Stage!="restart")animation.Start();else animation.Stop();Invalidate();}
         internal void Apply(Palette palette){colors=palette;BackColor=colors.Page;Invalidate();}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(Value==null)return;
