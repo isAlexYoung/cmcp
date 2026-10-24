@@ -7,7 +7,7 @@ $temporary=Join-Path ([IO.Path]::GetTempPath()) ('cmcp-update-fixture-'+[guid]::
 $null=New-Item -ItemType Directory -Path $temporary
 function Write-Tree([string]$Directory,[string]$Version){
     $null=New-Item -ItemType Directory -Path (Join-Path $Directory 'app\runtime') -Force
-    $entries=@();foreach($path in @('Claude-MCP.exe','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1','app/package.json','docs/使用说明.md')){
+    $entries=@();foreach($path in @('Claude-MCP.exe','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1','app/package.json','docs/许可示例.txt')){
         $content='fixture '+$Version;if($path -eq 'app/package.json'){$content='{"version":"'+$Version+'"}'}
         $file=Join-Path $Directory $path.Replace('/','\');$null=New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force;[IO.File]::WriteAllText($file,$content)
         $entries+=@{path=$path;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}

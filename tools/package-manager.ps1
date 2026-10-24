@@ -9,8 +9,8 @@ $packageName = 'CMCP-' + $version + '-windows-x64'
 $destination = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) $packageName
 $zip = $destination + '.zip'
 if ((Test-Path -LiteralPath $destination) -or (Test-Path -LiteralPath $zip)) { throw '输出位置已存在。请指定新的 OutputDirectory；不会覆盖或删除旧文件。' }
-$required = @('Claude-MCP.exe','app\server.mjs','app\start.ps1','app\manager-open.ps1','app\target-controls.ps1','app\target-connections.mjs','app\managed-target.mjs','app\cloudpc-connector.py','app\cloudpc-relay.py','app\runtime\node.exe','app\runtime\LICENSE','app\assets\claude-desktop.ico','app\node_modules\@modelcontextprotocol\server-filesystem\dist\index.js','app\node_modules\@modelcontextprotocol\sdk\package.json','app\package-lock.json','docs\桌面版使用说明.md','docs\THIRD_PARTY_NOTICES.md','tools\desktop-ui\Manager.cs','tools\desktop-ui\Shortcuts.cs','tools\desktop-ui\ShortcutTests.cs')
-$items = @('Claude-MCP.exe','app','docs','tools')
+$required = @('Claude-MCP.exe','app\server.mjs','app\start.ps1','app\manager-open.ps1','app\target-controls.ps1','app\target-connections.mjs','app\managed-target.mjs','app\cloudpc-connector.py','app\cloudpc-relay.py','app\runtime\node.exe','app\runtime\LICENSE','app\assets\claude-desktop.ico','app\node_modules\@modelcontextprotocol\server-filesystem\dist\index.js','app\node_modules\@modelcontextprotocol\sdk\package.json','app\package-lock.json','THIRD_PARTY_NOTICES.txt','tools\desktop-ui\Manager.cs','tools\desktop-ui\Shortcuts.cs','tools\desktop-ui\ShortcutTests.cs')
+$items = @('Claude-MCP.exe','app','docs','tools','THIRD_PARTY_NOTICES.txt')
 $required += @('app\manager-targets.ps1','app\remove-cloudpc.ps1','tools\desktop-ui\Dashboard.cs','tools\desktop-ui\DashboardControls.cs','tools\desktop-ui\DashboardTests.cs','tools\desktop-ui\UiPreferences.cs')
 $required += @('tools\desktop-ui\TargetCard.cs','tools\desktop-ui\TargetEditorPage.cs','tools\desktop-ui\NativeFrame.cs')
 $required += @('app\manager-events.ps1','app\manager-save.ps1','tools\desktop-ui\InlineWorker.cs','tools\desktop-ui\CardList.cs')
