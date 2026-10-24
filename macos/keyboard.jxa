@@ -1,0 +1,11 @@
+ObjC.import('Foundation');
+function run(){
+  var raw=$.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  var p=JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(raw,$.NSUTF8StringEncoding)));
+  var events=Application('System Events');
+  var names={command:'command down',control:'control down',option:'option down',shift:'shift down'};
+  var mods=(p.modifiers||[]).map(function(m){if(!names[m])throw Error('Invalid modifier');return names[m];});
+  if(p.text!==undefined)events.keystroke(String(p.text),{using:mods});
+  else {var codes={'return':36,tab:48,escape:53,space:49,backspace:51,left:123,right:124,down:125,up:126};if(codes[p.key]===undefined)throw Error('Invalid key');events.keyCode(codes[p.key],{using:mods});}
+  return 'ok';
+}

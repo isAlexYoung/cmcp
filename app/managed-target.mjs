@@ -5,7 +5,7 @@ import {Cloud} from './cloud-connector.mjs';
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
-export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log,
+export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log, deviceName,
   passwordFor, session = false, onReplaced, install = (t, auth, agent, signal) => new Cloud(t.url, auth, agent, signal).install()}) {
   return async (t, {signal, current, status}) => {
     const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null};
@@ -57,7 +57,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
           }
         } finally { record.installing = false; }
       };
-      record.link = startLink({name:t.name, machine, version, askPassword, notify, status, log, session, onReplaced,
+      record.link = startLink({name:t.name, machine, version, askPassword, notify, status, log, session, onReplaced, deviceName,
         forward:msg => { if (!current()) throw Error('Target stopped'); return forward(msg); },
         onConnected:auth => { if (current()) { record.auth = auth; return record.setup(); } },
         target:() => current() ? {

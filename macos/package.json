@@ -1,0 +1,20 @@
+{
+  "name": "claude-mcp-mac",
+  "version": "4.1.1",
+  "description": "macOS outbound MCP bridge with native and terminal transports",
+  "private": true,
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+    "express": "5.2.1",
+    "ws": "8.22.0",
+    "ajv": "8.20.0"
+  }
+}

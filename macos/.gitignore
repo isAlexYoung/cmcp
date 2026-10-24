@@ -1,0 +1,5 @@
+/node_modules/
+/runtime/*.tar.gz
+/build/
+*.app/
+.DS_Store

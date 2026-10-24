@@ -197,7 +197,7 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
-export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected }) {
+export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows' }) {
   let stopped = false;
   const controller = new AbortController();
   const sleep = ms => delay(ms, undefined, { signal: controller.signal }).catch(() => {});
@@ -256,7 +256,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
       });
       ws.on('open', () => {
         opened = Date.now();
-        ws.send(JSON.stringify({ t: 'hello', machine, name: process.env.COMPUTERNAME || 'Windows', version, recovery: {protocol: 1, epoch: recovery.epoch} }));
+        ws.send(JSON.stringify({ t: 'hello', machine, name: deviceName, version, recovery: {protocol: 1, epoch: recovery.epoch} }));
         welcomeTimer = setTimeout(() => { if (!welcomed) { log(`[${name}] no welcome within 15s`); ws.terminate(); } }, 15000);
         heartbeat = setInterval(() => {
           if (Date.now() - lastPong > 50000) { log(`[${name}] heartbeat lost`); return ws.terminate(); }

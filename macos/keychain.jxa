@@ -1,0 +1,37 @@
+ObjC.import('Foundation');
+ObjC.import('Security');
+function run() {
+  var input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  var request = JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding)));
+  if (!/^[a-f0-9-]{36}$/.test(request.id) || ['get','set','delete'].indexOf(request.op) < 0) throw Error('Invalid request');
+  var query = $.NSMutableDictionary.alloc.init;
+  query.setObjectForKey($.kSecClassGenericPassword, $.kSecClass);
+  query.setObjectForKey($('com.claude-mcp.mac.v1'), $.kSecAttrService);
+  query.setObjectForKey($(request.id), $.kSecAttrAccount);
+  var status, result;
+  if (request.op === 'get') {
+    query.setObjectForKey($.kCFBooleanTrue, $.kSecReturnData);
+    query.setObjectForKey($.kSecMatchLimitOne, $.kSecMatchLimit);
+    query.setObjectForKey($.kSecUseAuthenticationUIFail, $.kSecUseAuthenticationUI);
+    result = Ref();
+    status = $.SecItemCopyMatching(query, result);
+    return JSON.stringify(status === 0 ? {ok:true,data:ObjC.unwrap(ObjC.castRefToObject(result[0]).base64EncodedStringWithOptions(0))} : {ok:false,status:Number(status)});
+  }
+  if (request.op === 'delete') {
+    status = $.SecItemDelete(query);
+    return JSON.stringify({ok:status === 0 || status === -25300,status:Number(status)});
+  }
+  if (typeof request.password !== 'string' || !request.password || request.password.length > 4096) throw Error('Invalid password');
+  var data = $(request.password).dataUsingEncoding($.NSUTF8StringEncoding);
+  var update = $.NSMutableDictionary.alloc.init;
+  update.setObjectForKey(data, $.kSecValueData);
+  status = $.SecItemUpdate(query, update);
+  if (status === -25300) {
+    query.setObjectForKey(data, $.kSecValueData);
+    // Use the normal macOS login keychain. kSecAttrAccessible requires the
+    // Data Protection keychain and app entitlements; osascript is not our signed app.
+    query.setObjectForKey($('Claude MCP Mac cloud password'), $.kSecAttrLabel);
+    status = $.SecItemAdd(query, null);
+  }
+  return JSON.stringify({ok:status === 0,status:Number(status)});
+}

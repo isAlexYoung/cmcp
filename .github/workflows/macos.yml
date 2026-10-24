@@ -1,0 +1,57 @@
+name: Validate Mac CMCP
+on:
+  push:
+    branches: [main, codex/macos-parity]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/node-version.txt
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            macos/package-lock.json
+      - name: Locked dependencies
+        run: |
+          npm --prefix app ci
+          npm --prefix macos ci --ignore-scripts
+          mkdir -p test-results
+      - name: Backend and original Mac tool regressions
+        run: |
+          node --test macos/tests/*.test.mjs | tee test-results/mac-backend.tap
+          python3 macos/tests/connector_test.py 2>&1 | tee test-results/mac-connector.txt
+      - name: Build native application
+        run: node tools/build-macos.mjs "$RUNNER_TEMP/cmcp-built" | tee test-results/build.json
+      - name: Real AppKit and WebKit interface checks
+        run: |
+          "$RUNNER_TEMP/cmcp-built/CMCP.app/Contents/MacOS/CMCP" --self-test "$PWD/test-results/native"
+          python3 -c "import json; r=json.load(open('test-results/native/native-ui.json')); assert r['failed']==0 and r['passed']==7, r"
+      - name: Archive platform package
+        run: python3 tools/package-macos.py "$RUNNER_TEMP/cmcp-built/CMCP.app" "$RUNNER_TEMP/cmcp-packages"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cmcp-macos-${{ matrix.arch }}-evidence-${{ github.sha }}
+          path: test-results/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmcp-macos-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cmcp-packages/*.zip
+            ${{ runner.temp }}/cmcp-packages/*.sha256
