@@ -15,6 +15,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     var exitApproved = false, exitPending = false, ready = false, startup: Bool, testing: Bool
     var reportDirectory: URL?, testResults: [String] = []
     var updateRequest: URL?
+    var testStderr = Data()
     let bundle = Bundle.main
     var stateDirectory: URL
     var resources: URL { bundle.resourceURL! }
@@ -81,7 +82,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         if testing { environment["CMCP_NATIVE_SELF_TEST"] = "1" }
         child.environment = environment; child.currentDirectoryURL = resources
         child.standardOutput = output; child.standardError = errors
-        errors.fileHandleForReading.readabilityHandler = { handle in _ = handle.availableData }
+        errors.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let bytes = handle.availableData
+            DispatchQueue.main.async { if self?.testing == true, (self?.testStderr.count ?? 0) < 32768 { self?.testStderr.append(bytes) } }
+        }
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let bytes = handle.availableData
             DispatchQueue.main.async { self?.consume(bytes) }
@@ -89,7 +93,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         child.terminationHandler = { [weak self] child in DispatchQueue.main.async {
             guard let self = self else { return }
             if self.exitPending || self.exitApproved { return }
-            if !self.ready { self.fail("后台未能启动，请检查应用完整性。"); return }
+            if !self.ready { self.fail("后台未能启动，请检查应用完整性。 status=" + String(child.terminationStatus)); return }
             self.exitApproved = true; NSApp.terminate(nil)
         } }
         process = child
@@ -285,6 +289,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let result: [String: Any] = ["passed": testResults.count, "failed": error == nil ? 0 : 1, "error": error ?? "", "checks": testResults, "not_executed": ["real cloud connection", "user TCC permissions", "real login item approval"]]
             if let data = try? JSONSerialization.data(withJSONObject: result, options: .prettyPrinted) { try? data.write(to: folder.appendingPathComponent("native-ui.json")) }
+            try? testStderr.write(to: folder.appendingPathComponent("backend.stderr.txt"))
         }
         exitApproved = true; process?.terminate(); NSApp.terminate(nil)
     }

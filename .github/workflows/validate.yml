@@ -188,6 +188,7 @@ jobs:
           grep -q 'Ran 16 tests' test-results/python-recovery.txt
           ! grep -q 'skipped' test-results/python-recovery.txt
       - name: Full connector relay and Windows-client protocol recovery
+        shell: bash
         run: node --test app/tests/recovery-unix.integration.mjs | tee test-results/recovery-integration.tap
       - uses: actions/upload-artifact@v4
         if: always()

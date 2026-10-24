@@ -69,8 +69,18 @@ def read_json(file):
     return value
 
 
+def safe_parents(directory):
+    directory = Path(directory).absolute()
+    for item in (directory, *directory.parents):
+        if item.is_symlink():
+            raise ValueError("Refusing a symlink directory: " + str(item))
+
+
 def atomic_write(file, data, mode=0o600):
     file = Path(file)
+    safe_parents(file.parent)
+    if file.is_symlink():
+        raise ValueError("Refusing to replace a symlink: " + str(file))
     file.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".mcp-tmp-", dir=str(file.parent))
     try:
