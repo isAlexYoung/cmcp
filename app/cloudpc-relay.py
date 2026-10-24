@@ -43,6 +43,8 @@ class Relay:
         self.server = None
         self.lock = None
         self.socket_inode = None
+        self.recovery = None
+        self.stop_marker = self.directory / 'manual-stop.json'
 
     def emit(self, message):
         data = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -89,6 +91,10 @@ class Relay:
                     raise RuntimeError("云电脑已有连接服务，请重新连接")
         self.pc = {key: str(hello.get(key, ""))[:100] for key in ("machine", "name", "version")}
         self.pc["since"] = int(time.time() * 1000)
+        if isinstance(hello.get('recovery'), dict) and hello['recovery'].get('protocol') == 1:
+            self.recovery = hello['recovery']
+        with contextlib.suppress(FileNotFoundError):
+            self.stop_marker.unlink()
         relay = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -117,37 +123,48 @@ class Relay:
         reply = {"id": request.get("id"), "ok": True}
         op = request.get("op")
         if op == "status":
-            return dict(reply, connected=not self.stop.is_set(), pc=self.pc)
+            return dict(reply, connected=not self.stop.is_set(), pc=self.pc, recovery=self.recovery)
         if op == "replace":
             reason = "reconnected" if request.get("machine") == self.pc["machine"] else "replaced"
             self.emit({"t": "close", "code": 4002, "reason": reason})
             self.stop.set()
             return reply
-        if op != "call":
+        if op not in ("call", "result"):
             return dict(reply, ok=False, code="error", error="unknown op")
+        if op == 'result' and not self.recovery:
+            return dict(reply, ok=False, code='unsupported', error='结果查询不可用')
         if len(json.dumps(request.get("msg"), ensure_ascii=False).encode("utf-8")) > MAX_REQUEST:
             return dict(reply, ok=False, code="error", error="MCP request exceeds the 8 MiB limit")
+        request_id = request.get('request_id')
+        if request_id is not None and (not isinstance(request_id, str) or len(request_id) != 32 or any(c not in '0123456789abcdef' for c in request_id)):
+            return dict(reply, ok=False, code='error', error='Invalid request ID')
+        if op == 'result' and not request_id:
+            return dict(reply, ok=False, code='error', error='Missing request ID')
+        # Each socket exchange has its own wire ID, even concurrent result queries.
         key = uuid.uuid4().hex
         event = threading.Event()
         entry = {"event": event}
         with self.pending_lock:
             if self.stop.is_set():
-                return dict(reply, ok=False, code="offline", error="本地电脑当前未连接")
+                return dict(reply, ok=False, code="offline", delivery="not_sent", error="本地电脑当前未连接")
             if len(self.pending) >= 64:
                 return dict(reply, ok=False, code="error", error="同时进行的操作太多，请稍后重试")
             self.pending[key] = entry
         try:
-            self.emit({"t": "req", "id": key, "msg": request.get("msg")})
-            deadline = time.monotonic() + 180
+            packet = {"t": "req", "id": key, "msg": request.get("msg")}
+            if self.recovery and request_id:
+                packet['recovery'] = {'protocol': 1, 'requestId': request_id, 'action': 'query' if op == 'result' else 'execute'}
+            self.emit(packet)
+            deadline = time.monotonic() + (5 if op == 'result' else 180)
             while not event.wait(0.2):
                 if self.stop.is_set():
-                    return dict(reply, ok=False, code="offline", error="本地电脑连接已断开")
+                    return dict(reply, ok=False, code="disconnected", error="执行期间连接断开，结果尚未确认")
                 if time.monotonic() >= deadline:
                     return dict(reply, ok=False, code="timeout", error="本地电脑没有在规定时间内响应")
             response = entry["response"]
             if response.get("error"):
-                return dict(reply, ok=False, code="error", error=str(response["error"]))
-            return dict(reply, msg=response.get("msg"))
+                return dict(reply, ok=False, code="error", error=str(response["error"]), recovery=response.get('recovery'))
+            return dict(reply, msg=response.get("msg"), recovery=response.get('recovery'))
         finally:
             with self.pending_lock:
                 self.pending.pop(key, None)
@@ -155,6 +172,16 @@ class Relay:
     def message(self, message):
         if message.get("t") == "hello" and self.pc is None:
             self.start(message)
+        elif message.get('t') == 'stop' and self.pc is not None:
+            temporary = self.directory / ('manual-stop.' + uuid.uuid4().hex + '.tmp')
+            try:
+                temporary.write_text(json.dumps({'schema': 1, 'stopped': True}), encoding='utf-8')
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, self.stop_marker)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    temporary.unlink()
+            self.stop.set()
         elif message.get("t") == "res":
             with self.pending_lock:
                 entry = self.pending.get(message.get("id"))

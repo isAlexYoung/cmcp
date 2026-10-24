@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ClaudeMcp {
@@ -23,6 +24,8 @@ namespace ClaudeMcp {
         NotifyIcon tray;
         internal bool TrayVisible;
         bool exiting,updateNotice;
+        internal bool ExitPending;
+        internal Func<bool> ExitBackend;
         UpdateController updates;
         internal Action<string> Trace;
         void Mark(string message){if(Trace!=null)Trace(message);}
@@ -41,6 +44,7 @@ namespace ClaudeMcp {
             if (stateOverride != null) stateDirectory = stateOverride;
             if (kitOverride != null) kit = kitOverride;
             preview = demo;isolated=demo||stateOverride!=null; Preferences = demo ? new UiPreferences() : UiPreferences.Load(stateDirectory);
+            ExitBackend=isolated?(Func<bool>)(()=>true):(()=>BackendRestart.Run(kit,"manager-exit.ps1"));
             Options=demo?new AppSettings():AppSettings.Load(stateDirectory,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
             Icon=System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -61,7 +65,7 @@ namespace ClaudeMcp {
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
-            FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&Options.closeToTray&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;HideToTray();}};
+            FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;if(Options.closeToTray&&!ExitPending)HideToTray();else ExitApplication();}};
             FormClosed+=delegate{timer.Stop();timer.Dispose();updates.Dispose();if(tray!=null)tray.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();
         }
         void ApplyTheme(){
@@ -96,8 +100,21 @@ namespace ClaudeMcp {
         void RunUpdate(){updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
         void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.UpdateTip(message);if(Settings!=null)Settings.SetUpdateStatus(message);else if(updateNotice){notice=message;status.Text=L.Text(message);}}
         internal void HideToTray(){
-            if(!isolated&&tray==null){var menu=new ContextMenuStrip();menu.Items.Add(L.Text("打开主界面"),null,delegate{RestoreManager();});menu.Items.Add(L.Text("退出界面，保留连接"),null,delegate{exiting=true;Close();});tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=menu};tray.DoubleClick+=delegate{RestoreManager();};}
-            TrayVisible=true;if(tray!=null){tray.ContextMenuStrip.Items[0].Text=L.Text("打开主界面");tray.ContextMenuStrip.Items[1].Text=L.Text("退出界面，保留连接");tray.Visible=true;}Hide();
+            if(tray==null){var menu=new ContextMenuStrip();menu.Items.Add(L.Text("打开主界面"),null,delegate{RestoreManager();});menu.Items.Add(L.Text("退出程序"),null,delegate{ExitApplication();});tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=menu};tray.DoubleClick+=delegate{RestoreManager();};}
+            TrayVisible=true;if(tray!=null){tray.ContextMenuStrip.Items[0].Text=L.Text("打开主界面");tray.ContextMenuStrip.Items[1].Text=L.Text("退出程序");tray.Visible=!isolated;}Hide();
+        }
+        internal string[] TrayItems {get{return tray==null?new string[0]:tray.ContextMenuStrip.Items.Cast<ToolStripItem>().Select(item=>item.Text).ToArray();}}
+        internal async void ExitApplication(){
+            if(exiting||ExitPending)return;
+            ExitPending=true;Enabled=false;timer.Stop();
+            // Cancel only this manager's observers before saving a newer stop-all
+            // request, so an old connect action cannot re-enable a target later.
+            foreach(var pending in children){pending.Superseded=true;try{if(!pending.Process.HasExited)pending.Process.Kill();}catch{}}
+            bool stopped=false;try{stopped=isolated?ExitBackend():await Task.Run(()=>ExitBackend());}catch{}
+            if(IsDisposed)return;
+            ExitPending=false;
+            if(stopped){exiting=true;Close();return;}
+            Enabled=true;timer.Start();RestoreManager();Error("未能确认全部连接已断开，请稍后重试退出。");
         }
         internal void RestoreManager(){TrayVisible=false;if(tray!=null)tray.Visible=false;Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
         protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}base.WndProc(ref message);if(message.Msg==0x1a&&Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}

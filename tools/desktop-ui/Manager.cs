@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Claude MCP 连接管理")]
 [assembly: System.Reflection.AssemblyProduct("Claude MCP Portable Manager")]
-[assembly: System.Reflection.AssemblyVersion("4.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.1.1.0")]
 
 namespace ClaudeMcp {
     internal sealed class Target {

@@ -43,9 +43,9 @@ namespace ClaudeMcp {
                 Label("窗口行为",298,false);
                 var startup=new CheckBox{Text=L.Text("开机自启"),Checked=settings.autoStart,Bounds=new Rectangle(24,340,480,36),ForeColor=colors.Text,BackColor=colors.Surface};startup.Click+=delegate{Commit(s=>s.autoStart=startup.Checked);};sheet.Controls.Add(startup);
                 Label("登录 Windows 后启动到系统托盘；只恢复原来已启用的连接。",382,true);
-                Label("点击 X 后",458,false);
-                Button("关闭界面，保留连接",500,24,280,delegate{Commit(s=>s.closeToTray=false);},!settings.closeToTray);Button("隐藏到系统托盘",500,316,240,delegate{Commit(s=>s.closeToTray=true);},settings.closeToTray);
-                Label("关闭界面不会停止 MCP；托盘菜单可重新打开或退出界面。",558,true);
+                Label("关闭窗口时",458,false);
+                Button("直接退出程序",500,24,240,delegate{Commit(s=>s.closeToTray=false);},!settings.closeToTray);Button("隐藏到系统托盘",500,276,240,delegate{Commit(s=>s.closeToTray=true);},settings.closeToTray);
+                Label("直接退出会断开全部云电脑；隐藏到系统托盘会保留已连接的云电脑。",558,true);
                 Label("桌面快捷方式",650,false);Label("为当前程序创建 Claude-MCP 桌面快捷方式。",690,true);Button("创建快捷方式",748,24,240,delegate{action("shortcut");},false);
                 sheet.Height=890;
             }else{

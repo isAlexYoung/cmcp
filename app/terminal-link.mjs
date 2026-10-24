@@ -191,6 +191,15 @@ export class TerminalLink extends EventEmitter {
 
   ping() { this.ws.ping(); this.packet({ t: 'ping' }); }
 
+  shutdown() {
+    this.send(JSON.stringify({t: 'stop'}));
+    return new Promise(resolve => {
+      const finish = () => {this.close(1000, 'stop'); resolve();};
+      const timer = setTimeout(finish, 1000);
+      this.queue.finally(() => {clearTimeout(timer); finish();});
+    });
+  }
+
   finish(code, reason) {
     if (this.ended) return;
     this.ended = true;

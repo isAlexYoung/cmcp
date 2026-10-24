@@ -47,10 +47,10 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 40' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 49' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |
@@ -89,7 +89,14 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 160 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 166 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+      - name: Full application exit stops every target
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-exit.test.ps1 -EvidenceDirectory test-results/exit | Set-Content test-results/manager-exit.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/manager-exit.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 8 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete application exit regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |
@@ -149,6 +156,7 @@ jobs:
           name: cmcp-test-results-${{ github.sha }}
           path: test-results/
           if-no-files-found: error
+
       - name: Preserve versioned package
         uses: actions/upload-artifact@v4
         with:
@@ -157,3 +165,32 @@ jobs:
             ${{ runner.temp }}/cmcp-packages/*.zip
             ${{ runner.temp }}/cmcp-packages/*.sha256
           if-no-files-found: error
+
+  linux-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/node-version.txt
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm --prefix app ci
+      - name: Real Unix socket reconnect and request protection
+        run: |
+          mkdir -p test-results
+          python -m unittest discover -s app/tests -p 'test_request_recovery.py' -v 2>&1 | tee test-results/python-recovery.txt
+          test ${PIPESTATUS[0]} -eq 0
+          grep -q 'Ran 16 tests' test-results/python-recovery.txt
+          ! grep -q 'skipped' test-results/python-recovery.txt
+      - name: Full connector relay and Windows-client protocol recovery
+        run: node --test app/tests/recovery-unix.integration.mjs | tee test-results/recovery-integration.tap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cmcp-linux-recovery-${{ github.sha }}
+          path: test-results/

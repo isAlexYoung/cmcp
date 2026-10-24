@@ -24,15 +24,17 @@ import threading
 import time
 import uuid
 
-VERSION = "4.1.0"
+VERSION = "4.1.1"
 MAX_MESSAGE = 8 * 1024 * 1024
 MAX_RESPONSE = 40 * 1024 * 1024
 LINK_DIR = Path.home() / ".local" / "share" / "cloudpc-link"
 LINK_SOCKET = Path(os.environ.get("CLOUDPC_LINK_SOCKET") or LINK_DIR / "link.sock")
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
-OFFLINE_TEXT = ("本地电脑当前未连接，暂时无法执行这个操作。请确认电脑已开机并联网，然后在电脑上双击 "
-                "Start-Claude-MCP.bat 连接（短期连接版在关闭浏览器后会自动断开，需要重新连接）。连接恢复后直接重试即可。"
-                " (The Windows PC is offline. Ask the user to run Start-Claude-MCP.bat on it, then retry.)")
+OFFLINE_TEXT = ("本地电脑未连接或已主动停止，本次请求尚未送达。请在 CMCP 中检查连接状态后重试。"
+                " (The request was not delivered. Check the connection in CMCP.)")
+UNCERTAIN_TEXT = ("操作已发送，但执行结果未确认；它可能仍在执行或已经完成。为避免重复执行，程序没有重发。"
+                  "请先检查实际状态，再决定下一步。"
+                  " (Outcome unknown. The operation may have completed; it was not replayed.)")
 DEFAULT_INSTRUCTIONS = ("These tools operate on the user's physical Windows PC. Use absolute Windows paths such as "
                         "D:\\work\\my-project. Bash and terminals built into this cloud computer run on Linux; use the "
                         "windows_* MCP tools for Windows work.")
@@ -49,6 +51,14 @@ TRANSFER_NAMES = {tool["name"] for tool in TRANSFER_TOOLS}
 
 
 class Offline(Exception):
+    pass
+
+
+class NotSent(Offline):
+    """Proven failure before sendall; safe to wait and try delivery."""
+
+
+class OutcomeUnknown(RuntimeError):
     pass
 
 
@@ -82,8 +92,20 @@ def encoded_json(value):
 class Link:
     """One request per connection to the WebDesktop link socket (same Linux user only)."""
 
-    def __init__(self, path=LINK_SOCKET):
+    def __init__(self, path=LINK_SOCKET, recovery_wait=30, poll=0.5):
         self.path = str(path)
+        self.recovery_wait = recovery_wait
+        self.poll = poll
+
+    def manually_stopped(self):
+        try:
+            marker = Path(self.path).parent / 'manual-stop.json'
+            if marker.stat().st_size > 1024:
+                return False
+            data = json.loads(marker.read_text(encoding='utf-8'))
+            return data.get('schema') == 1 and data.get('stopped') is True
+        except (OSError, ValueError, AttributeError):
+            return False
 
     def _exchange(self, request, timeout):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -92,42 +114,112 @@ class Link:
             try:
                 sock.connect(self.path)
             except (FileNotFoundError, ConnectionRefusedError):
-                raise Offline("云电脑的连接服务未运行") from None
-            sock.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-            chunks = []
-            size = 0
-            while True:
-                data = sock.recv(1048576)
-                if not data:
-                    break
-                chunks.append(data)
-                size += len(data)
-                if size > MAX_RESPONSE:
-                    raise ValueError("MCP response exceeds the 40 MiB limit; read a smaller file")
-                if data.endswith(b"\n"):
-                    break
+                raise NotSent("云电脑的连接服务未运行") from None
+            try:
+                sock.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+                chunks = []
+                size = 0
+                while True:
+                    data = sock.recv(1048576)
+                    if not data:
+                        break
+                    chunks.append(data)
+                    size += len(data)
+                    if size > MAX_RESPONSE:
+                        raise OutcomeUnknown(UNCERTAIN_TEXT)
+                    if data.endswith(b"\n"):
+                        break
+            except OSError:
+                raise OutcomeUnknown(UNCERTAIN_TEXT) from None
         finally:
             sock.close()
         raw = b"".join(chunks)
         if not raw:
-            raise Offline("云电脑的连接服务没有响应")
-        return json.loads(raw.decode("utf-8"))
+            raise OutcomeUnknown(UNCERTAIN_TEXT)
+        try:
+            result = json.loads(raw.decode("utf-8"))
+            if not isinstance(result, dict):
+                raise ValueError()
+            return result
+        except (ValueError, UnicodeError):
+            raise OutcomeUnknown(UNCERTAIN_TEXT) from None
 
     def status(self):
         try:
             return self._exchange({"id": 1, "op": "status"}, 5)
-        except Offline:
+        except (Offline, OutcomeUnknown, OSError):
             return {"ok": True, "connected": False, "pc": None}
 
-    def request(self, message, wait=20):
+    def request(self, message, wait=30):
         data = json.dumps(message, ensure_ascii=False).encode("utf-8")
         if len(data) > MAX_MESSAGE:
             raise ValueError("MCP request exceeds the 8 MiB limit")
-        reply = self._exchange({"id": 1, "op": "call", "msg": message, "wait": int(wait * 1000)}, wait + 200)
-        if not reply.get("ok"):
-            if reply.get("code") == "offline":
-                raise Offline(reply.get("error") or "本地电脑当前未连接")
-            raise RuntimeError(reply.get("error") or "本地电脑返回了错误")
+        request_id = uuid.uuid4().hex
+        budget = max(0, min(wait, self.recovery_wait))
+        gap_deadline = time.monotonic() + budget
+        overall_deadline = time.monotonic() + 200 + budget
+        querying = False
+        while True:
+            if self.manually_stopped():
+                if querying:
+                    raise OutcomeUnknown(UNCERTAIN_TEXT)
+                raise Offline(OFFLINE_TEXT)
+            request = {'id': 1, 'op': 'result' if querying else 'call', 'request_id': request_id}
+            if not querying:
+                request.update(msg=message, wait=int(wait * 1000))
+            try:
+                timeout = min(5, max(0.1, gap_deadline - time.monotonic())) if querying else min(200, max(1, overall_deadline - time.monotonic()))
+                reply = self._exchange(request, timeout)
+            except NotSent:
+                if time.monotonic() >= gap_deadline:
+                    if querying:
+                        raise OutcomeUnknown(UNCERTAIN_TEXT)
+                    raise Offline(OFFLINE_TEXT)
+                time.sleep(min(self.poll, max(0, gap_deadline - time.monotonic())))
+                continue
+            except OutcomeUnknown:
+                # The send may have succeeded: query only, never submit again.
+                if not querying:
+                    gap_deadline = min(overall_deadline, time.monotonic() + budget)
+                querying = True
+                if time.monotonic() >= gap_deadline:
+                    raise OutcomeUnknown(UNCERTAIN_TEXT)
+                time.sleep(min(self.poll, max(0, gap_deadline - time.monotonic())))
+                continue
+            recovery = reply.get('recovery') or {}
+            phase = recovery.get('state') if recovery.get('protocol') == 1 else None
+            if phase in ('missing', 'unavailable', 'conflict', 'invalid'):
+                raise OutcomeUnknown(UNCERTAIN_TEXT)
+            if phase == 'running':
+                querying = True
+                if time.monotonic() >= overall_deadline:
+                    raise OutcomeUnknown(UNCERTAIN_TEXT)
+                gap_deadline = min(overall_deadline, time.monotonic() + budget)
+                time.sleep(self.poll)
+                continue
+            if (reply.get('code') == 'offline' and reply.get('delivery') == 'not_sent') or phase == 'not_sent':
+                if time.monotonic() >= gap_deadline:
+                    if querying:
+                        raise OutcomeUnknown(UNCERTAIN_TEXT)
+                    raise Offline(OFFLINE_TEXT)
+                time.sleep(min(self.poll, max(0, gap_deadline - time.monotonic())))
+                continue
+            if not reply.get('ok'):
+                if reply.get('code') in ('disconnected', 'timeout'):
+                    if not querying:
+                        gap_deadline = min(overall_deadline, time.monotonic() + budget)
+                    querying = True
+                    if time.monotonic() >= gap_deadline:
+                        raise OutcomeUnknown(UNCERTAIN_TEXT)
+                    time.sleep(min(self.poll, max(0, gap_deadline - time.monotonic())))
+                    continue
+                if reply.get('code') in ('offline', 'unsupported') or querying:
+                    # Legacy offline does not prove whether execution started.
+                    raise OutcomeUnknown(UNCERTAIN_TEXT)
+                raise RuntimeError(reply.get('error') or '本地电脑返回了错误')
+            if querying and phase != 'done':
+                raise OutcomeUnknown(UNCERTAIN_TEXT)
+            break
         result = reply.get("msg")
         if "id" not in message:
             return None

@@ -10,12 +10,16 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
   return async (t, {signal, current, status}) => {
     const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null};
     let closed = false;
-    record.stop = async () => {
-      if (closed) return;
+    let stopping;
+    record.stop = () => {
+      if (closed) return stopping;
       closed = true;
-      record.link?.stop();
-      record.agent?.destroy();
-      await record.gateway?.close();
+      stopping = (async () => {
+        await record.link?.stop();
+        record.agent?.destroy();
+        await record.gateway?.close();
+      })();
+      return stopping;
     };
     signal.addEventListener('abort', record.stop, {once:true});
     try {

@@ -9,7 +9,7 @@ using Microsoft.Win32;
 namespace ClaudeMcp {
     internal sealed class AppSettings {
         public string language="zh-CN",theme="";
-        public bool autoStart,closeToTray;
+        public bool autoStart,closeToTray=true;
         internal bool ReadError;
         Dictionary<string,object> extra=new Dictionary<string,object>();
         internal static string PathFor(string state){return Path.Combine(state,"application-preferences.json");}
@@ -24,7 +24,10 @@ namespace ClaudeMcp {
                 if(data.TryGetValue("language",out value)){if(!(value is string)||((string)value!="zh-CN"&&(string)value!="en"))throw new IOException();result.language=(string)value;}
                 if(data.TryGetValue("theme",out value)){if(!(value is string)||((string)value!=""&&(string)value!="light"&&(string)value!="dark"&&(string)value!="system"))throw new IOException();result.theme=(string)value;}
                 if(data.TryGetValue("autoStart",out value)){if(!(value is bool))throw new IOException();result.autoStart=(bool)value;}
-                if(data.TryGetValue("closeToTray",out value)){if(!(value is bool))throw new IOException();result.closeToTray=(bool)value;}
+                if(data.TryGetValue("closeToTray",out value)&&!(value is bool))throw new IOException();
+                // Both old choices kept connections alive. Migrate them to tray;
+                // only an explicit new closeAction may select disconnect-and-exit.
+                if(data.TryGetValue("closeAction",out value)){if(!(value is string)||((string)value!="tray"&&(string)value!="exit"))throw new IOException();result.closeToTray=(string)value=="tray";}
                 result.extra=data;return result;
             }catch{result.ReadError=true;return result;}
         }
@@ -34,7 +37,7 @@ namespace ClaudeMcp {
             using(var mutex=new Mutex(false,"Local\\CMCP-AppSettings-"+DesktopKey(state))){bool owned=false;try{
                 try{owned=mutex.WaitOne(5000);}catch(AbandonedMutexException){owned=true;}if(!owned)throw new IOException("设置正在保存。");
                 var current=Load(state);if(current.ReadError)throw new IOException("设置文件损坏，未覆盖原文件。");
-                var data=current.extra;data["schema"]=1;data["language"]=language;data["theme"]=theme;data["autoStart"]=autoStart;data["closeToTray"]=closeToTray;
+                var data=current.extra;data["schema"]=1;data["language"]=language;data["theme"]=theme;data["autoStart"]=autoStart;data["closeToTray"]=closeToTray;data["closeAction"]=closeToTray?"tray":"exit";
                 string json=new JavaScriptSerializer().Serialize(data);if(Encoding.UTF8.GetByteCount(json)>32768)throw new IOException("设置文件过大。");
                 File.WriteAllText(temp,json,new UTF8Encoding(false));
                 if(File.Exists(file))File.Replace(temp,file,null);else File.Move(temp,file);

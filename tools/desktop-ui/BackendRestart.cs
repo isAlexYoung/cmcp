@@ -6,9 +6,9 @@ using System.Text;
 namespace ClaudeMcp {
     internal static class BackendRestart {
         // Demo, screenshots and self-tests never enter the live launch path.
-        internal static bool Run(string kit) {
+        internal static bool Run(string kit,string entry="manager-restart.ps1") {
             try {
-                string script=Path.Combine(kit,"manager-restart.ps1");
+                string script=Path.Combine(kit,entry);
                 if(!File.Exists(script))return false;
                 string command="& "+Actions.Quote(script);
                 var info=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))) {

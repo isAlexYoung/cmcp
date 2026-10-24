@@ -15,6 +15,7 @@ import tls from 'node:tls';
 import WebSocket from 'ws';
 import { openTerminalLink } from './terminal-link.mjs';
 import { authHeaders, authSocketUrl, requiresSharedSession, requestBuffered } from './desktop-auth.mjs';
+import { RequestRecovery } from './request-recovery.mjs';
 
 const LINK_PATH = '/api/pclink/ws';
 
@@ -202,6 +203,8 @@ export function startLink({ name, target, machine, version, forward, askPassword
   const sleep = ms => delay(ms, undefined, { signal: controller.signal }).catch(() => {});
   let socket = null;
   let lastLog = '';
+  const recovery = new RequestRecovery();
+  let recoveryAuth;
   const say = (state, message, detail = '') => {
     status.set(name, state, message);
     const line = `[${name}] ${state} ${message}${detail ? ' | ' + detail : ''}`;
@@ -209,6 +212,8 @@ export function startLink({ name, target, machine, version, forward, askPassword
   };
 
   const connect = async (url, auth, agent, terminal = false) => {
+    const authKey = auth?.sessionId || JSON.stringify(auth);
+    if (recoveryAuth !== authKey) { recovery.reset(); recoveryAuth = authKey; }
     let ws;
     try {
       const wsUrl = authSocketUrl(url.replace(/^http/, 'ws') + LINK_PATH, auth);
@@ -251,7 +256,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
       });
       ws.on('open', () => {
         opened = Date.now();
-        ws.send(JSON.stringify({ t: 'hello', machine, name: process.env.COMPUTERNAME || 'Windows', version }));
+        ws.send(JSON.stringify({ t: 'hello', machine, name: process.env.COMPUTERNAME || 'Windows', version, recovery: {protocol: 1, epoch: recovery.epoch} }));
         welcomeTimer = setTimeout(() => { if (!welcomed) { log(`[${name}] no welcome within 15s`); ws.terminate(); } }, 15000);
         heartbeat = setInterval(() => {
           if (Date.now() - lastPong > 50000) { log(`[${name}] heartbeat lost`); return ws.terminate(); }
@@ -280,7 +285,9 @@ export function startLink({ name, target, machine, version, forward, askPassword
         if (pending >= 16) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({t:'res',id:m.id,error:'Too many requests'})); return; }
         pending++;
         let reply;
-        try { reply = { t: 'res', id: m.id, msg: await forward(m.msg) }; }
+        try { reply = m.recovery?.protocol === 1
+          ? { ...await recovery.handle(m.recovery.requestId, m.msg, m.recovery.action, forward), id: m.id }
+          : { t: 'res', id: m.id, msg: await forward(m.msg) }; }
         catch (error) { reply = { t: 'res', id: m.id, error: error.message || String(error) }; }
         pending--;
         if (!stopped && ws.readyState === WebSocket.OPEN) {
@@ -449,7 +456,10 @@ export function startLink({ name, target, machine, version, forward, askPassword
     }
   })().catch(error => { if (!stopped) say('error', '连接程序发生意外错误', error.stack || error.message); }).finally(() => agent?.destroy());
 
-  return { done, stop() { stopped = true; controller.abort(); try { socket?.close(1000, 'stop'); } catch {} } };
+  return { done, stop() {
+    stopped = true; controller.abort(); recovery.reset();
+    try { if (socket?.shutdown) return socket.shutdown(); socket?.close(1000, 'stop'); } catch {}
+  } };
 }
 
 async function waitForSettingsChange(target, signal) {
