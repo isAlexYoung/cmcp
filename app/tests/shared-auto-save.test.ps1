@@ -64,4 +64,4 @@ try{
     }finally{$child.Dispose()}
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=@($checks)}|ConvertTo-Json -Depth 4
 }catch{[pscustomobject]@{passed=$checks.Count;failed=1;skipped=0;error=$_.Exception.Message;checks=@($checks)}|ConvertTo-Json -Depth 4;exit 1}
-finally{if($fixture -and [IO.Directory]::Exists($fixture)){foreach($name in @('manager-save.ps1','manager-targets.ps1','manager-events.ps1','common.ps1')){[IO.File]::Delete((Join-Path $fixture $name))};[IO.Directory]::Delete($fixture,$false)};foreach($name in @('cloudpc-targets.json','target-controls.json','link-status.json','error.log')){[IO.File]::Delete((Join-Path $temp $name))};[IO.Directory]::Delete($temp,$false)}
+finally{if($fixture -and [IO.Directory]::Exists($fixture)){foreach($name in @('manager-save.ps1','manager-targets.ps1','manager-events.ps1','common.ps1')){[IO.File]::Delete((Join-Path $fixture $name))};[IO.Directory]::Delete($fixture,$false)};foreach($name in @('cloudpc-targets.json','target-controls.json','control-order.txt','link-status.json','error.log')){[IO.File]::Delete((Join-Path $temp $name))};[IO.Directory]::Delete($temp,$false)}

@@ -39,6 +39,22 @@ try {
     $rejected = $false
     try { $null = Set-TargetConnection 'A' $true -RequestTime ($newer - 100) } catch { $rejected = $true }
     Check ($rejected -and !(Enabled 'A')) 'delayed start cannot override a newer stop'
+    $future = [DateTime]::UtcNow.AddDays(2).Ticks
+    $null = Set-TargetConnection 'A' $false -RequestTime $future
+    $before = [IO.File]::ReadAllText((Join-Path $temp 'target-controls.json'))
+    $pending = New-TargetRequestOrder
+    Check ($pending -gt $future) 'new request survives clock rollback behind a legacy future timestamp'
+    Check ($before -ceq [IO.File]::ReadAllText((Join-Path $temp 'target-controls.json'))) 'reserving an order never changes target enable flags or revisions'
+    $stopOrder = New-TargetRequestOrder
+    $null = Set-TargetConnection 'A' $false -RequestTime $stopOrder
+    $rejected = $false
+    try { $null = Set-TargetConnection 'A' $true -RequestTime $pending } catch { $rejected = $true }
+    Check ($rejected -and !(Enabled 'A')) 'reserved delayed connect still cannot override a later stop after rollback'
+    $a = Set-TargetConnection 'A' $true
+    Check ((Enabled 'A') -and [long]$a.requestTime -gt $stopOrder) 'default script action shares the persisted GUI ordering sequence'
+    $null = Set-TargetConnection '' $false -All
+    Check (!(Enabled 'A') -and !(Enabled 'B')) 'exit and stop-all supersede future timestamps without changing the system clock'
+    $null = Set-TargetConnection 'B' $true
     Save-CloudTarget 'B' 'https://b.invalid' '' 'shared-browser'
     Check ((Enabled 'B') -and !(Enabled 'A')) 'editing saved target leaves both switches unchanged'
     Save-CloudTarget 'new' 'https://new.invalid' '' 'shared-browser'
@@ -108,7 +124,7 @@ try {
     Check ($p.ExitCode -eq 0 -and !(Enabled 'A') -and (Enabled 'B') -and !(Test-Path -LiteralPath $StopFlag)) 'production stop targets A without global shutdown or autostart removal'; $p.Dispose()
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=@($checks)} | ConvertTo-Json -Depth 4
 } finally {
-    foreach ($file in @('cloudpc-targets.json','cloudpc-targets.json.tmp','target-controls.json','target-controls.json.tmp','link-status.json')) { [IO.File]::Delete((Join-Path $temp $file)) }
+    foreach ($file in @('cloudpc-targets.json','cloudpc-targets.json.tmp','target-controls.json','target-controls.json.tmp','control-order.txt','link-status.json')) { [IO.File]::Delete((Join-Path $temp $file)) }
     $fixtureApp = Join-Path $temp 'fixture-app'
     if ([IO.Directory]::Exists($fixtureApp)) { foreach ($file in @('stop.ps1','common.ps1','ui.ps1')) { [IO.File]::Delete((Join-Path $fixtureApp $file)) } }
     if ([IO.Directory]::Exists($fixtureApp)) { [IO.Directory]::Delete($fixtureApp,$false) }

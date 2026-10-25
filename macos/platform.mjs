@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '4.1.1';
+export const VERSION = '4.1.2';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
 const requestedState = process.env.CMCP_STATE_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'ClaudeMcpMac');
 // Foundation may abbreviate /private/var back to the system-owned /var alias.

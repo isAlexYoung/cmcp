@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.1.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("4.1.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.1.2.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -140,20 +140,22 @@ namespace CMCP {
                 default: throw new ArgumentException("Unknown action");
             }
         }
-        internal static string Command(string kit, string action, string name, string initialUrl = "") {
+        internal static string Command(string kit, string action, string name, string initialUrl = "",long requestTime=0) {
             string command = "& " + Quote(Path.Combine(kit, Script(action)));
             if (action != "add") {
                 if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Select a cloud computer first");
                 command += " -TargetName " + Quote(name);
-                if (action == "connect" || action == "stop") command += " -RequestTime " + DateTime.UtcNow.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (action == "connect" || action == "stop") command += " -RequestTime " + requestTime.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             if (action == "edit" && initialUrl.Length > 0) command += " -InitialUrl " + Quote(initialUrl);
             return command;
         }
-        internal static Process Start(string kit, string action, string name, string initialUrl = "") {
+        internal static Process Start(string kit, string action, string name, string initialUrl = "",string stateDirectory=null) {
             string script = Path.Combine(kit, Script(action));
             if (!File.Exists(script)) throw new FileNotFoundException("缺少文件，请完整解压便携包。", script);
-            var command = Command(kit, action, name, initialUrl);
+            if(action!="add"&&String.IsNullOrWhiteSpace(name))throw new ArgumentException("Select a cloud computer first");
+            long order=action=="connect"||action=="stop"?ControlRequestOrder.Next(stateDirectory??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp")):0;
+            var command = Command(kit, action, name, initialUrl,order);
             string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
             return Process.Start(new ProcessStartInfo(ps, "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(command))) {
                 UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = kit, WindowStyle = ProcessWindowStyle.Hidden
@@ -256,7 +258,7 @@ namespace CMCP {
                 }
                 foreach (string action in new string[] { "connect", "stop" }) {
                     File.WriteAllText(Path.Combine(fixtureKit, Actions.Script(action)), "param([string]$TargetName,[long]$RequestTime)\r\nif($RequestTime -le 0){exit 1}\r\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'argument.txt'),$TargetName)\r\n", Encoding.UTF8);
-                    using (var child = Actions.Start(fixtureKit, action, literal)) {
+                    using (var child = Actions.Start(fixtureKit, action, literal,"",fixtureKit)) {
                         if (!child.WaitForExit(12000)) { child.Kill(); throw new Exception("Local action fixture timed out"); }
                         check(child.ExitCode == 0 && File.ReadAllText(fixtureOutput) == literal, "real " + action + " dispatch preserves selected target literally");
                     }
@@ -268,6 +270,7 @@ namespace CMCP {
                 BackendRestart.Test(temp,check);
                 SettingsTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
+                ControlOrderTests.Run(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }
             finally {
@@ -276,7 +279,7 @@ namespace CMCP {
                 try {
                     foreach (var file in new string[] { "cloudpc-targets.json", "link-status.json" }) File.Delete(Path.Combine(temp, file));
                     string fixtureKit = Path.Combine(temp, "中文 folder's");
-                    foreach (var file in new string[] { "manager-open.ps1", "argument.txt", "start.ps1", "stop.ps1" }) File.Delete(Path.Combine(fixtureKit, file));
+                    foreach (var file in new string[] { "manager-open.ps1", "argument.txt", "start.ps1", "stop.ps1", "control-order.txt" }) File.Delete(Path.Combine(fixtureKit, file));
                     if (Directory.Exists(fixtureKit)) Directory.Delete(fixtureKit, false);
                     Directory.Delete(temp, false);
                 } catch { }

@@ -58,7 +58,7 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/target-controls.test.ps1 | Set-Content test-results/powershell.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/powershell.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 20 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete PowerShell regression' }
+          if ($r.passed -ne 25 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete PowerShell regression' }
       - name: Offline platform update and rollback boundaries
         shell: pwsh
         run: |
@@ -97,7 +97,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 174 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 181 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Full application exit stops every target
         shell: pwsh
         run: |

@@ -51,9 +51,29 @@ function Assert-TargetControlSupport {
     }
 }
 
-function Set-TargetConnection([string]$Name, [bool]$Enabled, [switch]$All, [long]$RequestTime = 0) {
-    if (!$RequestTime) { $RequestTime = [DateTime]::UtcNow.Ticks }
+function New-TargetRequestOrder {
     Invoke-TargetStateLock {
+        $file = Join-Path $script:StateDir 'control-order.txt'
+        $latest = [DateTime]::UtcNow.Ticks
+        if (Test-Path -LiteralPath $file) {
+            if ((Get-Item -LiteralPath $file).Length -gt 32) { throw '连接操作顺序记录损坏。' }
+            $text = [IO.File]::ReadAllText($file)
+            if ($text -notmatch '^\d{1,19}$') { throw '连接操作顺序记录损坏。' }
+            $latest = [Math]::Max($latest, [long]$text)
+        }
+        foreach ($entry in @((Get-TargetControls).targets)) {
+            if ($entry.requestTime) { $latest = [Math]::Max($latest, [long]$entry.requestTime) }
+        }
+        if ($latest -eq [long]::MaxValue) { throw '连接操作顺序已超出范围。' }
+        $next = $latest + [long]1
+        Write-TargetStateFile $file ([string]$next)
+        return $next
+    }
+}
+
+function Set-TargetConnection([string]$Name, [bool]$Enabled, [switch]$All, [long]$RequestTime = 0) {
+    Invoke-TargetStateLock {
+        if (!$RequestTime) { $RequestTime = New-TargetRequestOrder }
         $targets = @(Get-CloudTargets)
         if ($targets.Count -gt 100) { throw '最多支持 100 个保存的云电脑。' }
         if (!$All -and !@($targets | Where-Object { $_.name -ceq $Name }).Count) { throw '所选云电脑已不存在，请刷新列表。' }

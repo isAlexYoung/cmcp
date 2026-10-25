@@ -54,6 +54,6 @@ try {
     [pscustomobject]@{passed=$checks.Count;failed=1;skipped=0;error=$_.Exception.Message;checks=@($checks)} | ConvertTo-Json -Depth 4
     exit 1
 } finally {
-    foreach ($file in @('cloudpc-targets.json','link-status.json','target-controls.json')) { if ([IO.File]::Exists((Join-Path $temp $file))) { [IO.File]::Delete((Join-Path $temp $file)) } }
+    foreach ($file in @('cloudpc-targets.json','link-status.json','target-controls.json','control-order.txt')) { if ([IO.File]::Exists((Join-Path $temp $file))) { [IO.File]::Delete((Join-Path $temp $file)) } }
     if ([IO.Directory]::Exists($temp)) { [IO.Directory]::Delete($temp,$false) }
 }

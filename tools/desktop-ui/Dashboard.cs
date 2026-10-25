@@ -135,7 +135,7 @@ namespace CMCP {
             if((action=="edit"||action=="remove")&&IsBusy(name)){Error("此卡片正在处理操作，请完成后重试。");return;}
             if((action=="connect"||action=="stop")&&children.Any(p=>p.Name==name&&(p.Action=="edit"||p.Action=="remove"))){Error("此卡片正在修改，请完成后重试。");return;}
             try{
-                var worker=new InlineWorker(kit,action,name,initialUrl,"");
+                var worker=new InlineWorker(kit,action,name,initialUrl,"",false,stateDirectory);
                 if(action=="stop")foreach(var old in children.Where(p=>p.Name==name&&p.Action=="connect"))old.Superseded=true;
                 children.Add(new PendingAction{Process=worker.Process,Worker=worker,Name=name,Action=action});
                 if(card!=null){card.SetExpanded(true,false);progress[name]=action=="stop"?"正在取消此台连接…":action=="open"?"正在打开此台云电脑…":"正在准备连接…";}

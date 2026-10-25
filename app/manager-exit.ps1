@@ -4,7 +4,7 @@
 try {
     Initialize-StateDir
     Invoke-LinkLifecycleLock {
-        $null = Set-TargetConnection '' $false -All -RequestTime ([DateTime]::UtcNow.Ticks)
+        $null = Set-TargetConnection '' $false -All
         Stop-LinkService
         if (@(Get-ServiceProcesses).Count) { throw 'Backend still running' }
         if (Test-Path -LiteralPath $StatusFile) { Remove-Item -LiteralPath $StatusFile -Force }
