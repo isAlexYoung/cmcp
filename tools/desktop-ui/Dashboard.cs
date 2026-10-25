@@ -22,6 +22,7 @@ namespace CMCP {
         internal SettingsPage Settings;
         internal AppSettings Options;
         readonly bool isolated;
+        readonly Func<Point> trayPosition;
         NotifyIcon tray;
         internal TrayMenu TrayCommands;
         internal bool TrayVisible;
@@ -42,7 +43,8 @@ namespace CMCP {
         List<Target> targets = new List<Target>();
         string selected = "", notice = "";
         bool arranging, previewInitialized;
-        internal Manager(bool demo, string stateOverride = null, string kitOverride = null) {
+        internal Manager(bool demo, string stateOverride = null, string kitOverride = null,Func<Point> trayPositionOverride=null) {
+            trayPosition=trayPositionOverride;
             if (stateOverride != null) stateDirectory = stateOverride;
             if (kitOverride != null) kit = kitOverride;
             preview = demo;isolated=demo||stateOverride!=null; Preferences = demo ? new UiPreferences() : UiPreferences.Load(stateDirectory);
@@ -111,7 +113,7 @@ namespace CMCP {
             if(reflow){Arrange();content.Invalidate(true);}
             if(Settings!=null)Settings.SetUpdateProgress(value);
         }
-        void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.Menu,Visible=!isolated};tray.DoubleClick+=delegate{RestoreManager();};TrayVisible=true;SyncTray();}
+        void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction,position:trayPosition);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.ActivationMenu,Visible=!isolated};tray.DoubleClick+=delegate{RestoreManager();};TrayVisible=true;SyncTray();}
         internal void HideToTray(){EnsureTray();SyncTray();Hide();}
         internal string[] TrayItems {get{return TrayCommands==null?new string[0]:TrayCommands.Menu.Items.OfType<ToolStripMenuItem>().Select(item=>item.Text).ToArray();}}
         TrayTarget TrayValue(TargetCard card){bool blocked=updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login"}.Contains(card.Target.State);return new TrayTarget{Name=card.Target.Name,Label=card.Preference.label.Length>0?card.Preference.label:new Uri(card.Target.Url).Host,State=card.BusyStop?"正在停止":card.BusyConnect&&card.Target.State=="stopped"?"连接中":LocalState.Caption(card.Target.State),CanConnect=!blocked&&!card.BusyStop&&!active,CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Target.State!="stopped"),CanRename=!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name)};}

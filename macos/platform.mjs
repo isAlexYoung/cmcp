@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '4.3.1';
+export const VERSION = '4.3.2';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
 export const LEGACY_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'ClaudeMcpMac');
 const bundleMarker=KIT.lastIndexOf('.app'+path.sep+'Contents'+path.sep);

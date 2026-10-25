@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace CMCP {
@@ -21,6 +22,7 @@ namespace CMCP {
         }
         internal static void Run(string directory,Action<bool,string> check){
             Positions(check);
+            MixedDisplays(check);
             using(var form=new Manager(true)){
                 form.Show();Application.DoEvents();var menu=form.TrayCommands;
                 check(form.TrayVisible&&form.Visible&&menu.Targets.Count==2,"launch keeps a resident tray icon alongside the visible main window");
@@ -92,7 +94,7 @@ namespace CMCP {
                 tray.Menu.Close();var second=new Point(area.Left+40,area.Top+40);tray.ShowAt(second);Application.DoEvents();
                 check(refreshes==2&&tray.Menu.Location==TrayMenu.Position(second,tray.Menu.Size,area),"reopening tray menu captures the new click instead of reusing the previous position");
                 tray.Menu.Close();owner.Hide();Application.DoEvents();click=point;
-                using(var notification=new NotifyIcon{Icon=SystemIcons.Application,ContextMenuStrip=tray.Menu,Visible=true}){
+                using(var notification=new NotifyIcon{Icon=SystemIcons.Application,ContextMenuStrip=tray.ActivationMenu,Visible=true}){
                     typeof(NotifyIcon).GetMethod("ShowContextMenu",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(notification,null);Application.DoEvents();
                     check(!owner.Visible&&tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"hidden main window preserves notification popup placement: owner="+owner.Visible+", menu="+tray.Menu.Visible+", actual="+tray.Menu.Location+", expected="+TrayMenu.Position(point,tray.Menu.Size,area));
                     tray.Menu.Close();
@@ -102,6 +104,45 @@ namespace CMCP {
                     tray.Menu.Close();
                 }
             }
+        }
+        [StructLayout(LayoutKind.Sequential)]struct Rect {public int L,T,R,B;internal Rectangle Value{get{return Rectangle.FromLTRB(L,T,R,B);}}}
+        [StructLayout(LayoutKind.Sequential)]struct Monitor {public int Size;public Rect Bounds,Work;public int Flags;}
+        delegate bool MonitorCallback(IntPtr monitor,IntPtr dc,ref Rect rect,IntPtr data);
+        [DllImport("user32.dll")]static extern bool EnumDisplayMonitors(IntPtr dc,IntPtr rect,MonitorCallback callback,IntPtr data);
+        [DllImport("user32.dll")]static extern bool GetMonitorInfo(IntPtr monitor,ref Monitor info);
+        [DllImport("user32.dll")]static extern bool PostMessage(IntPtr window,int message,IntPtr w,IntPtr l);
+        [DllImport("user32.dll")]static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+        [DllImport("user32.dll")]static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
+        static bool PerMonitor(Control control){return TrayDisplay.Context==IntPtr.Zero||GetAwarenessFromDpiAwarenessContext(GetWindowDpiAwarenessContext(control.Handle))==2;}
+        static void MixedDisplays(Action<bool,string> check){
+            var areas=new System.Collections.Generic.List<Rectangle>();
+            using(var scope=new TrayDisplay.Scope())EnumDisplayMonitors(IntPtr.Zero,IntPtr.Zero,delegate(IntPtr monitor,IntPtr dc,ref Rect rect,IntPtr data){var info=new Monitor{Size=Marshal.SizeOf(typeof(Monitor))};if(GetMonitorInfo(monitor,ref info)){if((info.Flags&1)!=0)areas.Insert(0,info.Work.Value);else areas.Add(info.Work.Value);}return true;},IntPtr.Zero);
+            if(areas.Count==0)areas.Add(Screen.PrimaryScreen.WorkingArea);
+            Point click=new Point(areas[0].Right-180,areas[0].Bottom-130);bool positioned=true,independent=true,preserved=true,submenu=true;string failures="";
+            IntPtr original=TrayDisplay.Context;
+            using(var form=new Manager(true,trayPositionOverride:()=>click)){
+                form.Show();Application.DoEvents();
+                var notification=(NotifyIcon)typeof(Manager).GetField("tray",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(form);notification.Visible=true;
+                var window=(NativeWindow)typeof(NotifyIcon).GetField("window",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(notification);
+                foreach(var area in areas)foreach(int state in new[]{0,1,2}){
+                    form.RestoreManager();TrayDisplay.Move(form,new Point(area.Left+100,area.Top+70));
+                    if(state==1)form.WindowState=FormWindowState.Minimized;else if(state==2)form.HideToTray();Application.DoEvents();
+                    var expectedState=form.WindowState;bool expectedVisible=form.Visible;
+                    PostMessage(window.Handle,0x800,IntPtr.Zero,new IntPtr(0x205));Application.DoEvents();Application.DoEvents();
+                    var tray=form.TrayCommands;Rectangle bounds=TrayDisplay.Bounds(tray.Menu);
+                    positioned&=tray.Menu.Visible&&bounds.Location==TrayMenu.Position(click,bounds.Size,TrayDisplay.WorkingArea(click));
+                    var owner=tray.Menu.SourceControl;independent&=owner!=null&&owner!=form&&!owner.Visible&&!tray.ActivationMenu.Visible&&PerMonitor(owner)&&PerMonitor(tray.Menu);
+                    bool valid=form.Visible==expectedVisible&&form.WindowState==expectedState&&(expectedState==FormWindowState.Minimized||form.LayoutFits());preserved&=valid;
+                    if(!valid)failures+=" state="+state+" area="+area+" visible="+form.Visible+" expectedVisible="+expectedVisible+" window="+form.WindowState+" expectedWindow="+expectedState+" fits="+form.LayoutFits();
+                    var row=tray.Targets.Values.First();using(var scope=new TrayDisplay.Scope())row.ShowDropDown();Application.DoEvents();Rectangle child=TrayDisplay.Bounds(row.DropDown);
+                    submenu&=row.DropDown.Visible&&PerMonitor(row.DropDown)&&Math.Abs(child.Top-bounds.Top)<bounds.Height&&(Math.Abs(child.Left-bounds.Right)<8||Math.Abs(child.Right-bounds.Left)<8);
+                    tray.Menu.Close();Application.DoEvents();
+                }
+            }
+            check(positioned,"real queued tray notifications anchor physical pixels with the main window shown minimized or hidden on every attached monitor");
+            check(independent,"notification activation never shows its temporary menu and the popup uses an independent invisible owner");
+            check(preserved&&TrayDisplay.Context==original,"tray activation preserves main window visibility layout and original DPI awareness: "+failures+" context="+TrayDisplay.Context+" original="+original);
+            check(submenu,"native cloud submenus stay adjacent across mixed display scaling and main window states");
         }
     }
 }
