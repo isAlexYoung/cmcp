@@ -25,7 +25,7 @@ namespace CMCP {
             open.Click+=delegate{restore();};exit.Click+=delegate{quit();};
             Menu.Items.AddRange(new ToolStripItem[]{open,first,empty,last,exit});
             Menu.Opening+=delegate{if(!anchor.HasValue)anchor=pointer();refresh();ApplySystemTheme();};
-            Menu.Opened+=delegate{Reposition();};Menu.SizeChanged+=delegate{if(Menu.Visible)Reposition();};Menu.Closed+=delegate{anchor=null;};ApplySystemTheme();
+            Menu.Opened+=delegate{Reposition();};Menu.SizeChanged+=delegate{if(Menu.Visible)Reposition();};Menu.LocationChanged+=delegate{if(Menu.Visible)Reposition();};Menu.Closed+=delegate{anchor=null;};ApplySystemTheme();
         }
         internal void ShowAt(Point screenPoint){
             if(Menu.Visible)Menu.Close();

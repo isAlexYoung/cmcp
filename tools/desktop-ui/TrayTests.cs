@@ -85,6 +85,8 @@ namespace CMCP {
                 check(refreshes==1&&tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"first tray popup anchors after its opening refresh instead of using an uninitialized screen position");
                 dark=true;tray.Sync(new[]{new TrayTarget{Name="a",Label="A much longer cloud remark after connection refresh",State="等待网络恢复",CanDisconnect=true,CanRename=true}});Application.DoEvents();
                 check(tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"live cloud and system theme changes preserve the original tray click anchor");
+                tray.Menu.Location=new Point(area.Left+32,area.Top+28);Application.DoEvents();
+                check(tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"late native relocation cannot leave the visible tray menu at the screen origin");
                 var row=tray.Targets["a"];row.ShowDropDown();Application.DoEvents();
                 check(row.DropDown.Visible&&Screen.FromRectangle(row.DropDown.Bounds).WorkingArea.IntersectsWith(row.DropDown.Bounds)&&Math.Abs(row.DropDown.Top-tray.Menu.Top)<tray.Menu.Height,"cloud submenu remains beside its anchored parent menu");
                 tray.Menu.Close();var second=new Point(area.Left+40,area.Top+40);tray.ShowAt(second);Application.DoEvents();
