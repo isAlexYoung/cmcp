@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.1.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.1.2.0")]
+[assembly: System.Reflection.AssemblyVersion("4.1.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.1.3.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -185,7 +185,7 @@ namespace CMCP {
                     if(page=="editor")form.OpenEditor(first.Target.Name);
                     else if(page=="add")form.OpenAdd();
                     else if(page=="settings"||page=="settings-en"||page=="about"){if(page=="settings-en"){var options=form.Options.Copy();options.language="en";form.ChangeSettings(options);}form.OpenSettings();if(page=="about")form.Settings.ShowAbout();}
-                    else if(page.StartsWith("update")){var update=new UpdateProgress{Stage=page=="update-failed"?"failed":"download",Code="network",Received=14680064,Total=41037076};form.SetUpdateProgress(update);if(page=="update-about"){form.OpenSettings();form.Settings.ShowAbout();form.Settings.SetUpdateProgress(update);}}
+                    else if(page.StartsWith("update")){var update=new UpdateProgress{Stage=page=="update-failed"?"failed":"download",Code="network",Received=14680064,Total=41037076};if(page=="update-expanded")first.SetExpanded(true,false);form.SetUpdateProgress(update);if(page=="update-about"){form.OpenSettings();form.Settings.ShowAbout();form.Settings.SetUpdateProgress(update);}}
                     else if(page=="progress"){first.BusyConnect=true;first.Target.State="waiting-login";first.Target.Detail="[4/5] 等待网页登录 · 请在打开的云电脑网页中输入密码，可随时停止。";first.RefreshTarget(first.Target);first.SetExpanded(true,false);first.TestHover(true);}
                     else {first.SetExpanded(page=="expanded",false);foreach(var card in form.Cards.Values)card.ClearPointer();if(page!="idle")first.TestHover(true);}
                     Application.DoEvents();

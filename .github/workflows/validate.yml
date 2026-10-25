@@ -97,7 +97,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 181 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 189 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Full application exit stops every target
         shell: pwsh
         run: |
@@ -152,6 +152,16 @@ jobs:
           }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build-manager.ps1 -PreviewOnly
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Capture expanded cards during update
+        shell: pwsh
+        run: |
+          foreach ($theme in @('light','dark')) {
+            $imageFile = Join-Path $PWD ('test-results/update-expanded-' + $theme + '.png')
+            $arguments = '--preview "' + $imageFile + '" 882 605 ' + $theme + ' update-expanded'
+            $p = Start-Process -FilePath (Join-Path $PWD 'CMCP.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
+            if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Expanded update capture timed out' }
+            if ($p.ExitCode -ne 0 -or !(Test-Path -LiteralPath $imageFile)) { throw 'Expanded update capture failed' }
+          }
       - name: Build portable package
         shell: pwsh
         run: |

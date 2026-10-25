@@ -16,7 +16,7 @@ namespace CMCP {
         readonly DashboardToolbar toolbar = new DashboardToolbar();
         internal readonly CardList list = new CardList();
         readonly Label status = new Label(), count = new Label(), empty = new Label();
-        readonly Panel content = new Panel();
+        readonly ResizePanel content = new ResizePanel();
         internal readonly UpdateProgressView UpdateView=new UpdateProgressView{Dock=DockStyle.Top,Visible=false};
         internal TargetEditorPage Editor;
         internal SettingsPage Settings;
@@ -101,7 +101,15 @@ namespace CMCP {
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
         void RunUpdate(){updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
         void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.UpdateTip(message);if(Settings!=null)Settings.SetUpdateStatus(message);else if(updateNotice){notice=message;status.Text=L.Text(message);}}
-        internal void SetUpdateProgress(UpdateProgress value){if(IsDisposed)return;UpdateView.Set(value);UpdateView.Apply(colors);if(Settings!=null)Settings.SetUpdateProgress(value);}
+        internal void SetUpdateProgress(UpdateProgress value){
+            if(IsDisposed)return;
+            bool reflow=(value!=null&&value.Visible)!=(UpdateView.Value!=null&&UpdateView.Value.Visible);
+            if(reflow)content.SuspendLayout();
+            try{UpdateView.Set(value);UpdateView.Apply(colors);}
+            finally{if(reflow)content.ResumeLayout(true);}
+            if(reflow){Arrange();content.Invalidate(true);}
+            if(Settings!=null)Settings.SetUpdateProgress(value);
+        }
         internal void HideToTray(){
             if(tray==null){var menu=new ContextMenuStrip();menu.Items.Add(L.Text("打开主界面"),null,delegate{RestoreManager();});menu.Items.Add(L.Text("退出程序"),null,delegate{ExitApplication();});tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=menu};tray.DoubleClick+=delegate{RestoreManager();};}
             TrayVisible=true;if(tray!=null){tray.ContextMenuStrip.Items[0].Text=L.Text("打开主界面");tray.ContextMenuStrip.Items[1].Text=L.Text("退出程序");tray.Visible=!isolated;}Hide();
