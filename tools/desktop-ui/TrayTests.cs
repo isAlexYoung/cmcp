@@ -9,7 +9,7 @@ namespace CMCP {
         internal static void Capture(string path,bool dark){
             L.Set("zh-CN");using(var host=new Form{ClientSize=new Size(680,320)})using(var menu=new TrayMenu(delegate{},delegate{},delegate{},delegate{},()=>dark)){
                 host.Show();menu.Sync(new[]{new TrayTarget{Name="A",Label="工作电脑",State="已连接",CanDisconnect=true,CanRename=true},new TrayTarget{Name="B",Label="desktop.example.com",State="已停止",CanConnect=true,CanRename=true}});
-                menu.Menu.Show(host,new Point(30,50));var item=menu.Targets["A"];item.Select();item.ShowDropDown();Application.DoEvents();
+                menu.ShowAt(host.PointToScreen(new Point(310,180)));var item=menu.Targets["A"];item.Select();item.ShowDropDown();Application.DoEvents();
                 Rectangle area=Rectangle.Union(menu.Menu.Bounds,item.DropDown.Bounds);using(var bitmap=new Bitmap(area.Width+8,area.Height+8)){
                     using(var graphics=Graphics.FromImage(bitmap))graphics.Clear(Palette.Create(dark).Page);
                     menu.Menu.DrawToBitmap(bitmap,new Rectangle(menu.Menu.Left-area.Left+4,menu.Menu.Top-area.Top+4,menu.Menu.Width,menu.Menu.Height));
@@ -20,6 +20,7 @@ namespace CMCP {
             }
         }
         internal static void Run(string directory,Action<bool,string> check){
+            Positions(check);
             using(var form=new Manager(true)){
                 form.Show();Application.DoEvents();var menu=form.TrayCommands;
                 check(form.TrayVisible&&form.Visible&&menu.Targets.Count==2,"launch keeps a resident tray icon alongside the visible main window");
@@ -63,6 +64,42 @@ namespace CMCP {
                 File.WriteAllText(AppSettings.PathFor(state),"{\"schema\":1,\"theme\":\"\"}");check(AppSettings.Load(state).theme=="system","legacy unspecified theme migrates to following the system");
                 File.WriteAllText(AppSettings.PathFor(state),"{\"schema\":1,\"theme\":\"dark\"}");check(AppSettings.Load(state).theme=="dark","explicit user theme choice is retained across the tray update");
             }finally{File.Delete(AppSettings.PathFor(state));Directory.Delete(state,false);}
+        }
+        static void Positions(Action<bool,string> check){
+            bool fits=true;
+            foreach(var area in new[]{new Rectangle(0,0,1920,1040),new Rectangle(-2560,0,2560,1400),new Rectangle(0,-1440,2560,1400),new Rectangle(40,32,1280,900)})
+                foreach(int scale in new[]{100,125,150,200})
+                    foreach(var point in new[]{new Point(area.Left+3,area.Top+3),new Point(area.Right-3,area.Top+3),new Point(area.Left+3,area.Bottom-3),new Point(area.Right-3,area.Bottom-3)}){
+                        var size=new Size(200*scale/100,120*scale/100);var bounds=new Rectangle(TrayMenu.Position(point,size,area),size);fits&=area.Contains(bounds);
+                    }
+            check(fits,"tray placement stays inside each monitor work area at every corner and common display scale");
+            check(TrayMenu.Position(new Point(-50,1000),new Size(240,120),new Rectangle(-1920,0,1920,1080))==new Point(-290,880),"tray placement preserves negative monitor coordinates without jumping to the primary display");
+            check(TrayMenu.Position(new Point(10,45),new Size(240,120),new Rectangle(0,40,1920,1040))==new Point(0,40),"tray placement respects reserved taskbar space at the top edge");
+            bool dark=false;TrayMenu tray=null;int refreshes=0;Point click=Point.Empty;
+            Action refresh=delegate{refreshes++;tray.Sync(new[]{new TrayTarget{Name="a",Label="Refreshed cloud",State="已停止",CanConnect=true,CanRename=true}});};
+            using(var owner=new Form{ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Bounds=new Rectangle(70,70,320,200)})
+            using(tray=new TrayMenu(refresh,delegate{},delegate{},delegate{},()=>dark,()=>click)){
+                owner.Show();Application.DoEvents();
+                var area=Screen.FromControl(owner).WorkingArea;var point=new Point(area.Right-80,area.Bottom-70);
+                tray.ShowAt(point);Application.DoEvents();
+                check(refreshes==1&&tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"first tray popup anchors after its opening refresh instead of using an uninitialized screen position");
+                dark=true;tray.Sync(new[]{new TrayTarget{Name="a",Label="A much longer cloud remark after connection refresh",State="等待网络恢复",CanDisconnect=true,CanRename=true}});Application.DoEvents();
+                check(tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"live cloud and system theme changes preserve the original tray click anchor");
+                var row=tray.Targets["a"];row.ShowDropDown();Application.DoEvents();
+                check(row.DropDown.Visible&&Screen.FromRectangle(row.DropDown.Bounds).WorkingArea.IntersectsWith(row.DropDown.Bounds)&&Math.Abs(row.DropDown.Top-tray.Menu.Top)<tray.Menu.Height,"cloud submenu remains beside its anchored parent menu");
+                tray.Menu.Close();var second=new Point(area.Left+40,area.Top+40);tray.ShowAt(second);Application.DoEvents();
+                check(refreshes==2&&tray.Menu.Location==TrayMenu.Position(second,tray.Menu.Size,area),"reopening tray menu captures the new click instead of reusing the previous position");
+                tray.Menu.Close();owner.Hide();Application.DoEvents();click=point;
+                using(var notification=new NotifyIcon{Icon=SystemIcons.Application,ContextMenuStrip=tray.Menu,Visible=true}){
+                    typeof(NotifyIcon).GetMethod("ShowContextMenu",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(notification,null);Application.DoEvents();
+                    check(!owner.Visible&&tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(point,tray.Menu.Size,area),"hidden main window preserves notification popup placement: owner="+owner.Visible+", menu="+tray.Menu.Visible+", actual="+tray.Menu.Location+", expected="+TrayMenu.Position(point,tray.Menu.Size,area));
+                    tray.Menu.Close();
+                    click=new Point(area.Right-180,area.Bottom-110);
+                    typeof(NotifyIcon).GetMethod("ShowContextMenu",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(notification,null);Application.DoEvents();
+                    check(tray.Menu.Visible&&tray.Menu.Location==TrayMenu.Position(click,tray.Menu.Size,area),"native notification menu entry reopens at the captured screen click instead of a stale origin");
+                    tray.Menu.Close();
+                }
+            }
         }
     }
 }

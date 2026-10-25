@@ -16,12 +16,35 @@ namespace CMCP {
         readonly ToolStripSeparator first=new ToolStripSeparator(),last=new ToolStripSeparator();
         readonly Action<string,string> invoke;
         readonly Func<bool> systemTheme;
+        readonly Func<Point> pointer;
+        Point? anchor;
+        bool positioning;
         internal Palette Colors;
-        internal TrayMenu(Action refresh,Action restore,Action quit,Action<string,string> command,Func<bool> theme=null){
-            invoke=command;systemTheme=theme??(()=>AppSettings.SystemDark(true,false));
+        internal TrayMenu(Action refresh,Action restore,Action quit,Action<string,string> command,Func<bool> theme=null,Func<Point> position=null){
+            invoke=command;systemTheme=theme??(()=>AppSettings.SystemDark(true,false));pointer=position??(()=>Cursor.Position);
             open.Click+=delegate{restore();};exit.Click+=delegate{quit();};
             Menu.Items.AddRange(new ToolStripItem[]{open,first,empty,last,exit});
-            Menu.Opening+=delegate{refresh();ApplySystemTheme();};ApplySystemTheme();
+            Menu.Opening+=delegate{if(!anchor.HasValue)anchor=pointer();refresh();ApplySystemTheme();};
+            Menu.Opened+=delegate{Reposition();};Menu.SizeChanged+=delegate{if(Menu.Visible)Reposition();};Menu.Closed+=delegate{anchor=null;};ApplySystemTheme();
+        }
+        internal void ShowAt(Point screenPoint){
+            if(Menu.Visible)Menu.Close();
+            anchor=screenPoint;
+            try{
+                Menu.Show(screenPoint,ToolStripDropDownDirection.AboveLeft);
+                Reposition();
+            }catch{anchor=null;throw;}
+        }
+        internal static Point Position(Point point,Size size,Rectangle area){
+            int x=Math.Max(area.Left,Math.Min(point.X-size.Width,area.Right-size.Width));
+            int y=Math.Max(area.Top,Math.Min(point.Y-size.Height,area.Bottom-size.Height));
+            return new Point(x,y);
+        }
+        void Reposition(){
+            if(!anchor.HasValue||positioning||Menu.IsDisposed)return;
+            positioning=true;
+            try{Point point=anchor.Value;Menu.Location=Position(point,Menu.Size,Screen.FromPoint(point).WorkingArea);}
+            finally{positioning=false;}
         }
         ToolStripMenuItem Create(string id){
             var item=new ToolStripMenuItem{Name=id};

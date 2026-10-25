@@ -137,8 +137,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             self.updateTrayMenu(); completion?()
         }
     }
-    func menuWillOpen(_ menu: NSMenu) { trayTracking = true; refreshTray() }
-    func menuDidClose(_ menu: NSMenu) { trayTracking = false; updateTrayMenu() }
+    func menuNeedsUpdate(_ menu: NSMenu) { if menu === item.menu && !trayTracking { updateTrayMenu() } }
+    func menuWillOpen(_ menu: NSMenu) { if menu === item.menu { trayTracking = true; refreshTray() } }
+    func menuDidClose(_ menu: NSMenu) { if menu === item.menu { trayTracking = false; updateTrayMenu() } }
     func trayAction(_ sender: NSMenuItem, route: String) {
         guard let id = sender.representedObject as? String, let row = trayRows[id], let sub = row.submenu else { return }
         let index = route == "start" ? 0 : 1; guard sub.items[index].isEnabled else { return }
@@ -370,6 +371,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func runTests() {
         guard item.isVisible, trayTargets.count == 2, trayRows.count == 2 else { finishTests(error: "Resident tray cloud list missing"); return }
         testResults.append("resident menu bar icon lists every cloud")
+        guard let nativeMenu = item.menu, let button = item.button, button.window != nil, nativeMenu.delegate === self else { finishTests(error: "Status menu must remain attached to the native menu bar button"); return }
+        menuNeedsUpdate(nativeMenu)
+        guard item.menu === nativeMenu, !trayTracking else { finishTests(error: "Preparing the tray menu changed its native anchor"); return }
+        testResults.append("tray menu prepares content while retaining its native status button anchor")
+        let unrelated = NSMenu(); menuWillOpen(unrelated); menuDidClose(unrelated)
+        guard item.menu === nativeMenu, !trayTracking else { finishTests(error: "Another menu changed tray tracking"); return }
+        testResults.append("unrelated menus cannot change native tray tracking or positioning")
         guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接云电脑", "Connect cloud PC"), tr("断开云电脑", "Disconnect cloud PC"), tr("重命名", "Rename")] }) else { finishTests(error: "Tray submenu actions missing"); return }
         testResults.append("native cloud submenus expose connect disconnect and rename")
         let savedTargets = trayTargets, firstID = trayTargets[0]["id"] as! String, firstRow = trayRows[trayTargets[0]["id"] as! String]
