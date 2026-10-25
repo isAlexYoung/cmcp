@@ -17,7 +17,7 @@ test('chunked transfer sessions can exceed 256 requests without duplicate execut
 });
 test('fresh manager defaults to tray and saves manual shared login without touching Keychain',async t=>{
   const f=fixture(t),state=new ManagerState(f.directory,f.secrets);
-  assert.equal(state.preferences.closeAction,'tray');const id=await state.save(input(),async()=>true);
+  assert.equal(state.preferences.closeAction,'tray');assert.equal(state.preferences.theme,'system');const id=await state.save(input(),async()=>true);
   assert.equal(state.view().targets[0].enabled,false);assert.equal(f.calls.length,0);assert.equal(state.targets[0].authMode,'shared-browser');assert.equal(id,state.targets[0].id);
 });
 test('automatic password is Keychain-only and metadata edits preserve its credential reference',async t=>{
@@ -79,4 +79,17 @@ test('full application exit disables every connection and closes backend tools',
   const res=await fetch(m.origin+'/api/exit',{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:'{}'});assert.equal(res.status,200);
   for(let i=0;i<50&&closed===0;i++)await new Promise(r=>setTimeout(r,20));assert.equal(closed,1);
   assert.equal(m.store.controlMap().size,2);assert.ok([...m.store.controlMap().values()].every(t=>!t.enabled));
+});
+
+test('tray snapshot is authenticated and includes display names and states without icons, credentials or URLs',async t=>{
+  const f=fixture(t);const m=await createManager({...f,detectShared:async()=>true,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}}});t.after(()=>m.close());
+  const call=(secret=m.token)=>fetch(m.origin+'/api/tray',{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':secret},body:'{}'});
+  assert.equal((await call('wrong')).status,403);
+  assert.deepEqual((await (await call()).json()).targets,[]);
+  const password='NOT-IN-TRAY-SECRET',id=await m.store.save({...input(),label:'工作 & 云电脑',autoLogin:true,password},async()=>true);
+  let response=await call(),text=await response.text(),value=JSON.parse(text);
+  assert.equal(response.status,200);assert.equal(value.targets[0].label,'工作 & 云电脑');assert.equal(value.targets[0].state,'stopped');assert.equal(value.targets[0].enabled,false);
+  assert.deepEqual(Object.keys(value.targets[0]).sort(),['enabled','id','label','state']);assert.equal(value.language,'zh-CN');assert.equal(value.updating,false);assert.ok(!text.includes(password)&&!text.includes('credentialId')&&!text.includes('https://'));
+  await m.store.save({...input(),id,label:'Renamed',autoLogin:true},()=>assert.fail('rename must not probe'));
+  assert.equal((await (await call()).json()).targets[0].label,'Renamed');assert.equal(await m.store.password(id),password);
 });

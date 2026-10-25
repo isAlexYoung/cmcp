@@ -8,7 +8,7 @@ using Microsoft.Win32;
 
 namespace CMCP {
     internal sealed class AppSettings {
-        public string language="zh-CN",theme="";
+        public string language="zh-CN",theme="system";
         public bool autoStart,closeToTray=true;
         internal bool ReadError;
         Dictionary<string,object> extra=new Dictionary<string,object>();
@@ -22,7 +22,7 @@ namespace CMCP {
                 var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(file,Encoding.UTF8));
                 object value;if(data==null||!data.TryGetValue("schema",out value)||Convert.ToString(value)!="1")throw new IOException();
                 if(data.TryGetValue("language",out value)){if(!(value is string)||((string)value!="zh-CN"&&(string)value!="en"))throw new IOException();result.language=(string)value;}
-                if(data.TryGetValue("theme",out value)){if(!(value is string)||((string)value!=""&&(string)value!="light"&&(string)value!="dark"&&(string)value!="system"))throw new IOException();result.theme=(string)value;}
+                if(data.TryGetValue("theme",out value)){if(!(value is string)||((string)value!=""&&(string)value!="light"&&(string)value!="dark"&&(string)value!="system"))throw new IOException();result.theme=(string)value==""?"system":(string)value;}
                 if(data.TryGetValue("autoStart",out value)){if(!(value is bool))throw new IOException();result.autoStart=(bool)value;}
                 if(data.TryGetValue("closeToTray",out value)&&!(value is bool))throw new IOException();
                 // Both old choices kept connections alive. Migrate them to tray;
@@ -44,7 +44,8 @@ namespace CMCP {
             }finally{if(File.Exists(temp))File.Delete(temp);if(owned)mutex.ReleaseMutex();}}
         }
         static string DesktopKey(string state){using(var hash=System.Security.Cryptography.SHA256.Create())return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(state).ToLowerInvariant()))).Replace("-","").Substring(0,20);}
-        internal bool IsDark(bool previous){if(theme=="dark")return true;if(theme=="light")return false;if(theme!="system")return previous;try{using(var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))return Convert.ToInt32(key==null?1:key.GetValue("AppsUseLightTheme",1))==0;}catch{return previous;}}
+        internal bool IsDark(bool previous){if(theme=="dark")return true;if(theme=="light")return false;return SystemDark(false,previous);}
+        internal static bool SystemDark(bool tray,bool fallback){try{using(var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))return Convert.ToInt32(key==null?1:key.GetValue(tray?"SystemUsesLightTheme":"AppsUseLightTheme",1))==0;}catch{return fallback;}}
     }
     internal static class StartupRegistration {
         internal const string RunPath=@"Software\Microsoft\Windows\CurrentVersion\Run",Name="CMCPManager",LegacyName="ClaudeCloudPcLink";

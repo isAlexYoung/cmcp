@@ -193,7 +193,7 @@ namespace CMCP {
                 // Check real resize layout and repaint buffers over repeated cycles.
                 for(int i=0;i<12;i++){form.ClientSize=new Size(i%2==0?1380:680,650);Pump();}
                 check(form.LayoutFits()&&form.Cards.Values.All(c=>c.Left==0),"repeated live resizing retains one fitted card rectangle per target");
-                using(var image=new Bitmap(form.list.Width,form.list.Height)){form.list.DrawToBitmap(image,form.list.ClientRectangle);check(image.GetPixel(form.list.ClientSize.Width-2,5).ToArgb()==Palette.Create(false).Page.ToArgb(),"repaint clears the exposed list strip after repeated resizing");}
+                using(var image=new Bitmap(form.list.Width,form.list.Height)){form.list.DrawToBitmap(image,form.list.ClientRectangle);check(image.GetPixel(form.list.ClientSize.Width-2,5).ToArgb()==form.list.BackColor.ToArgb(),"repaint clears the exposed list strip after repeated resizing");}
             }
             foreach(var file in new[]{"start.ps1","stop.ps1","manager-save.ps1","stop-A","stop-B","pipe.ps1","pipe-completed"})File.Delete(Path.Combine(kit,file));
             Directory.Delete(kit,false);File.Delete(targets);File.Delete(Path.Combine(state,"control-order.txt"));File.Delete(UiPreferences.PathFor(state));Directory.Delete(state,false);

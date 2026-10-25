@@ -97,7 +97,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 207 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 230 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Full application exit stops every target
         shell: pwsh
         run: |
@@ -162,7 +162,16 @@ jobs:
             if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Expanded update capture timed out' }
             if ($p.ExitCode -ne 0 -or !(Test-Path -LiteralPath $imageFile)) { throw 'Expanded update capture failed' }
           }
-      - name: Build portable package
+      - name: Capture system-themed tray menus
+        shell: pwsh
+        run: |
+          foreach ($theme in @('light','dark')) {
+            $imageFile = Join-Path $PWD ('test-results/tray-' + $theme + '.png')
+            $p = Start-Process -FilePath (Join-Path $PWD 'CMCP.exe') -ArgumentList ('--preview-tray "' + $imageFile + '" ' + $theme) -WindowStyle Hidden -PassThru
+            if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Tray capture timed out' }
+            if ($p.ExitCode -ne 0 -or !(Test-Path -LiteralPath $imageFile)) { throw 'Tray capture failed' }
+          }
+      - name: Build portable archives
         shell: pwsh
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/package-manager.ps1 -OutputDirectory "$env:RUNNER_TEMP/cmcp-packages"

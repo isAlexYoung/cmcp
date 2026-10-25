@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.1.4.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.1.4.0")]
+[assembly: System.Reflection.AssemblyVersion("4.2.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.2.1.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -175,11 +175,12 @@ namespace CMCP {
             return 64;
 #else
             if (args.Length == 2 && args[0] == "--self-test") return SelfTest(args[1]);
+            if(args.Length==3&&args[0]=="--preview-tray"){TrayTests.Capture(args[1],args[2]=="dark");return 0;}
             if (args.Length == 1 && args[0] == "--demo") { Application.Run(new Manager(true)); return 0; }
             if (args.Length >= 2 && args[0] == "--preview") {
                 using (var form = new Manager(true)) {
                     if(args.Length > 2) form.ClientSize=new Size(Int32.Parse(args[2]),args.Length>3?Int32.Parse(args[3]):720);
-                    form.Show();Application.DoEvents();if(args.Length>4&&args[4]=="dark")form.SetTheme(true);
+                    form.Show();Application.DoEvents();if(args.Length>4)form.SetTheme(args[4]=="dark");
                     var first=form.Cards.Values.First();
                     string page=args.Length>5?args[5]:"expanded";
                     if(page=="editor")form.OpenEditor(first.Target.Name);
@@ -269,6 +270,7 @@ namespace CMCP {
                 DashboardTests.Run(temp, check);
                 BackendRestart.Test(temp,check);
                 SettingsTests.Run(temp,check);
+                TrayTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
                 ControlOrderTests.Run(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;

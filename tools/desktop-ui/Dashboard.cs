@@ -23,6 +23,7 @@ namespace CMCP {
         internal AppSettings Options;
         readonly bool isolated;
         NotifyIcon tray;
+        internal TrayMenu TrayCommands;
         internal bool TrayVisible;
         bool exiting,updateNotice;
         internal bool ExitPending;
@@ -67,7 +68,7 @@ namespace CMCP {
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;if(Options.closeToTray&&!ExitPending)HideToTray();else ExitApplication();}};
-            FormClosed+=delegate{timer.Stop();timer.Dispose();updates.Dispose();if(tray!=null)tray.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();
+            FormClosed+=delegate{timer.Stop();timer.Dispose();updates.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();EnsureTray();
         }
         void ApplyTheme(){
             BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);
@@ -110,11 +111,12 @@ namespace CMCP {
             if(reflow){Arrange();content.Invalidate(true);}
             if(Settings!=null)Settings.SetUpdateProgress(value);
         }
-        internal void HideToTray(){
-            if(tray==null){var menu=new ContextMenuStrip();menu.Items.Add(L.Text("打开主界面"),null,delegate{RestoreManager();});menu.Items.Add(L.Text("退出程序"),null,delegate{ExitApplication();});tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=menu};tray.DoubleClick+=delegate{RestoreManager();};}
-            TrayVisible=true;if(tray!=null){tray.ContextMenuStrip.Items[0].Text=L.Text("打开主界面");tray.ContextMenuStrip.Items[1].Text=L.Text("退出程序");tray.Visible=!isolated;}Hide();
-        }
-        internal string[] TrayItems {get{return tray==null?new string[0]:tray.ContextMenuStrip.Items.Cast<ToolStripItem>().Select(item=>item.Text).ToArray();}}
+        void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.Menu,Visible=!isolated};tray.DoubleClick+=delegate{RestoreManager();};TrayVisible=true;SyncTray();}
+        internal void HideToTray(){EnsureTray();SyncTray();Hide();}
+        internal string[] TrayItems {get{return TrayCommands==null?new string[0]:TrayCommands.Menu.Items.OfType<ToolStripMenuItem>().Select(item=>item.Text).ToArray();}}
+        TrayTarget TrayValue(TargetCard card){bool blocked=updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login"}.Contains(card.Target.State);return new TrayTarget{Name=card.Target.Name,Label=card.Preference.label.Length>0?card.Preference.label:new Uri(card.Target.Url).Host,State=card.BusyStop?"正在停止":card.BusyConnect&&card.Target.State=="stopped"?"连接中":LocalState.Caption(card.Target.State),CanConnect=!blocked&&!card.BusyStop&&!active,CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Target.State!="stopped"),CanRename=!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name)};}
+        void SyncTray(){if(TrayCommands!=null)TrayCommands.Sync(Preferences.Sort(targets).Where(t=>Cards.ContainsKey(t.Name)).Select(t=>TrayValue(Cards[t.Name])).ToList());}
+        internal void TrayAction(string name,string action){TargetCard card;if(!Cards.TryGetValue(name,out card))return;var value=TrayValue(card);if(action=="connect"&&value.CanConnect)Launch("connect",card,"");else if(action=="stop"&&value.CanDisconnect)Launch("stop",card,"");else if(action=="rename"&&value.CanRename){RestoreManager();if(Settings!=null)CloseSettings();if(Editor!=null&&Editor.TargetName!=name){Editor.ShowError("请先保存或返回当前编辑页，再重命名其他云电脑。");return;}OpenEditor(name);if(Editor!=null){Editor.NameInput.Box.Focus();Editor.NameInput.Box.SelectAll();}}SyncTray();}
         internal async void ExitApplication(){
             if(exiting||ExitPending)return;
             ExitPending=true;Enabled=false;timer.Stop();
@@ -127,8 +129,9 @@ namespace CMCP {
             if(stopped){exiting=true;Close();return;}
             Enabled=true;timer.Start();RestoreManager();Error("未能确认全部连接已断开，请稍后重试退出。");
         }
-        internal void RestoreManager(){TrayVisible=false;if(tray!=null)tray.Visible=false;Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
-        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}base.WndProc(ref message);if(message.Msg==0x1a&&Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}
+        internal void RestoreManager(){EnsureTray();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
+        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
+        protected override void Dispose(bool disposing){if(disposing){TrayVisible=false;if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(TrayCommands!=null){TrayCommands.Dispose();TrayCommands=null;}}base.Dispose(disposing);}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
         void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}
         void OpenLocal(string path){try{if(!File.Exists(path)&&!Directory.Exists(path)){MessageBox.Show(this,L.Text("该位置尚不存在。首次连接后会生成日志。"),Text);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}catch{Error("无法打开该位置，请检查文件是否存在。");}}
@@ -259,7 +262,7 @@ namespace CMCP {
                 if(target.AutoLogin&&(target.State=="password"||target.State=="locked"||target.State=="expired"))target.Detail=LocalState.Detail(target.State);
                 card.RefreshTarget(target);card.Edit.Enabled=card.Delete.Enabled=!IsBusy(target.Name);
             }
-            toolbar.Add.Enabled=!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove");Arrange();ApplyTheme();
+            toolbar.Add.Enabled=!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove");Arrange();ApplyTheme();SyncTray();
         }
         void Arrange(){Arrange(false);}
         void Arrange(bool animate){if(arranging||IsDisposed)return;arranging=true;try{

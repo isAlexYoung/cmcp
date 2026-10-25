@@ -37,6 +37,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
+    '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled})=>({id,label,state,enabled})),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
     '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();return {started:true};}),
     '/api/targets/stop':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};}),
