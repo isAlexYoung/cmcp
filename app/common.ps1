@@ -6,7 +6,7 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.1.3'
+$script:KitVersion = '4.1.4'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = Join-Path $env:LOCALAPPDATA 'ClaudeLocalMcp'
 $script:TargetsFile = Join-Path $script:StateDir 'cloudpc-targets.json'

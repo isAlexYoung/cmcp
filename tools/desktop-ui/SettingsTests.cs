@@ -2,12 +2,16 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace CMCP {
     internal static class SettingsTests {
+        [DllImport("user32.dll")]static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wParam,IntPtr lParam);
+        static void NativeWheel(Control target,int delta){var point=target.PointToScreen(new Point(10,10));SendMessage(target.Handle,0x20a,new IntPtr(delta<<16),new IntPtr((point.Y<<16)|(point.X&0xffff)));Application.DoEvents();}
         internal static void Run(string directory,Action<bool,string> check){
+            ToggleScrollTests(check);
             string state=Path.Combine(directory,"settings-test");Directory.CreateDirectory(state);
             var options=AppSettings.Load(state);check(!options.autoStart&&options.closeToTray&&options.language=="zh-CN","fresh settings use Chinese and default to hiding in tray");
             File.WriteAllText(AppSettings.PathFor(state),"{\"schema\":1,\"closeToTray\":false}");check(AppSettings.Load(state).closeToTray,"legacy close-manager choice migrates to preserving connections in tray");
@@ -44,6 +48,43 @@ namespace CMCP {
                 check(stops==1&&trayForm.IsDisposed,"explicit tray exit disconnects backend and closes manager");
             }
             L.Set("zh-CN");check(!File.Exists(Path.Combine(state,"cloudpc-targets.json"))&&!File.Exists(Path.Combine(state,"config.json")),"settings tests never create target or credential state");
+        }
+        static void ToggleScrollTests(Action<bool,string> check){
+            foreach(bool dark in new[]{false,true})using(var form=new Manager(true)){
+                form.ClientSize=new Size(700,500);form.Show();form.SetTheme(dark);
+                var options=form.Options.Copy();options.autoStart=true;form.ChangeSettings(options);form.OpenSettings();Application.DoEvents();
+                var page=form.Settings;var viewport=page.Viewport;var sheet=viewport.Controls[0];var startup=sheet.Controls.OfType<CheckBox>().Single();
+                viewport.AutoScrollPosition=new Point(0,200);startup.Focus();Application.DoEvents();int before=-viewport.AutoScrollPosition.Y;
+                startup.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(!form.Options.autoStart&&!startup.IsDisposed&&Object.ReferenceEquals(startup,sheet.Controls.OfType<CheckBox>().Single()),"disabling startup keeps the focused checkbox alive in theme "+dark);
+                check(-viewport.AutoScrollPosition.Y==before&&startup.Focused,"saving startup preserves settings scroll position and keyboard focus in theme "+dark);
+                bool scrolls=true;
+                for(int i=0;i<4;i++){
+                    int start=-viewport.AutoScrollPosition.Y;viewport.Wheel(-120);Application.DoEvents();int down=-viewport.AutoScrollPosition.Y;viewport.Wheel(120);Application.DoEvents();int up=-viewport.AutoScrollPosition.Y;
+                    scrolls&=down>start&&up<down;
+                    startup.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                    scrolls&=!startup.IsDisposed&&form.Options.autoStart==startup.Checked&&!viewport.NativeBarsVisible;
+                }
+                check(scrolls,"repeated startup toggles retain wheel scrolling in both directions without native bars in theme "+dark);
+                int nativeBefore=-viewport.AutoScrollPosition.Y;NativeWheel(startup,-120);int nativeDown=-viewport.AutoScrollPosition.Y;NativeWheel(startup,120);
+                check(nativeDown>nativeBefore&&-viewport.AutoScrollPosition.Y<nativeDown,"native mouse wheel messages on the focused startup checkbox still reach the viewport in theme "+dark);
+                var language=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="English");language.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(L.Language=="en"&&!startup.IsDisposed&&startup.Text=="Start with Windows"&&sheet.Controls.OfType<Label>().Any(label=>label.Text=="Interface language")&&sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="English").Primary,"language changes translate existing settings controls without replacing the focused page in theme "+dark);
+                var theme=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text==(dark?"浅色":"深色"));theme.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(form.Preferences.dark!=dark&&!startup.IsDisposed&&form.Settings==page,"theme changes update the same settings controls in theme "+dark);
+                var exit=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="直接退出程序");var tray=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="隐藏到系统托盘");exit.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                bool exitSelected=!form.Options.closeToTray&&exit.Primary&&!tray.Primary;tray.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(exitSelected&&form.Options.closeToTray&&tray.Primary&&!exit.Primary&&!startup.IsDisposed,"close behavior choices update selection without rebuilding settings in theme "+dark);
+                form.CloseSettings();form.OpenSettings();Application.DoEvents();viewport=form.Settings.Viewport;viewport.Wheel(-120);Application.DoEvents();
+                check(viewport.AutoScrollPosition.Y<0&&!viewport.NativeBarsVisible,"reopening settings retains wheel scrolling after startup changes in theme "+dark);
+                L.Set("zh-CN");
+            }
+            using(var host=new Form{ClientSize=new Size(700,500)})using(var page=new SettingsPage(new AppSettings{autoStart=true},Palette.Create(false),delegate{throw new IOException("fixture save failure");},delegate{})){
+                host.Controls.Add(page);host.Show();Application.DoEvents();var viewport=page.Viewport;var startup=viewport.Controls[0].Controls.OfType<CheckBox>().Single();startup.Focus();startup.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(!startup.IsDisposed&&startup.Checked,"failed startup save restores the existing checkbox to its last saved state");
+                viewport.AutoScrollPosition=new Point(0,200);Application.DoEvents();int before=-viewport.AutoScrollPosition.Y;NativeWheel(startup,-120);int down=-viewport.AutoScrollPosition.Y;NativeWheel(startup,120);
+                check(down>before&&-viewport.AutoScrollPosition.Y<down&&!viewport.NativeBarsVisible,"save failures preserve native wheel scrolling on the same settings page");
+            }
         }
     }
 }
