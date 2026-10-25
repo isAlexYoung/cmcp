@@ -2,6 +2,7 @@
 $ErrorActionPreference='Stop'
 $state=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ClaudeLocalMcp'
 $directory=Join-Path (Join-Path $state 'updates') $Transaction
+if([IO.Path]::GetFileName($PSScriptRoot) -ceq ('.cmcp-update-'+$Transaction)){$directory=$PSScriptRoot}
 if([IO.Path]::GetFullPath($PSScriptRoot) -ine [IO.Path]::GetFullPath($directory)){exit 1}
 . (Join-Path $PSScriptRoot 'update-core.ps1')
 $held=$false;$canRecover=$false
@@ -11,6 +12,8 @@ try{
     $request=Get-Content -LiteralPath (Join-Path $directory 'request.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $install=Assert-CmcpInstallRoot $request.installRoot
     $parent=[IO.Path]::GetDirectoryName($install);$stage=Join-Path $parent ('.cmcp-new-'+$Transaction);$backup=Join-Path $parent ('.cmcp-backup-'+$Transaction)
+    $external=[IO.Path]::GetFullPath($directory) -ieq (Join-Path $parent ('.cmcp-update-'+$Transaction))
+    if([IO.Path]::GetFileName($directory) -like '.cmcp-update-*' -and !$external){throw 'Invalid update helper location'}
     if($request.schema -ne 1 -or $request.staged -cne $stage -or $request.backup -cne $backup -or $request.token -cnotmatch '^[a-f0-9]{32}$' -or (Get-CmcpVersion $request.version) -le (Get-CmcpVersion $request.oldVersion)){throw 'Invalid update transaction'}
     $null=Test-CmcpTree $stage $request.version
     $manager=Get-Process -Id $request.managerPid -ErrorAction SilentlyContinue
@@ -25,6 +28,14 @@ try{
     $stopFailed={param($process)try{if(!$process.HasExited){$process.Kill()}}catch{if(!$process.HasExited){throw}};$process.WaitForExit(10000)|Out-Null;Stop-LinkService}
     $null=Invoke-CmcpSwap $install $stage $backup $launch $healthy $stopFailed
     [IO.File]::WriteAllText((Join-Path $directory 'complete.txt'),'Update completed. Previous package retained at '+$backup)
+    if($external){
+        [Environment]::CurrentDirectory=$install;Set-Location -LiteralPath $install
+        $result=Join-Path $install 'user\update-result.json'
+        $pending=Join-Path $install 'user\update-cleanup.json'
+        [IO.File]::WriteAllText($pending,(@{installRoot=$install;backup=$backup;transaction=$directory}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+        try{Complete-CmcpUpdate $install $backup $directory;Remove-Item -LiteralPath $pending;[IO.File]::WriteAllText($result,'{"ok":true,"cleanup":true}')}
+        catch{[IO.File]::WriteAllText($result,'{"ok":true,"cleanup":false}')}
+    }
 }catch{
     [IO.File]::WriteAllText((Join-Path $directory 'failure.txt'),'Update could not complete. The previous package is retained; see .cmcp-backup folders if recovery is needed.')
     $oldRestored=$false

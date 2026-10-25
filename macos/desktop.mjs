@@ -1,11 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {STATE,privateDir,safeFile,atomicWrite,LABEL} from './platform.mjs';
+import {STATE,LEGACY_STATE,KIT,privateDir,safeFile,atomicWrite,LABEL} from './platform.mjs';
+import {migratePortableState,retryPortableCleanup} from './portable-state.mjs';
 import {createManager} from './manager.mjs';
 import {retireLegacyAgent} from './legacy-agent.mjs';
 if(process.platform!=='darwin')throw Error('CMCP desktop requires macOS');
 if(process.getuid()===0)throw Error('Do not run CMCP as root');
-process.umask(0o077);privateDir(STATE);
+process.umask(0o077);
+if(process.env.CMCP_NATIVE_SELF_TEST!=='1'&&!fs.existsSync(STATE)){
+  await retireLegacyAgent({home:process.env.HOME,state:LEGACY_STATE,uid:process.getuid()});
+  await migratePortableState(STATE,LEGACY_STATE);
+}
+privateDir(STATE);
+if(process.env.CMCP_NATIVE_SELF_TEST!=='1'){
+  const bundleRoot=path.resolve(KIT,'../../..');
+  retryPortableCleanup(STATE,bundleRoot);
+}
 const instanceFile=path.join(STATE,'manager-instance.json'),lockFile=path.join(STATE,'manager.lock');
 safeFile(instanceFile);safeFile(lockFile);
 const alive=pid=>{if(!Number.isInteger(pid)||pid<2)return false;try{process.kill(pid,0);return true;}catch(e){return e.code==='EPERM';}};

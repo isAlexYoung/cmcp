@@ -36,3 +36,4 @@ node-extra-args.txt
 *.pfx
 *.p12
 *.lnk
+/user/

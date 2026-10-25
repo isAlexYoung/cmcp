@@ -15,7 +15,7 @@ fs.mkdirSync(output,{recursive:true});const bundle=path.join(output,'CMCP.app');
 if(fs.existsSync(bundle))throw Error('Output already exists; choose a fresh build directory');
 const contents=path.join(bundle,'Contents'),resources=path.join(contents,'Resources'),executable=path.join(contents,'MacOS');
 for(const dir of [resources,executable,path.join(resources,'macos'),path.join(resources,'app'),path.join(resources,'runtime')])fs.mkdirSync(dir,{recursive:true});
-const sourceFiles=['package.json','package-lock.json','platform.mjs','schema.mjs','binary-tools.mjs','mac-tools.mjs','process-worker.mjs','dispatcher.mjs','tool-schemas.mjs','cloudpc-connector.py','keychain.jxa','keyboard.jxa','state.mjs','manager.mjs','updates.mjs','update-transaction.mjs','apply-update.mjs','desktop.mjs','legacy-agent.mjs','cloud-api.mjs','LICENSE','THIRD-PARTY-NOTICES.txt'];
+const sourceFiles=['package.json','package-lock.json','platform.mjs','portable-state.mjs','finalize-update.mjs','schema.mjs','binary-tools.mjs','mac-tools.mjs','process-worker.mjs','dispatcher.mjs','tool-schemas.mjs','cloudpc-connector.py','keychain.jxa','keyboard.jxa','state.mjs','manager.mjs','updates.mjs','update-transaction.mjs','apply-update.mjs','desktop.mjs','legacy-agent.mjs','cloud-api.mjs','LICENSE','THIRD-PARTY-NOTICES.txt'];
 for(const name of sourceFiles)fs.copyFileSync(path.join(root,'macos',name),path.join(resources,'macos',name));
 fs.cpSync(path.join(root,'macos/ui'),path.join(resources,'macos/ui'),{recursive:true});
 fs.copyFileSync(path.join(root,'macos/runtime/FILESYSTEM-LICENSE.txt'),path.join(resources,'macos/FILESYSTEM-LICENSE.txt'));

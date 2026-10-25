@@ -26,7 +26,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     init(arguments: [String]) {
         startup = arguments.contains("--startup")
         testing = arguments.contains("--self-test")
-        stateDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ClaudeMcpMac", isDirectory: true)
+        stateDirectory = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("user", isDirectory: true)
         if testing {
             let index = arguments.firstIndex(of: "--self-test")!
             if index + 1 < arguments.count { reportDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true) }
@@ -271,10 +271,17 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 request("/api/tray", [:]) { [weak self] result in guard let self = self else { return }; if case .success(let value) = result, let targets = value["targets"] as? [[String: Any]] { self.trayTargets = targets; self.updateTrayMenu(); self.runTests() } else { self.finishTests(error: "Tray snapshot unavailable") } }
             }
             else if let file = updateRequest {
-                if file.deletingLastPathComponent().standardizedFileURL == stateDirectory.standardizedFileURL,
+                let legacy = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ClaudeMcpMac", isDirectory: true)
+                if [stateDirectory.standardizedFileURL, legacy.standardizedFileURL].contains(file.deletingLastPathComponent().standardizedFileURL),
                    let bytes = try? Data(contentsOf: file), let values = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                    values["installRoot"] as? String == bundle.bundleURL.path, let nonce = values["nonce"] as? String {
                     try? Data(nonce.utf8).write(to: URL(fileURLWithPath: file.path + ".ack"), options: .atomic)
+                    if file.deletingLastPathComponent().standardizedFileURL == legacy.standardizedFileURL {
+                        let cleanup = Process(); cleanup.executableURL = resources.appendingPathComponent("runtime/node")
+                        cleanup.arguments = [resources.appendingPathComponent("macos/finalize-update.mjs").path, file.path, stateDirectory.path, bundle.bundleURL.path]
+                        cleanup.standardOutput = FileHandle.nullDevice; cleanup.standardError = FileHandle.nullDevice
+                        try? cleanup.run()
+                    }
                 }
             } else if !startup { promptShortcut() }
         case "open":

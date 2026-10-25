@@ -17,7 +17,7 @@ namespace CMCP {
             if(!File.Exists(Path.Combine(kit,file)))throw new FileNotFoundException(file);
             if(!save&&String.IsNullOrWhiteSpace(name))throw new ArgumentException("Select a target");
             string command="& "+Actions.Quote(Path.Combine(kit,file));
-            if(!save){command+=" -TargetName "+Actions.Quote(name)+" -ManagerMode";if(action=="connect"||action=="stop")command+=" -RequestTime "+ControlRequestOrder.Next(stateDirectory??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp")).ToString(System.Globalization.CultureInfo.InvariantCulture);}
+            if(!save){command+=" -TargetName "+Actions.Quote(name)+" -ManagerMode";if(action=="connect"||action=="stop")command+=" -RequestTime "+ControlRequestOrder.Next(stateDirectory??PortableState.DirectoryPath).ToString(System.Globalization.CultureInfo.InvariantCulture);}
             var info=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))) {
                 UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=kit,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,StandardOutputEncoding=new UTF8Encoding(false)
             };

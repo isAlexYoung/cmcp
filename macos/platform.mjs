@@ -5,9 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '4.2.1';
+export const VERSION = '4.3.0';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
-const requestedState = process.env.CMCP_STATE_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'ClaudeMcpMac');
+export const LEGACY_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'ClaudeMcpMac');
+const bundleMarker=KIT.lastIndexOf('.app'+path.sep+'Contents'+path.sep);
+const portableRoot=bundleMarker>=0?path.dirname(KIT.slice(0,bundleMarker+4)):path.dirname(KIT);
+const requestedState = process.env.CMCP_STATE_DIR || path.join(portableRoot,'user');
 // Foundation may abbreviate /private/var back to the system-owned /var alias.
 // Normalize only that known macOS alias; retain rejection of user symlinks.
 export const STATE = process.platform==='darwin' && requestedState.startsWith('/var/') && fs.realpathSync('/var')==='/private/var' ? '/private'+requestedState : requestedState;

@@ -66,6 +66,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/updater.json -Raw | ConvertFrom-Json
           if ($r.passed -ne 40 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete update regression' }
+      - name: Portable data migration and update cleanup
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/portable-state.test.ps1 | Set-Content test-results/portable-state.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/portable-state.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 21 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete portable state regression' }
       - name: Startup preference registration isolation
         shell: pwsh
         run: |
@@ -86,7 +93,7 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/update-apply.test.ps1 | Set-Content test-results/update-apply.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/update-apply.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 14 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete external update helper regression' }
+          if ($r.passed -ne 21 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete external update helper regression' }
       - name: Build and exercise real WinForms and Shell shortcuts
         shell: pwsh
         run: |

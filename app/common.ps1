@@ -6,9 +6,9 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.2.1'
+$script:KitVersion = '4.3.0'
 $script:KitDir = $PSScriptRoot
-$script:StateDir = Join-Path $env:LOCALAPPDATA 'ClaudeLocalMcp'
+$script:StateDir = if ($env:CMCP_STATE_DIR) { [IO.Path]::GetFullPath($env:CMCP_STATE_DIR) } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'user' }
 $script:TargetsFile = Join-Path $script:StateDir 'cloudpc-targets.json'
 $script:StopFlag = Join-Path $script:StateDir 'stopped.flag'
 $script:StatusFile = Join-Path $script:StateDir 'link-status.json'
@@ -18,7 +18,48 @@ $script:RunName = 'ClaudeCloudPcLink'
 # Invoke-WebRequest 的进度条会盖住窗口里的文字，而且会明显拖慢下载
 $ProgressPreference = 'SilentlyContinue'
 
+function Assert-PrivateStatePath([string]$Path) {
+    $current=[IO.Path]::GetFullPath($Path)
+    while($current){
+        if(Test-Path -LiteralPath $current){$item=Get-Item -LiteralPath $current -Force;if(!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Unsafe user directory path'}}
+        $current=[IO.Path]::GetDirectoryName($current)
+    }
+}
+
+function Initialize-PortableState([string]$Destination,[string]$Legacy) {
+    Assert-PrivateStatePath $Destination
+    if (Test-Path -LiteralPath $Destination) {
+        if ((Get-Item -LiteralPath $Destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe user directory' }
+        return
+    }
+    $parent=Split-Path $Destination -Parent
+    $stage=Join-Path $parent ('.cmcp-user-'+[guid]::NewGuid().ToString('N'))
+    $null=New-Item -ItemType Directory -Path $stage
+    try {
+        if (Test-Path -LiteralPath $Legacy) {
+            Assert-PrivateStatePath $Legacy
+            if ((Get-Item -LiteralPath $Legacy -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe legacy user directory' }
+            foreach ($name in @('config.json','cloudpc-targets.json','vps-targets.json','target-controls.json','control-order.txt','application-preferences.json','dashboard-preferences.json','manager-preferences.json','node-extra-args.txt','machine-id')) {
+                $file=Join-Path $Legacy $name
+                if (!(Test-Path -LiteralPath $file)) { continue }
+                $item=Get-Item -LiteralPath $file -Force
+                if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe legacy user file' }
+                [IO.File]::Copy($file,(Join-Path $stage $name),$false)
+            }
+        }
+        $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        & icacls.exe $stage /inheritance:r /grant:r ('*'+$sid+':(OI)(CI)F') '*S-1-5-18:(OI)(CI)F' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot protect user data' }
+        [IO.Directory]::Move($stage,$Destination)
+    } finally {
+        if ([IO.Directory]::Exists($stage) -and [IO.Path]::GetDirectoryName($stage) -eq $parent -and [IO.Path]::GetFileName($stage) -match '^\.cmcp-user-[a-f0-9]{32}$') { Remove-Item -LiteralPath $stage -Recurse -Force }
+    }
+}
+
 function Initialize-StateDir {
+    if ($script:StateDir -ieq (Join-Path (Split-Path $script:KitDir -Parent) 'user')) {
+        Initialize-PortableState $script:StateDir (Join-Path $env:LOCALAPPDATA 'ClaudeLocalMcp')
+    }
     New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
     # 用 SID 而不是账户名：中文账户名、微软账户、域账户在 icacls 里都可能解析失败
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -275,6 +316,7 @@ $script:ErrorLog = Join-Path $script:StateDir 'error.log'
 
 function Write-ErrorLog([string]$step, $errorRecord) {
     try {
+        if(!(Test-Path -LiteralPath $script:StateDir) -and $script:StateDir -ieq (Join-Path (Split-Path $script:KitDir -Parent) 'user')){return}
         New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
         $text = "[{0}] 步骤：{1}`r`n{2}`r`n{3}`r`n{4}`r`n`r`n" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $step,
             $errorRecord.Exception.GetType().FullName, $errorRecord.Exception.Message, $errorRecord.ScriptStackTrace

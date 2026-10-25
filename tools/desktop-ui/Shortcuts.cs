@@ -146,7 +146,7 @@ namespace CMCP {
             Controls.Add(yes); Controls.Add(no); AcceptButton = no; CancelButton = no;
         }
         internal static void AskBeforeManager() {
-            string state = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp");
+            string state = PortableState.DirectoryPath;
             if (!StartupPreferences.ShouldPrompt(state,Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory))) return;
             using (var prompt = new ShortcutPrompt()) {
                 var result = prompt.ShowDialog();

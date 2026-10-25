@@ -11,7 +11,7 @@ namespace CMCP {
     internal sealed class Manager : Form {
         readonly string root = AppDomain.CurrentDomain.BaseDirectory;
         readonly string kit = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app");
-        readonly string stateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeLocalMcp");
+        readonly string stateDirectory = PortableState.DirectoryPath;
         readonly bool preview;
         readonly DashboardToolbar toolbar = new DashboardToolbar();
         internal readonly CardList list = new CardList();

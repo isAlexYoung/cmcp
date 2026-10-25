@@ -64,7 +64,7 @@ namespace CMCP {
                 if(result!="prepared"){ShowProgress(new UpdateProgress{Stage="failed"});return;}
                 try{
                     string transaction=Convert.ToString(LocalState.Get(data,"transaction"));Guid id;if(!Guid.TryParseExact(transaction,"N",out id))throw new IOException();
-                    string path=Path.Combine(state,"updates",transaction),helper=Path.Combine(path,"update-apply.ps1");
+                    string path=PortableState.TransactionPath(root,transaction),helper=Path.Combine(path,"update-apply.ps1");
                     string command="& "+Actions.Quote(helper)+" -Transaction "+Actions.Quote(transaction);
                     Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=path}).Dispose();
                     ShowProgress(new UpdateProgress{Stage="restart",Received=1,Total=1});exit();
@@ -74,10 +74,16 @@ namespace CMCP {
         public void Dispose(){lock(this){disposed=true;if(child!=null)try{if(!child.HasExited)child.Kill();}catch{}child=null;}}
         internal static void Acknowledge(string transaction,bool healthy){
             Guid id;if(!healthy||!Guid.TryParseExact(transaction,"N",out id))return;
-            try{string state=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp","updates",transaction),request=Path.Combine(state,"request.json");
+            foreach(string state in new[]{PortableState.TransactionPath(AppDomain.CurrentDomain.BaseDirectory,transaction),Path.Combine(PortableState.Legacy,"updates",transaction)})try{string request=Path.Combine(state,"request.json");
                 var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(request));
-                if(!String.Equals(Path.GetFullPath(Convert.ToString(data["installRoot"])).TrimEnd('\\'),Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)||Convert.ToString(data["version"])!=Application.ProductVersion.Substring(0,Application.ProductVersion.LastIndexOf('.')))return;
+                if(!String.Equals(Path.GetFullPath(Convert.ToString(data["installRoot"])).TrimEnd('\\'),Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)||Convert.ToString(data["version"])!=Application.ProductVersion.Substring(0,Application.ProductVersion.LastIndexOf('.')))continue;
                 File.WriteAllText(Path.Combine(state,"ready.json"),new JavaScriptSerializer().Serialize(new{token=data["token"],pid=Process.GetCurrentProcess().Id}),new UTF8Encoding(false));
+                if(String.Equals(Path.GetDirectoryName(state),Path.Combine(PortableState.Legacy,"updates"),StringComparison.OrdinalIgnoreCase)){
+                    string script=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app","update-finalize.ps1");
+                    string command="& "+Actions.Quote(script)+" -Transaction "+Actions.Quote(transaction);
+                    Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=AppDomain.CurrentDomain.BaseDirectory}).Dispose();
+                }
+                return;
             }catch{}
         }
     }

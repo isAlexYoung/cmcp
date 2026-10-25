@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.2.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.2.1.0")]
+[assembly: System.Reflection.AssemblyVersion("4.3.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.3.0.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -154,7 +154,7 @@ namespace CMCP {
             string script = Path.Combine(kit, Script(action));
             if (!File.Exists(script)) throw new FileNotFoundException("缺少文件，请完整解压便携包。", script);
             if(action!="add"&&String.IsNullOrWhiteSpace(name))throw new ArgumentException("Select a cloud computer first");
-            long order=action=="connect"||action=="stop"?ControlRequestOrder.Next(stateDirectory??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp")):0;
+            long order=action=="connect"||action=="stop"?ControlRequestOrder.Next(stateDirectory??PortableState.DirectoryPath):0;
             var command = Command(kit, action, name, initialUrl,order);
             string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
             return Process.Start(new ProcessStartInfo(ps, "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(command))) {
@@ -202,15 +202,17 @@ namespace CMCP {
             bool updated=args.Length==2&&args[0]=="--updated";
             Guid transactionId;if(updated&&!Guid.TryParseExact(args[1],"N",out transactionId))return 64;
             if (args.Length != 0&&!startup&&!updated) return 64;
-            if(startup&&!AppSettings.Load(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ClaudeLocalMcp")).autoStart)return 0;
+            Environment.CurrentDirectory=AppDomain.CurrentDomain.BaseDirectory;
+            if(startup&&!AppSettings.Load(PortableState.PreferencesPath).autoStart)return 0;
             bool healthy=BackendRestart.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app"));
+            if(!Directory.Exists(PortableState.DirectoryPath))return 1;
             string account = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string key; using (var hash = SHA256.Create()) key = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(account.ToLowerInvariant()))).Replace("-", "").Substring(0, 20);
             bool created;
             using (var mutex = new Mutex(true, "Local\\ClaudeMcpManager-" + key, out created)) {
                 if (!created) {if(!startup)ManagerSignal.Restore();return 0;}
                 try {
-                    L.Set(AppSettings.Load(Path.Combine(account,"ClaudeLocalMcp")).language);if(!startup&&!updated)ShortcutPrompt.AskBeforeManager();
+                    L.Set(AppSettings.Load(PortableState.DirectoryPath).language);if(!startup&&!updated)ShortcutPrompt.AskBeforeManager();
                     using(var form=new Manager(false)){
                         form.Shown+=delegate{if(startup)form.BeginInvoke(new Action(form.HideToTray));if(updated)UpdateController.Acknowledge(args[1],healthy);};
                         Application.Run(form);

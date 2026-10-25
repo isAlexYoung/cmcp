@@ -29,7 +29,7 @@ try{
     $output=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $app 'update.ps1') -Action prepare -InstallRoot $bad -StateDirectory $state -ManagerPid $PID
     $exit=$LASTEXITCODE;$packets=@($output|ForEach-Object {$_|ConvertFrom-Json})
     Check ($exit -ne 0 -and $packets[0].type -eq 'progress' -and $packets[-1].status -eq 'failed' -and $packets[-1].code -eq 'installation') 'real prepare worker emits progress and a specific failure before any replacement'
-    $failure=Get-ChildItem -LiteralPath (Join-Path $state 'updates') -Filter failure.json -Recurse|Select-Object -First 1
+    $failure=Get-ChildItem -LiteralPath $temporary -Filter failure.json -Recurse|Select-Object -First 1
     $text=[IO.File]::ReadAllText($failure.FullName);Check ($text.Contains('installation') -and !$text.Contains('DO-NOT-LOG') -and !$text.Contains($temporary)) 'failure log contains a stage and code without private paths or raw error text'
     Check (!(Test-Path -LiteralPath (Join-Path $bad 'CMCP.exe'))) 'validation failure does not create or launch an application'
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks}|ConvertTo-Json -Depth 4

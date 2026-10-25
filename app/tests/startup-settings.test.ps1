@@ -8,6 +8,7 @@ $checks=New-Object 'Collections.Generic.List[string]'
 function Check([bool]$Value,[string]$Name){if(!$Value){throw $Name};$checks.Add($Name)}
 try{
     $env:LOCALAPPDATA=$temporary;. (Join-Path $app 'common.ps1')
+    $script:StateDir=Join-Path $temporary 'state'
     $script:RunKey=$registry;$script:StartupLink='';$script:KitDir=Join-Path $temporary 'kit\app'
     $null=New-Item -ItemType Directory -Path $script:KitDir -Force;$null=New-Item -ItemType Directory -Path $script:StateDir -Force
     $manager=Join-Path (Split-Path $script:KitDir -Parent) 'CMCP.exe';[IO.File]::WriteAllText($manager,'fixture, never executed')

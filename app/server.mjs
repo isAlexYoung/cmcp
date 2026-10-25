@@ -25,7 +25,7 @@ const bridgeVersion = JSON.parse(fs.readFileSync(path.join(here, 'package.json')
 const selfTest = process.argv.includes('--selftest');
 // --session：短期连接版的一次性连接（由 run-session.ps1 启动）。被另一台电脑替换时以退出码 4 结束。
 const sessionMode = process.argv.includes('--session');
-const stateDir = path.join(process.env.LOCALAPPDATA, 'ClaudeLocalMcp');
+const stateDir = process.env.CMCP_STATE_DIR || path.join(here, '..', 'user');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const config = readJson(path.join(stateDir, 'config.json'));
 
