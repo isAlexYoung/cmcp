@@ -183,11 +183,17 @@ for (const phase of ['protocol probe','legacy login']) {
 test('real server process honors target switches without changing backend PID or the other desktop', {timeout:40000}, async t=>{
   const a=await desktop(t),b=await desktop(t);
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mcp-multi-server-')),state=path.join(dir,'ClaudeLocalMcp');fs.mkdirSync(state);
-  const write=(name,data)=>{const file=path.join(state,name);fs.writeFileSync(file+'.tmp',JSON.stringify(data));fs.renameSync(file+'.tmp',file);};
-  write('config.json',{token:randomBytes(32).toString('hex'),roots:[dir]});
-  write('cloudpc-targets.json',[{name:'A',url:a.url,authMode:'shared-browser'},{name:'B',url:b.url,authMode:'shared-browser'}]);
+  const write=async(name,data)=>{
+    const file=path.join(state,name);fs.writeFileSync(file+'.tmp',JSON.stringify(data));
+    for(let attempt=0;;attempt++){
+      try{fs.renameSync(file+'.tmp',file);return;}
+      catch(error){if(process.platform!=='win32'||!['EPERM','EACCES','EBUSY'].includes(error.code)||attempt===19)throw error;await delay(25);}
+    }
+  };
+  await write('config.json',{token:randomBytes(32).toString('hex'),roots:[dir]});
+  await write('cloudpc-targets.json',[{name:'A',url:a.url,authMode:'shared-browser'},{name:'B',url:b.url,authMode:'shared-browser'}]);
   const enable=(aa,bb)=>write('target-controls.json',{schema:1,targets:[{name:'A',enabled:aa,revision:aa?'A-on':'A-off'},{name:'B',enabled:bb,revision:'B-on'}]});
-  enable(true,false);
+  await enable(true,false);
   const env={...process.env,LOCALAPPDATA:dir};for(const name of ['HTTPS_PROXY','https_proxy','ALL_PROXY','all_proxy']) delete env[name];
   const child=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname.replace(/^\/(\w:)/,'$1')],{env,windowsHide:true,stdio:['ignore','ignore','pipe']});
   let error='';child.stderr.on('data',c=>error+=c.toString().slice(0,2000));
@@ -205,12 +211,12 @@ test('real server process honors target switches without changing backend PID or
   assert.equal(pid,child.pid,error);
   await signIn(read('browser-entries.json').targets[0]);
   await until(()=>a.state.setups===1);
-  enable(true,true);
+  await enable(true,true);
   await until(()=>read('browser-entries.json')?.targets.length===2,15000);
   await signIn(read('browser-entries.json').targets.find(x=>x.name==='B'));
   await until(()=>b.state.setups===1);
   const socketB=b.state.sockets[0],sessionB=b.state.session;
-  enable(false,true);
+  await enable(false,true);
   await until(()=>read('link-status.json')?.targets.A?.state==='stopped' && a.state.sockets[0].readyState===3);
   assert.equal(read('browser-entries.json').pid,pid);assert.equal(b.state.upgrades,1);assert.equal(b.state.session,sessionB);
   socketB.send(JSON.stringify({t:'req',id:'B-survives',msg:{jsonrpc:'2.0',id:88,method:'tools/list'}}));
