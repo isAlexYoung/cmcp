@@ -7,12 +7,12 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
 import WebSocket from 'ws';
-import { authHeaders, authSocketUrl } from './desktop-auth.mjs';
+import { authHeaders, authSocketUrl, socketHeaders } from './desktop-auth.mjs';
 
 const PREFIX = 'CPCMCP1:';
 const MAX_MESSAGE = 40 * 1024 * 1024;
-const CHUNK_SIZE = 64 * 1024;
-const WINDOW = 8;
+const CHUNK_SIZE = 8192;
+const WINDOW = 4;
 const relaySource = () => fs.readFileSync(new URL('./cloudpc-relay.py', import.meta.url), 'utf8');
 
 export function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', body, signal) {
@@ -54,6 +54,7 @@ export function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', body, s
 export async function prepareRelay(url, auth, agent, signal) {
   const api = (endpoint, method, body) => cloudApi(url, auth, agent, endpoint, method, body, signal);
   const info = await api('/api/sys/info?lite=1');
+  if(info.cmcp?.protocol===1 && info.cmcp.available!==true)throw Error('CC 的终端系统层需要管理员更新，尚未启用 CMCP 兼容连接');
   const home = info.home;
   if (typeof home !== 'string' || !/^\/[a-zA-Z0-9_./-]+$/.test(home) || home.split('/').includes('..')) {
     throw new Error('云电脑的用户目录异常');
@@ -77,7 +78,7 @@ export async function prepareRelay(url, auth, agent, signal) {
   } else {
     await api('/api/sys/fs', 'POST', { dir, name: 'cloudpc-relay.py', kind: 'file', content });
   }
-  return { home, file };
+  return { home, file, cc:info.cmcp?.protocol===1 };
 }
 
 // WebSocket-shaped adapter: startLink keeps its existing login, heartbeat, reconnect,
@@ -124,7 +125,7 @@ export class TerminalLink extends EventEmitter {
             const ack = this.acks.get(key);
             if (ack) { this.acks.delete(key); clearTimeout(ack.timer); ack.resolve(); }
           } else if (message.t === 'pong') {
-            this.emit('pong');
+            this.emit('pong',Buffer.from(typeof message.nonce==='string'?message.nonce:''));
           } else if (message.t === 'close') {
             this.close(message.code || 1000, message.reason || 'closed');
           } else if (message.t === 'error') {
@@ -189,7 +190,7 @@ export class TerminalLink extends EventEmitter {
     }
   }
 
-  ping() { this.ws.ping(); this.packet({ t: 'ping' }); }
+  ping(data=Buffer.alloc(0)) { this.packet({ t: 'ping',nonce:Buffer.from(data).toString() }); }
 
   shutdown() {
     this.send(JSON.stringify({t: 'stop'}));
@@ -228,11 +229,11 @@ export class TerminalLink extends EventEmitter {
 }
 
 export async function openTerminalLink(baseUrl, auth, agent, signal) {
-  const { home, file } = await prepareRelay(baseUrl, auth, agent, signal);
+  const { home, file,cc } = await prepareRelay(baseUrl, auth, agent, signal);
   signal?.throwIfAborted();
   const url = new URL(baseUrl.replace(/^http/, 'ws') + '/api/term/ws');
   url.search = new URLSearchParams({ sid: 'pclink-' + randomUUID(), cols: '200', rows: '30', cwd: home,
-    cmd: `exec python3 -u '${file}'` }).toString();
-  return new TerminalLink(authSocketUrl(url, auth), { headers: authHeaders(auth), agent, rejectUnauthorized: true, perMessageDeflate: false,
+    cmd: `exec ${cc?'env CLOUDPC_CC_SHARED=1 ':''}python3 -u '${file}'` }).toString();
+  return new TerminalLink(authSocketUrl(url, auth), { headers: socketHeaders(baseUrl,auth), agent, rejectUnauthorized: true, perMessageDeflate: false,
     maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000 });
 }

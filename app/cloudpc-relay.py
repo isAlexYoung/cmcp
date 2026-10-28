@@ -26,6 +26,22 @@ PREFIX = b"CPCMCP1:"
 MAX_REQUEST = 8 * 1024 * 1024
 MAX_RESPONSE = 40 * 1024 * 1024
 LINK_DIR = Path.home() / ".local" / "share" / "cloudpc-link"
+CC_SHARED = os.environ.get('CLOUDPC_CC_SHARED') == '1'
+
+
+def directory_mode(directory):
+    if not CC_SHARED:
+        os.chmod(directory,0o700)
+        return
+    import pwd
+    if Path(directory)!=Path('/home/wdguest/.local/share/cloudpc-link') or os.geteuid()!=pwd.getpwnam('wdterm').pw_uid or os.getegid()!=pwd.getpwnam('wdguest').pw_gid:
+        raise RuntimeError('Restricted CC relay identity required')
+    current=Path(directory)
+    while str(current).startswith('/home/wdguest'):
+        meta=current.lstat()
+        if not stat.S_ISDIR(meta.st_mode) or meta.st_uid not in (os.geteuid(),pwd.getpwnam('wdguest').pw_uid) or meta.st_gid!=os.getegid() or meta.st_mode&0o5007 or meta.st_mode&0o070!=0o070:
+            raise RuntimeError('Unsafe CC relay directory')
+        current=current.parent
 
 
 class Relay:
@@ -63,9 +79,12 @@ class Relay:
 
     def start(self, hello):
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.directory, 0o700)
-        self.lock = (self.directory / "terminal-relay.lock").open("a+")
-        os.chmod(self.lock.name, 0o600)
+        directory_mode(self.directory)
+        fd=os.open(self.directory/'terminal-relay.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o660 if CC_SHARED else 0o600)
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid():os.close(fd);raise RuntimeError('Unsafe relay lock')
+        self.lock=os.fdopen(fd,'a+')
+        os.fchmod(self.lock.fileno(),0o660 if CC_SHARED else 0o600)
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -114,7 +133,7 @@ class Relay:
             daemon_threads = True
 
         self.server = Server(str(self.path), Handler)
-        os.chmod(self.path, 0o600)
+        os.chmod(self.path, 0o660 if CC_SHARED else 0o600)
         self.socket_inode = self.path.stat().st_ino
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
         self.emit({"t": "welcome"})
@@ -176,7 +195,7 @@ class Relay:
             temporary = self.directory / ('manual-stop.' + uuid.uuid4().hex + '.tmp')
             try:
                 temporary.write_text(json.dumps({'schema': 1, 'stopped': True}), encoding='utf-8')
-                os.chmod(temporary, 0o600)
+                os.chmod(temporary, 0o640 if CC_SHARED else 0o600)
                 os.replace(temporary, self.stop_marker)
             finally:
                 with contextlib.suppress(FileNotFoundError):
@@ -191,7 +210,9 @@ class Relay:
 
     def packet(self, packet):
         if packet.get("t") == "ping":
-            self.emit({"t": "pong"})
+            nonce=packet.get('nonce','')
+            if not isinstance(nonce,str) or len(nonce)>64:raise ValueError('Invalid health probe')
+            self.emit({"t": "pong",'nonce':nonce})
             return
         if packet.get("t") != "data":
             raise ValueError("Invalid terminal packet")
@@ -233,8 +254,8 @@ class Relay:
             signal.signal(signum, lambda *_: self.stop.set())
         try:
             self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chmod(self.directory, 0o700)
-            os.chmod(Path(__file__), 0o600)
+            directory_mode(self.directory)
+            if not CC_SHARED:os.chmod(Path(__file__), 0o600)
             # bash leaves the cursor after its prompt/escape sequence. Start the
             # first framed packet on a fresh line, even with bracketed paste on.
             sys.stdout.buffer.write(b"\n")

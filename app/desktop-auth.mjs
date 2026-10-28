@@ -17,6 +17,12 @@ export function authSocketUrl(url, auth) {
   return result;
 }
 
+export function socketHeaders(baseUrl,auth) {
+  const url=new URL(baseUrl);
+  if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('Invalid desktop origin');
+  return {...authHeaders(auth),Origin:url.origin};
+}
+
 export function requestBuffered(url, {method='GET', headers={}, body, agent, signal, limit=2*1024*1024, timeout=30000}={}) {
   return new Promise((resolve,reject)=>{
     const target=new URL(url);

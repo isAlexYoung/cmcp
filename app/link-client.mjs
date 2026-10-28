@@ -12,9 +12,11 @@ import https from 'node:https';
 import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
+import {performance} from 'node:perf_hooks';
+import {randomBytes} from 'node:crypto';
 import WebSocket from 'ws';
-import { openTerminalLink } from './terminal-link.mjs';
-import { authHeaders, authSocketUrl, requiresSharedSession, requestBuffered } from './desktop-auth.mjs';
+import { openTerminalLink,cloudApi } from './terminal-link.mjs';
+import { authHeaders, authSocketUrl, socketHeaders, requiresSharedSession, requestBuffered } from './desktop-auth.mjs';
 import { RequestRecovery } from './request-recovery.mjs';
 
 const LINK_PATH = '/api/pclink/ws';
@@ -197,7 +199,9 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
-export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions }) {
+export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={} }) {
+  const interval=healthOptions.interval??1000,timeout=healthOptions.timeout??5000;
+  if(!Number.isFinite(interval)||!Number.isFinite(timeout)||interval<50||timeout<interval*2||timeout>60000)throw Error('Invalid connection health policy');
   let stopped = false;
   const controller = new AbortController();
   const sleep = ms => delay(ms, undefined, { signal: controller.signal }).catch(() => {});
@@ -218,13 +222,13 @@ export function startLink({ name, target, machine, version, forward, askPassword
     try {
       const wsUrl = authSocketUrl(url.replace(/^http/, 'ws') + LINK_PATH, auth);
       ws = terminal ? await openTerminalLink(url, auth, agent, controller.signal) : new WebSocket(wsUrl, {
-        headers: authHeaders(auth), agent, rejectUnauthorized: true, perMessageDeflate: false, maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000,
+        headers: socketHeaders(url,auth), agent, rejectUnauthorized: true, perMessageDeflate: false, maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000,
       });
     } catch (error) { return { error, http: error.status, welcomed: false, lasted: 0 }; }
     if (stopped) { ws.on('error', () => {}); ws.close(); return { welcomed: false, lasted: 0 }; }
     return new Promise(resolve => {
       socket = ws;
-      let lastPong = Date.now();
+      let lastPong = performance.now(),probe=null;
       let opened = 0;
       let welcomed = false;
       let heartbeat;
@@ -259,15 +263,13 @@ export function startLink({ name, target, machine, version, forward, askPassword
         ws.send(JSON.stringify({ t: 'hello', machine, name: deviceName, version, recovery: {protocol: 1, epoch: recovery.epoch} }));
         welcomeTimer = setTimeout(() => { if (!welcomed) { log(`[${name}] no welcome within 15s`); ws.terminate(); } }, 15000);
         heartbeat = setInterval(() => {
-          if (Date.now() - lastPong > 50000) { log(`[${name}] heartbeat lost`); return ws.terminate(); }
-          try { ws.ping(); } catch {}
-        }, 20000);
+          if (performance.now() - lastPong >= timeout) { say('recovering','连接无响应，正在恢复');return ws.terminate(); }
+          try { if(!probe)probe=Buffer.from(randomBytes(12).toString('hex'));ws.ping(probe); } catch {ws.terminate();}
+        }, interval);
       });
-      ws.on('pong', () => { lastPong = Date.now(); });
-      ws.on('ping', () => { lastPong = Date.now(); });
+      ws.on('pong', data => { if(probe&&Buffer.isBuffer(data)&&data.equals(probe)){lastPong=performance.now();probe=null;} });
       ws.on('message', async (data, isBinary) => {
         if (stopped) return;
-        lastPong = Date.now();
         if (isBinary) return;
         if (data.length > 8 * 1024 * 1024) { ws.close(1009, 'Request too large'); return; }
         let m;
@@ -276,8 +278,10 @@ export function startLink({ name, target, machine, version, forward, askPassword
         if (m.t === 'welcome') {
           if (welcomed) return;
           welcomed = true; clearTimeout(welcomeTimer);
-          say('connected', terminal ? '已连接（兼容模式）' : '已连接');
-          Promise.resolve(onConnected?.(auth)).catch(() => log(`[${name}] connector setup failed`));
+          if(onConnected){say('configuring','连接已建立，正在验证工具链路');Promise.resolve().then(()=>onConnected(auth)).then(result=>{
+            if(!finished&&!stopped&&result?.statusHandled!==true&&result!==false)say('connected',terminal?'已连接（兼容模式）':'已连接');
+          }).catch(()=>{if(!finished&&!stopped)say('config-error','连接已建立，但工具配置未确认');});}
+          else say('connected', terminal ? '已连接（兼容模式）' : '已连接');
           return;
         }
         if (m.t !== 'req' || typeof m.id !== 'string' || m.id.length > 256) return;
@@ -328,7 +332,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
           agent?.destroy(); agent = agentFor(url, proxy); proxyDirty = false;
         } catch (error) {
           say('offline', '无法读取或使用系统网络设置，稍后重试', describeNetworkError(error));
-          await sleep(backoff); backoff = Math.min(backoff * 2, 60000); continue;
+          await sleep(backoff); backoff = Math.min(backoff * 2, 30000); continue;
         }
       }
       if (settings.authMode === 'shared-browser') {
@@ -377,12 +381,17 @@ export function startLink({ name, target, machine, version, forward, askPassword
           proxyDirty = true;
           say('offline', error.message + '，稍后自动重试', error.detail);
           await sleep(backoff);
-          backoff = Math.min(backoff * 2, 60000);
+          backoff = Math.min(backoff * 2, 30000);
           continue;
         }
       }
       if (stopped) break;
       if (!credential) continue;
+      if(!terminal){
+        try {const info=await cloudApi(url,credential,agent,'/api/sys/info?lite=1','GET',undefined,controller.signal);if(info.cmcp?.protocol===1){
+          if(info.cmcp.available!==true){say('config-error','CC 终端系统层需要管理员更新，连接已暂停');await sleep(30000);continue;}terminal=true;
+        }} catch(error){if(error.status && error.status!==404 && error.status!==405){say('offline','无法确认云端连接能力，稍后重试');await sleep(backoff);backoff=Math.min(backoff*2,30000);continue;}}
+      }
       say('connecting', '登录成功，正在建立连接');
       const result = await connect(url, credential, agent, terminal);
       if (stopped) break;
@@ -414,7 +423,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
             say('offline', sessionStatus >= 200 && sessionStatus < 300
               ? '云电脑连接接口拒绝访问，已保留网页登录，稍后重试'
               : '暂时无法验证网页会话，已保留登录，稍后重试');
-            await sleep(backoff); backoff = Math.min(backoff * 2, 60000); continue;
+            await sleep(backoff); backoff = Math.min(backoff * 2, 30000); continue;
           }
         }
         credential = null;
@@ -426,7 +435,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
           say('offline', '云端要求重新验证登录，稍后重试', `http=${result.http || 0} close=${result.code || 0}`);
         }
         if (settings.authMode === 'shared-browser') backoff = 1000;
-        await sleep(backoff); backoff = Math.min(backoff * 2, 60000); continue;
+        await sleep(backoff); backoff = Math.min(backoff * 2, 30000); continue;
       }
       if (result.http === 404 && !terminal) {
         terminal = true;
@@ -449,10 +458,10 @@ export function startLink({ name, target, machine, version, forward, askPassword
         say('offline', `建立连接失败（HTTP ${result.http}），稍后自动重试`);
       } else {
         proxyDirty = true;
-        say('offline', '连接中断，正在重连', `close=${result.code || 0}`);
+        say('recovering', '连接中断，正在恢复', `close=${result.code || 0}`);
       }
       await sleep(backoff);
-      backoff = Math.min(backoff * 2, 60000);
+      backoff = Math.min(backoff * 2, 30000);
     }
   })().catch(error => { if (!stopped) say('error', '连接程序发生意外错误', error.stack || error.message); }).finally(() => agent?.destroy());
 

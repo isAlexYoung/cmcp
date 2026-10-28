@@ -69,8 +69,76 @@ def read_json(file):
     return value
 
 
+CC_SHARED = os.environ.get("CLOUDPC_CC_SHARED") == "1"
+
+
+def shared_directory(directory, create=False):
+    """CC user-data grant: terminal and GUI may share Claude/MCP data only."""
+    import pwd
+    import stat
+    home = Path("/home/wdguest")
+    directory = Path(directory)
+    allowed = (home / ".config/Claude", home / ".local/share/cloudpc-link")
+    if not any(directory == root or root in directory.parents for root in allowed):
+        raise ValueError("Outside shared Claude/MCP data")
+    identities = [pwd.getpwnam(n) for n in ("wdguest", "wdterm", "wdgui")]
+    group = identities[0].pw_gid
+    if os.geteuid() not in {u.pw_uid for u in identities[1:]} or os.getegid() != group:
+        raise ValueError("Restricted CC connector identity required")
+    fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for name in directory.relative_to(home).parts:
+            if create:
+                try:
+                    os.mkdir(name, 0o2770, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            meta = os.fstat(fd)
+            if meta.st_uid not in {u.pw_uid for u in identities} or meta.st_gid != group or meta.st_mode & 0o5007 or meta.st_mode & 0o070 != 0o070:
+                raise ValueError("Unsafe shared Claude/MCP directory")
+            if meta.st_uid == os.geteuid() and not meta.st_mode & 0o2000:
+                os.fchmod(fd, stat.S_IMODE(meta.st_mode) | 0o2000)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def shared_write(file, data):
+    # Descriptor-relative operations cannot follow a substituted parent symlink.
+    import stat
+    import pwd
+    directory = shared_directory(file.parent, create=True)
+    temporary = ".mcp-tmp-" + uuid.uuid4().hex
+    try:
+        try:
+            meta = os.stat(file.name, dir_fd=directory, follow_symlinks=False)
+            owners = {pwd.getpwnam(n).pw_uid for n in ("wdguest", "wdterm", "wdgui")}
+            if not stat.S_ISREG(meta.st_mode) or meta.st_nlink != 1 or meta.st_gid != os.getegid() or meta.st_uid not in owners:
+                raise ValueError("Unsafe shared Claude/MCP file")
+        except FileNotFoundError:
+            pass
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o660)
+            os.fsync(stream.fileno())
+        os.replace(temporary, file.name, src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=directory)
+        os.close(directory)
+
+
 def atomic_write(file, data, mode=0o600):
     file = Path(file)
+    if CC_SHARED:
+        return shared_write(file, data)
     file.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".mcp-tmp-", dir=str(file.parent))
     try:
@@ -502,9 +570,16 @@ def apply_install(private, targets, catalog, name):
             raise ValueError("mcpServers must be an object in " + str(target))
         documents[target] = document
 
-    private.mkdir(parents=True, exist_ok=True)
-    os.chmod(private.parent, 0o700)
-    os.chmod(private, 0o700)
+    if CC_SHARED:
+        expected = Path("/home/wdguest/.config/Claude/claude_desktop_config.json")
+        if targets != [expected]:
+            raise ValueError("CC shared install requires the fixed Claude Desktop config")
+        fd = shared_directory(private, create=True)
+        os.close(fd)
+    else:
+        private.mkdir(parents=True, exist_ok=True)
+        os.chmod(private.parent, 0o700)
+        os.chmod(private, 0o700)
     lock_dir = private / ".install-lock"
     try:
         lock_dir.mkdir()
@@ -517,7 +592,11 @@ def apply_install(private, targets, catalog, name):
         code = Path(__file__).read_bytes()
         updated = (connector.read_bytes() if connector.exists() else None) != code
         entry = {"command": str(Path(sys.executable).resolve()),
-                 "args": ["-u", str(connector), "serve", "--name", name]}
+                 "args": ["-u", str(connector), "serve", "--name", name, "--home", str(private.parents[3])]}
+        if os.environ.get("CLOUDPC_LINK_SOCKET"):
+            entry["env"] = {"CLOUDPC_LINK_SOCKET": str(LINK_SOCKET)}
+        if CC_SHARED:
+            entry["env"] = {"CLOUDPC_CC_SHARED": "1", "CLOUDPC_LINK_SOCKET": str(LINK_SOCKET)}
         manifest_file = private / "manifest.json"
         previous_manifest = read_json(manifest_file) if manifest_file.exists() else {}
         known_targets = sorted(set(previous_manifest.get("targets", []) + [str(p) for p in targets]))

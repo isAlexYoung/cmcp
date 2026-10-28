@@ -8,7 +8,7 @@ import {Cloud} from './cloud-connector.mjs';
 export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log, deviceName, recoveryOptions,
   passwordFor, session = false, onReplaced, install = (t, auth, agent, signal) => new Cloud(t.url, auth, agent, signal).install()}) {
   return async (t, {signal, current, status}) => {
-    const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null};
+    const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null,connected:false,connectionEpoch:0};
     let closed = false;
     let stopping;
     record.stop = () => {
@@ -38,28 +38,31 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
       }
       record.setup = async () => {
         const authKey = shared ? record.auth?.sessionId : record.auth;
-        if (!current() || record.installing || Date.now() < record.retryAt || !authKey || (shared && authKey !== record.gateway.getSessionId()) || record.installed === authKey) return;
+        if (!current() || !record.connected || record.installing || Date.now() < record.retryAt || !authKey || (shared && authKey !== record.gateway.getSessionId())) return;
+        if(record.installed===authKey)return;
         record.installing = true;
         const used = authKey;
-        const sameSession = () => current() && (!shared || used === record.gateway.getSessionId());
+        const epoch=record.connectionEpoch;
+        const sameSession = () => current() && epoch===record.connectionEpoch && (!shared || used === record.gateway.getSessionId());
         status.set(t.name, 'configuring', '正在配置此云电脑的 Claude MCP');
         try {
           const changed = await install(t, record.auth, record.agent, signal);
-          if (sameSession()) {
+          if (sameSession()&&record.connected) {
             record.installed = used;
             status.set(t.name, 'connected', changed ? '共享会话已连接；MCP 配置已更新，请重启云端 Claude' : '共享会话已连接，Claude MCP 配置已确认');
           }
         } catch (error) {
-          if (sameSession()) {
+          if (sameSession()&&record.connected) {
             status.set(t.name, 'config-error', '共享连接已建立，但 Claude 配置失败，30 秒后重试');
             log(`[${t.name}] shared connector setup failed (${error.status || error.code || 'setup'})`);
             record.retryAt = Date.now() + 30000;
           }
         } finally { record.installing = false; }
       };
-      record.link = startLink({name:t.name, machine, version, askPassword, notify, status, log, session, onReplaced, deviceName, recoveryOptions,
+      const linkStatus={set:(name,state,message)=>{if(['offline','recovering','waiting-login','replaced','stopped'].includes(state)){record.connected=false;record.installed=null;record.connectionEpoch++;}status.set(name,state,message);}};
+      record.link = startLink({name:t.name, machine, version, askPassword, notify,status:linkStatus,log, session, onReplaced, deviceName, recoveryOptions,
         forward:msg => { if (!current()) throw Error('Target stopped'); return forward(msg); },
-        onConnected:auth => { if (current()) { record.auth = auth; return record.setup(); } },
+        onConnected:async auth => { if (current()) { record.auth = auth;record.connected=true;record.retryAt=0;await record.setup(); }return {statusHandled:true}; },
         target:() => current() ? {
           url:t.url, stamp:t.stamp, authMode:shared ? 'shared-browser' : 'legacy',
           getSessionId:() => record.gateway?.getSessionId(),
