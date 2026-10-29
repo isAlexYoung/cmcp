@@ -139,7 +139,10 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
     }
     out['cache-control'] = 'no-store';
     out['x-content-type-options'] = 'nosniff';
-    out['referrer-policy'] = 'no-referrer';
+    // Native Windows DownloadURL drags pass the page URL as their referrer.
+    // no-referrer conflicts with that browser path before HTTP is sent.
+    // Allow same-origin downloads while withholding referrers from other sites.
+    out['referrer-policy'] = 'same-origin';
     return out;
   };
   async function collect(req, max) {

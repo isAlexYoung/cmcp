@@ -51,7 +51,7 @@ jobs:
           node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 81' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 82' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |

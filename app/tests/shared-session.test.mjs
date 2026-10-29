@@ -195,3 +195,10 @@ test('dual authentication shares the upstream cookie and page session across bro
   assert.ok(d.state.requests.every(r=>!r.cookie || r.cookie==='wd_session=fixture-cookie'));
   d.gateway.invalidateSession(d.gateway.getSessionId());assert.equal(d.gateway.getSessionAuth(),null);
 });
+
+test('proxied documents permit same-origin download referrers and bootstrap retains no-referrer', async t=>{
+  const d=await fixture(t);
+  const page=await d.browser('/');assert.equal(page.headers['referrer-policy'],'same-origin');
+  const launch=await d.browser('/__mcp/open');assert.equal(launch.headers['referrer-policy'],'no-referrer');
+  assert.match(launch.body.toString(),/name="referrer" content="no-referrer"/);
+});
