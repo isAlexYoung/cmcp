@@ -199,9 +199,9 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
-export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={} }) {
-  const interval=healthOptions.interval??1000,timeout=healthOptions.timeout??5000;
-  if(!Number.isFinite(interval)||!Number.isFinite(timeout)||interval<50||timeout<interval*2||timeout>60000)throw Error('Invalid connection health policy');
+export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={},onHealth }) {
+  const interval=healthOptions.interval??1000,timeout=healthOptions.timeout??5000,hardTimeout=healthOptions.hardTimeout??30000;
+  if(!Number.isFinite(interval)||!Number.isFinite(timeout)||interval<50||timeout<interval*2||timeout>60000||!Number.isFinite(hardTimeout)||hardTimeout<timeout+interval||hardTimeout>120000)throw Error('Invalid connection health policy');
   let stopped = false;
   const controller = new AbortController();
   const sleep = ms => delay(ms, undefined, { signal: controller.signal }).catch(() => {});
@@ -209,13 +209,21 @@ export function startLink({ name, target, machine, version, forward, askPassword
   let lastLog = '';
   const recovery = new RequestRecovery(recoveryOptions);
   let recoveryAuth;
+  let unstable=false,lastStatus;
+  const publish = () => {
+    if(!lastStatus)return;
+    const soft=unstable&&!onHealth&&['connected','configuring'].includes(lastStatus.state);
+    status.set(name,soft?'unstable':lastStatus.state,soft?'连接短暂波动，正在探测恢复':lastStatus.message);
+  };
+  const health = value => { if(unstable===value)return;unstable=value;if(value)log(`[${name}] heartbeat delayed; retaining connection`);if(onHealth)onHealth(value);else publish(); };
   const say = (state, message, detail = '') => {
-    status.set(name, state, message);
+    lastStatus={state,message};publish();
     const line = `[${name}] ${state} ${message}${detail ? ' | ' + detail : ''}`;
     if (line !== lastLog) { lastLog = line; log(line); }
   };
 
   const connect = async (url, auth, agent, terminal = false) => {
+    health(false);
     const authKey = auth?.sessionId || JSON.stringify(auth);
     if (recoveryAuth !== authKey) { recovery.reset(); recoveryAuth = authKey; }
     let ws;
@@ -228,7 +236,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
     if (stopped) { ws.on('error', () => {}); ws.close(); return { welcomed: false, lasted: 0 }; }
     return new Promise(resolve => {
       socket = ws;
-      let lastPong = performance.now(),probe=null;
+      let lastPong = performance.now(),probe=null,lastTick=lastPong,hardNotBefore=0;
       let opened = 0;
       let welcomed = false;
       let heartbeat;
@@ -259,15 +267,20 @@ export function startLink({ name, target, machine, version, forward, askPassword
         ws.terminate();
       });
       ws.on('open', () => {
-        opened = Date.now();
+        opened = Date.now();lastPong=lastTick=performance.now();
         ws.send(JSON.stringify({ t: 'hello', machine, name: deviceName, version, recovery: {protocol: 1, epoch: recovery.epoch} }));
         welcomeTimer = setTimeout(() => { if (!welcomed) { log(`[${name}] no welcome within 15s`); ws.terminate(); } }, 15000);
         heartbeat = setInterval(() => {
-          if (performance.now() - lastPong >= timeout) { say('recovering','连接无响应，正在恢复');return ws.terminate(); }
+          const now=performance.now();
+          // A suspended or busy client needs a chance to process queued pongs first.
+          if(now-lastTick>interval*3)hardNotBefore=now+interval*2;
+          lastTick=now;
+          if(now-lastPong>=timeout)health(true);
+          if(now-lastPong>=hardTimeout&&now>=hardNotBefore){say('recovering','持续无响应，正在重建连接');return ws.terminate();}
           try { if(!probe)probe=Buffer.from(randomBytes(12).toString('hex'));ws.ping(probe); } catch {ws.terminate();}
         }, interval);
       });
-      ws.on('pong', data => { if(probe&&Buffer.isBuffer(data)&&data.equals(probe)){lastPong=performance.now();probe=null;} });
+      ws.on('pong', data => { if(probe&&Buffer.isBuffer(data)&&data.equals(probe)){lastPong=performance.now();probe=null;if(unstable)log(`[${name}] heartbeat recovered without reconnect`);health(false);} });
       ws.on('message', async (data, isBinary) => {
         if (stopped) return;
         if (isBinary) return;
@@ -396,7 +409,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
       const result = await connect(url, credential, agent, terminal);
       if (stopped) break;
       if (result.sessionChanged) { credential = null; backoff = 1000; continue; }
-      if (result.lasted > 60000) backoff = 1000;
+      if (result.welcomed || result.lasted > 60000) backoff = 1000;
       if (result.http === 401 || result.code === 4001) {
         const invalid = credential;
         if (settings.authMode === 'shared-browser') {

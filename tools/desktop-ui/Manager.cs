@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.5.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.5.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.5.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.5.1.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -46,6 +46,7 @@ namespace CMCP {
                 case "connecting": return "正在连接";
                 case "configuring": return "正在配置 Claude";
                 case "config-error": return "Claude 配置待处理";
+                case "unstable": return "正在恢复";
                 case "recovering": return "正在恢复";
                 case "offline": return "等待网络恢复";
                 case "replaced": return "连接已被接管";
@@ -70,6 +71,7 @@ namespace CMCP {
                 case "configuring": return "正在通过现有流程检查云端 Claude 配置，请等待。";
                 case "config-error": return "连接已建立，但 Claude 配置尚未确认。可查看日志，后台按原规则重试。";
                 case "offline": return "后台正在等待网络或云端恢复。共享模式不会自动抢回失效的网页登录。";
+                case "unstable": return "连接短暂波动，正在继续探测；已保留登录和工具配置，恢复后继续使用。";
                 case "recovering": return "连接暂时中断，正在自动重连并重新确认工具链路；未确认结果的操作不会自动重发。";
                 case "replaced": return "其他电脑或进程已接管连接。本机会停止竞争；需要时手动启动连接。";
                 case "stale": return "本地状态超过 30 秒未更新，暂不确认连接有效。此界面不会主动探测 VPS。";

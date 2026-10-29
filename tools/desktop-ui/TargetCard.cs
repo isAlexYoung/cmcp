@@ -114,7 +114,7 @@ namespace CMCP {
 
         internal void UpdateActions() {
             bool connected=Target.State=="connected";
-            bool connecting=BusyConnect||Target.State=="connecting"||Target.State=="configuring"||Target.State=="waiting-login"||Target.State=="recovering";
+            bool connecting=BusyConnect||Target.State=="connecting"||Target.State=="configuring"||Target.State=="waiting-login"||(Target.State=="recovering"||Target.State=="unstable");
             Details.StatusOverride=BusyStop?"正在停止":BusyConnect&&Target.State=="stopped"?"连接中":"";
             Connect.Text=BusyStop?"正在停止":connected?"成功连接":connecting?"连接中":"未连接";
             Connect.Glyph=connected?"check":connecting?"stop":"play";
@@ -122,7 +122,7 @@ namespace CMCP {
             Connect.Enabled=!BusyStop;
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
-            StatusText.Text=BusyStop?"正在停止":Target.State=="recovering"?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
+            StatusText.Text=BusyStop?"正在停止":(Target.State=="recovering"||Target.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
             StatusText.Text=L.Text(StatusText.Text);StatusText.AccessibleName=StatusText.Text;
             tips.SetToolTip(Connect,connected?"点击停止此云电脑的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台云电脑");
             Connect.AccessibleName=L.Text(Connect.Text)+" · "+Target.Url;

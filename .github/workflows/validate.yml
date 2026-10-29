@@ -48,10 +48,10 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 49' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 68' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |
@@ -104,7 +104,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 244 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 246 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Theme-aware native tooltips and focus preservation
         shell: pwsh
         run: |

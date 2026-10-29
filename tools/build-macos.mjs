@@ -20,7 +20,7 @@ sourceFiles.push('desktop-instance.mjs');
 for(const name of sourceFiles)fs.copyFileSync(path.join(root,'macos',name),path.join(resources,'macos',name));
 fs.cpSync(path.join(root,'macos/ui'),path.join(resources,'macos/ui'),{recursive:true});
 fs.copyFileSync(path.join(root,'macos/runtime/FILESYSTEM-LICENSE.txt'),path.join(resources,'macos/FILESYSTEM-LICENSE.txt'));
-const shared=['link-client.mjs','terminal-link.mjs','desktop-auth.mjs','shared-session-gateway.mjs','shared-autofill.mjs','request-recovery.mjs','target-connections.mjs','managed-target.mjs','cloud-connector.mjs','cloudpc-relay.py'];
+const shared=['link-client.mjs','terminal-link.mjs','desktop-auth.mjs','shared-session-gateway.mjs','web-recovery.mjs','shared-autofill.mjs','request-recovery.mjs','target-connections.mjs','managed-target.mjs','cloud-connector.mjs','cloudpc-relay.py'];
 for(const name of shared)fs.copyFileSync(path.join(root,'app',name),path.join(resources,'app',name));
 fs.cpSync(path.join(root,'macos/node_modules'),path.join(resources,'node_modules'),{recursive:true,filter:source=>!source.split(path.sep).includes('.bin')});
 fs.copyFileSync(process.execPath,path.join(resources,'runtime/node'));fs.chmodSync(path.join(resources,'runtime/node'),0o755);

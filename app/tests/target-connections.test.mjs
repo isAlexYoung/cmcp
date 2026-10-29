@@ -21,7 +21,7 @@ async function until(check, timeout=10000) {
 function board() { return {data:new Map(), set(name,state,message,revision) { this.data.set(name,{state,message,revision}); }}; }
 function controls(...names) { return new Map(names.map(name=>[name,{name,enabled:true,revision:name+'-1'}])); }
 async function desktop(t) {
-  const state={session:'',logins:0,upgrades:0,sockets:[],requests:0,setups:0};
+  const state={pong:true,session:'',logins:0,upgrades:0,sockets:[],requests:0,setups:0};
   const server=http.createServer(async(req,res)=>{
     state.requests++;
     const chunks=[]; for await (const c of req) chunks.push(c);
@@ -39,7 +39,7 @@ async function desktop(t) {
     if (req.url.startsWith('/api/sys/fs')) return res.end('{"entries":[]}');
     res.end('{"ok":true}');
   });
-  const wss=new WebSocketServer({noServer:true});
+  const wss=new WebSocketServer({noServer:true,autoPong:false});
   server.on('upgrade',(req,socket,head)=>{
     const u=new URL(req.url,'http://fixture');
     if (u.searchParams.get('access')!==state.session || req.headers.cookie!=='wd_session=test-only') return socket.destroy();
@@ -50,6 +50,7 @@ async function desktop(t) {
         ws.send(JSON.stringify({t:'exit',code:0})); return;
       }
       state.upgrades++; state.sockets.push(ws);
+      ws.on('ping',data=>{if(state.pong)ws.pong(data);});
       ws.on('message',raw=>{
         const m=JSON.parse(raw);
         if (m.t==='hello') ws.send(JSON.stringify({t:'welcome'}));
@@ -223,4 +224,20 @@ test('real server process honors target switches without changing backend PID or
   await until(()=>b.state.reply?.id==='B-survives');
   assert.ok(b.state.reply.msg.result.tools.some(x=>x.name==='read_file'));
   assert.equal(b.state.logins,1);assert.equal(child.exitCode,null);
+});
+
+
+test('soft network recovery keeps the managed setup lease, browser session and tool connection', {timeout:6000}, async t=>{
+  const d=await desktop(t),status=board();let setups=0;
+  const manager=createTargetConnections({readTargets:()=>[{name:'A',url:d.url,authMode:'shared-browser'}],readControls:()=>controls('A'),status,interval:20,
+    create:managedTargetFactory({proxyFor:async()=>'',machine:'fixture',version:'test',healthOptions:{interval:50,timeout:200,hardTimeout:1000},
+      forward:async()=>({ok:true}),askPassword:()=>assert.fail('no password prompt'),passwordFor:()=>assert.fail('no saved password'),notify:()=>{},log:()=>{},install:async()=>{setups++;return false;}})});
+  t.after(()=>manager.close());await until(()=>manager.values().length===1);
+  const record=manager.values()[0];await signIn(record.gateway);await until(()=>status.data.get('A')?.state==='connected');
+  const installed=record.installed,epoch=record.connectionEpoch,session=record.gateway.getSessionId();d.state.pong=false;
+  await until(()=>status.data.get('A')?.state==='unstable');
+  assert.equal(record.connected,true);assert.equal(record.installed,installed);assert.equal(record.connectionEpoch,epoch);
+  d.state.sockets[0].send(JSON.stringify({t:'req',id:'during-soft',msg:{}}));await until(()=>d.state.reply?.id==='during-soft');
+  d.state.pong=true;await until(()=>status.data.get('A')?.state==='connected');await record.setup();
+  assert.equal(setups,1);assert.equal(d.state.upgrades,1);assert.equal(d.state.logins,1);assert.equal(record.gateway.getSessionId(),session);
 });

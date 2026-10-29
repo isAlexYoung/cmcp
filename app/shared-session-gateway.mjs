@@ -5,6 +5,7 @@ import https from 'node:https';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { authHeaders, requestBuffered } from './desktop-auth.mjs';
 import {autoFillSource, injectAutoFill} from './shared-autofill.mjs';
+import {recoveryPage} from './web-recovery.mjs';
 
 const SESSION_RE = /^[A-Za-z0-9._~-]{16,4096}$/;
 const HOP_HEADERS = new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade','host']);
@@ -47,7 +48,11 @@ function localError(res, status, message) {
   res.end(body);
 }
 
-export async function createSharedSessionGateway({ name, baseUrl, agent, onSession = () => {}, onInvalidate = () => {}, diagnostic = () => {}, autoPassword }) {
+export async function createSharedSessionGateway({ name, baseUrl, agent, onSession = () => {}, onInvalidate = () => {}, diagnostic = () => {}, autoPassword, httpRecoveryOptions={} }) {
+  const retryDelays=httpRecoveryOptions.delays??[500,1500];
+  const headerTimeout=httpRecoveryOptions.headerTimeout??10000;
+  if(!Array.isArray(retryDelays)||retryDelays.length>4||retryDelays.some(n=>!Number.isFinite(n)||n<0||n>5000)||!Number.isFinite(headerTimeout)||headerTimeout<50||headerTimeout>60000)throw Error('Invalid HTTP recovery policy');
+  const report=message=>{try{diagnostic(message);}catch{}};
   const remote = new URL(baseUrl);
   const loopbackTest = remote.protocol === 'http:' && remote.hostname === '127.0.0.1';
   if ((!loopbackTest && remote.protocol !== 'https:') || remote.username || remote.password || remote.search || remote.hash || remote.pathname !== '/') throw new Error('共享会话只支持干净的 HTTPS 云电脑地址');
@@ -239,33 +244,88 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
   function proxyHttp(req, res, local) {
     const target = upstreamUrl(local);
     if (req.method === 'POST' && local.pathname === '/api/auth/login') return void proxyLogin(req, res, target);
-    const headers = requestHeaders(req, target);
-    const autoPage=typeof autoPassword==='function'&&(!autoUsed||sessionId)&&req.method==='GET'&&local.pathname==='/';
-    if(autoPage)headers['accept-encoding']='identity';
-    const used = sessionId;
-    const upstream = track(transport.request(target, { method: req.method, headers, agent, rejectUnauthorized: true, timeout: 60000 }, upstreamRes => {
-      if (upstreamRes.statusCode === 401 && local.pathname === '/api/auth/session') clearSession(used);
-      let outputHeaders;
-      try { outputHeaders = responseHeaders(upstreamRes.headers, upstreamRes.statusCode); }
-      catch { upstreamRes.resume(); return localError(res, 502, '云电脑返回了不安全的跳转'); }
-      if(autoPage&&upstreamRes.statusCode===200&&/^text\/html\b/i.test(String(outputHeaders['content-type']))&&!outputHeaders['content-encoding']){
-        const chunks=[];let size=0;
-        upstreamRes.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)upstreamRes.destroy(Error('HTML too large'));else chunks.push(chunk);});
-        upstreamRes.on('error',()=>localError(res,502,'无法加载自动登录页面，请手动重试'));
-        upstreamRes.on('end',()=>{const body=Buffer.from(injectAutoFill(Buffer.concat(chunks).toString('utf8')));delete outputHeaders['etag'];delete outputHeaders['content-md5'];outputHeaders['content-length']=body.length;res.writeHead(200,outputHeaders);res.end(body);});
-        return;
+    // Never replay submissions, uploads, or a request with a body. Streaming
+    // responses cannot be replayed once headers/data reached the browser.
+    const safe=['GET','HEAD'].includes(req.method)&&!req.headers['transfer-encoding']&&!Number(req.headers['content-length']||0);
+    const document=safe&&req.method==='GET'&&!local.pathname.startsWith('/api/')&&
+      (req.headers['sec-fetch-dest']==='document'||String(req.headers.accept||'').includes('text/html'));
+    let upstream,retryTimer,headerTimer,attempt=0,cancelled=false;
+    const unavailable=()=>{
+      if(document){const body=Buffer.from(recoveryPage());res.writeHead(503,{
+        'content-type':'text/html; charset=utf-8','content-length':body.length,'cache-control':'no-store',
+        'x-cmcp-recovery':'1','retry-after':'3','x-content-type-options':'nosniff','referrer-policy':'no-referrer',
+        'content-security-policy':"default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"});res.end(body);}
+      else localError(res,502,'连接正在恢复，请稍后重试');
+    };
+    const cancel=()=>{cancelled=true;clearTimeout(retryTimer);clearTimeout(headerTimer);if(upstream){req.unpipe(upstream);upstream.destroy();}};
+    req.once('aborted',cancel);res.once('close',cancel);
+    const transient=new Set(['ECONNRESET','EPIPE','ETIMEDOUT','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','EAI_AGAIN','ERR_STREAM_PREMATURE_CLOSE']);
+    const category=document?'document':local.pathname.startsWith('/api/')?'api':'asset';
+    function run(){
+      if(cancelled||closed||res.destroyed||res.writableEnded)return;
+      let settled=false;
+      const retry=code=>{
+        if(settled)return true;
+        settled=true;clearTimeout(headerTimer);
+        if(cancelled||closed||res.destroyed||res.writableEnded)return true;
+        // Codes/categories only: URLs may contain session credentials.
+        report(`web ${category} ${req.method} attempt=${attempt+1} code=${code} tls=${!!upstream?.socket?.encrypted&&!!upstream?.socket?._secureEstablished}`);
+        if(safe&&!res.headersSent&&attempt<retryDelays.length){
+          const wait=retryDelays[attempt++];retryTimer=setTimeout(run,wait);return true;
+        }
+        return false;
+      };
+      const headers=requestHeaders(req,target);
+      const autoPage=typeof autoPassword==='function'&&(!autoUsed||sessionId)&&req.method==='GET'&&local.pathname==='/';
+      if(autoPage)headers['accept-encoding']='identity';
+      const used=sessionId;
+      upstream=track(transport.request(target,{method:req.method,headers,agent,rejectUnauthorized:true,timeout:60000},upstreamRes=>{
+        clearTimeout(headerTimer);
+        if(cancelled||closed){upstreamRes.destroy();return;}
+        if([502,503,504].includes(upstreamRes.statusCode)&&safe){
+          if(retry('HTTP_'+upstreamRes.statusCode)){upstreamRes.destroy();return;}
+          if(document){upstreamRes.destroy();return unavailable();}
+        }
+        if(upstreamRes.statusCode===401&&local.pathname==='/api/auth/session')clearSession(used);
+        let outputHeaders;
+        try{outputHeaders=responseHeaders(upstreamRes.headers,upstreamRes.statusCode);}
+        catch{settled=true;upstreamRes.resume();return localError(res,502,'云电脑返回了不安全的跳转');}
+        if(autoPage&&upstreamRes.statusCode===200&&/^text\/html\b/i.test(String(outputHeaders['content-type']))&&!outputHeaders['content-encoding']){
+          const chunks=[];let size=0;
+          upstreamRes.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)upstreamRes.destroy(Error('HTML too large'));else chunks.push(chunk);});
+          upstreamRes.on('error',error=>{
+            if(transient.has(error.code)){if(!retry(error.code))unavailable();}
+            else{settled=true;localError(res,502,'无法加载页面');}
+          });
+          upstreamRes.on('end',()=>{
+            if(settled||cancelled||closed)return;settled=true;
+            const body=Buffer.from(injectAutoFill(Buffer.concat(chunks).toString('utf8')));
+            delete outputHeaders['etag'];delete outputHeaders['content-md5'];outputHeaders['content-length']=body.length;
+            if(attempt)report(`web ${category} recovered attempts=${attempt+1}`);
+            res.writeHead(200,outputHeaders);res.end(body);
+          });return;
+        }
+        settled=true;
+        if(attempt)report(`web ${category} recovered attempts=${attempt+1}`);
+        res.writeHead(upstreamRes.statusCode||502,outputHeaders);
+        upstreamRes.on('error',()=>res.destroy());upstreamRes.pipe(res);
+      }));
+      upstream.on('timeout',()=>upstream.destroy(Object.assign(Error('timeout'),{code:'ETIMEDOUT'})));
+      upstream.on('error',error=>{
+        if(settled||cancelled||closed)return;
+        if(transient.has(error.code)){if(!retry(error.code))unavailable();}
+        else{settled=true;report(`web ${category} failed code=NON_TRANSIENT`);localError(res,502,'无法建立安全连接，请检查 CMCP 日志和网络设置');}
+      });
+      // Bound TLS/header stalls, without imposing that deadline on downloads.
+      if(safe)headerTimer=setTimeout(()=>upstream.destroy(Object.assign(Error('header timeout'),{code:'ETIMEDOUT'})),headerTimeout);
+      if(safe){req.resume();upstream.end();}
+      else{
+        let bytes=0;
+        req.on('data',chunk=>{bytes+=chunk.length;if(bytes>64*1024*1024){cancel();localError(res,413,'Request too large');}});
+        req.pipe(upstream);
       }
-      res.writeHead(upstreamRes.statusCode || 502, outputHeaders);
-      upstreamRes.on('error', () => res.destroy());
-      upstreamRes.pipe(res);
-    }));
-    upstream.on('timeout', () => upstream.destroy(new Error('timeout')));
-    upstream.on('error', () => localError(res, 502, '无法连接云电脑'));
-    req.on('aborted', () => upstream.destroy());
-    let bytes = 0;
-    req.on('data', chunk => { bytes += chunk.length; if (bytes > 64*1024*1024) { req.unpipe(upstream); upstream.destroy(); localError(res,413,'Request too large'); } });
-    res.on('close', () => upstream.destroy());
-    req.pipe(upstream);
+    }
+    run();
   }
 
   server = http.createServer((req, res) => {

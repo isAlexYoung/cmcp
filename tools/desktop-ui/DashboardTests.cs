@@ -69,6 +69,9 @@ namespace CMCP {
                 form.Show();Pump();var a=form.Cards["preview-a"];var b=form.Cards["preview-b"];
                 check(form.LayoutFits(),"real wide WinForms cards and toolbar fit inside window");
                 check(a.Connect.Text=="成功连接"&&a.Connect.Primary&&b.Connect.Text=="未连接"&&!b.Connect.Primary,"connection pill reflects confirmed versus disconnected state");
+                b.Target.State="unstable";b.TestHover(true);b.UpdateActions();
+                check(b.StatusText.Text=="正在恢复"&&b.Connect.Text=="连接中","soft recovery keeps the card in an active connection state");
+                b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","soft recovery stop action cancels only B instead of starting another connection");
                 b.TestHover(true);b.Connect.PerformClick();check(b.Target.State=="connected"&&a.Target.State=="connected","card connect dispatch addresses B only in isolated interactive demo");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","card disconnect leaves A intact in isolated interactive demo");
                 a.SetExpanded(true,false);Pump();check(a.Details.Visible&&a.Height>a.Width/20&&b.Top>=a.Bottom,"accordion expands inside card and shifts following card");
