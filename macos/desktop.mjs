@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {STATE,LEGACY_STATE,KIT,privateDir,safeFile,atomicWrite,LABEL} from './platform.mjs';
+import {STATE,LEGACY_STATE,KIT,VERSION,privateDir,safeFile,atomicWrite,LABEL} from './platform.mjs';
+import {reuseDesktopManager} from './desktop-instance.mjs';
 import {migratePortableState,retryPortableCleanup} from './portable-state.mjs';
 import {createManager} from './manager.mjs';
 import {retireLegacyAgent} from './legacy-agent.mjs';
@@ -32,6 +33,15 @@ for(let attempt=0;attempt<50;attempt++){
     if(attempt===0){
       let previous;try{previous=JSON.parse(fs.readFileSync(instanceFile,'utf8'));}catch{throw Error('A CMCP manager is already starting');}
       if(previous.pid!==pid||!/^http:\/\/127\.0\.0\.1:\d+$/.test(previous.origin)||!/^[a-f0-9]{64}$/.test(previous.token))throw Error('Existing manager identity could not be verified');
+      if(process.env.CMCP_FORCE_RESTART!=='1'&&await reuseDesktopManager(previous,{pid,version:VERSION})){
+        process.stdout.write(JSON.stringify({origin:previous.origin,token:previous.token})+'\n');
+        // This observer owns no backend or lock. Closing it cannot stop the owner;
+        // explicit application exit still uses the existing authenticated API.
+        const watcher=setInterval(()=>{if(!alive(pid))process.exit(1);},1000);
+        process.once('SIGTERM',()=>{clearInterval(watcher);process.exit(0);});
+        process.once('SIGINT',()=>{clearInterval(watcher);process.exit(0);});
+        await new Promise(()=>{});
+      }
       const response=await fetch(previous.origin+'/api/restart',{method:'POST',headers:{'x-cmcp-token':previous.token,'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(10000)});
       if(!response.ok)throw Error('Existing manager could not stop');
     }

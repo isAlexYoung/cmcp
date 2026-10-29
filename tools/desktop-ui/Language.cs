@@ -9,6 +9,8 @@ namespace CMCP {
         internal static event Action Changed;
         internal static void Set(string value){Language=value=="en"?"en":"zh-CN";if(Changed!=null)Changed();}
         static readonly Dictionary<string,string> words=new Dictionary<string,string>{
+            {"正在准备本机连接服务…","Preparing the local connection service…"},
+            {"本机连接服务未能就绪，请检查日志后重试连接。","The local connection service is not ready. Check the logs and retry the connection."},
             {"正在恢复","Recovering"},
             {"设置","Settings"},{"通用","General"},{"关于","About"},{"返回","Back"},{"添加云电脑","Add cloud PC"},{"编辑云电脑","Edit cloud PC"},{"保存","Save"},{"添加","Add"},{"取消","Cancel"},
             {"连接云电脑","Connect cloud PC"},{"断开云电脑","Disconnect cloud PC"},{"重命名","Rename"},{"暂无云电脑","No cloud PCs"},{"请先保存或返回当前编辑页，再重命名其他云电脑。","Save or leave the current editor before renaming another cloud PC."},

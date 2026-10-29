@@ -45,11 +45,13 @@ const controls=JSON.parse(fs.readFileSync(path.join(state,'target-controls.json'
 const targets=Object.fromEntries(controls.targets.map(t=>[t.name,{state:t.enabled?'offline':'stopped',revision:t.revision}]));
 fs.appendFileSync(path.join(state,'launches.txt'),process.pid+'\n');
 const publish=()=>fs.writeFileSync(path.join(state,'link-status.json'),JSON.stringify({pid:process.pid,controlProtocol:1,autoLoginProtocol:AUTO_VERSION,at:new Date().toISOString(),targets}));
-publish();setInterval(()=>{if(fs.existsSync(path.join(state,'stopped.flag')))process.exit(0);publish();},100);
+publish();setInterval(()=>{if(fs.existsSync(path.join(state,'stopped.flag')))process.exit(0);if(!fs.existsSync(path.join(state,'freeze.flag')))publish();},100);
 '@
 $workers=New-Object Collections.Generic.List[object]
-function Worker([string]$name){
-    $p=Start-Process powershell.exe -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $kit 'manager-restart.ps1')+'"') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $EvidenceDirectory ($name+'.out')) -RedirectStandardError (Join-Path $EvidenceDirectory ($name+'.err'))
+function Worker([string]$name,[switch]$ForceRestart){
+    $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $kit 'manager-restart.ps1')+'"'
+    if($ForceRestart){$arguments+=' -ForceRestart'}
+    $p=Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $EvidenceDirectory ($name+'.out')) -RedirectStandardError (Join-Path $EvidenceDirectory ($name+'.err'))
     $null=$p.Handle
     $workers.Add($p);return $p
 }
@@ -71,11 +73,20 @@ try {
     Check ($first.pid -ne $old.Id -and $first.autoLoginProtocol -eq 1 -and !(Get-Process -Id $old.Id -ErrorAction SilentlyContinue)) 'old node exits and a new compatible PID is confirmed'
     foreach($f in @('config.json','cloudpc-targets.json','target-controls.json')){Check ([IO.File]::ReadAllText((Join-Path $state $f)) -ceq $original[$f]) ('restart preserves exact '+$f+' bytes')}
     Check ($first.targets.A.state -eq 'offline' -and $first.targets.B.state -eq 'stopped') 'only previously enabled A resumes; B remains stopped'
-    $p=Worker 'repeat';Check ((Finish $p) -eq 0 -and (Status).pid -ne $first.pid) 'every subsequent launch restarts even an already compatible backend'
+    $p=Worker 'repeat';Check ((Finish $p) -eq 0 -and (Status).pid -eq $first.pid) 'ordinary launch reuses the fresh compatible backend PID'
     $parallel1=Worker 'parallel-1';$parallel2=Worker 'parallel-2'
     Check ((Finish $parallel1) -eq 0 -and (Finish $parallel2) -eq 0) 'simultaneous launches serialize and both complete'
     $matching=@(Get-CimInstance Win32_Process | Where-Object {$_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains('"'+(Join-Path $kit 'server.mjs')+'"')})
-    Check ($matching.Count -eq 1 -and (Get-Content (Join-Path $state 'launches.txt')).Count -eq 5) 'parallel opens leave one node instance and retain evidence of every restart'
+    Check ($matching.Count -eq 1 -and (Status).pid -eq $first.pid -and (Get-Content (Join-Path $state 'launches.txt')).Count -eq 2) 'parallel opens reuse one backend without interrupting connections'
+    Check ((Finish (Worker 'updated' -ForceRestart)) -eq 0 -and (Status).pid -ne $first.pid) 'an update explicitly restarts even a compatible backend'
+    $upgraded=Status
+    # Freeze the fixture heartbeat so a stale marker cannot race the probe.
+    Put-File (Join-Path $state 'freeze.flag') 'freeze'
+    Start-Sleep -Milliseconds 200
+    $stale=$upgraded|ConvertTo-Json -Depth 8|ConvertFrom-Json;$stale.at='2000-01-01T00:00:00Z'
+    Put-File (Join-Path $state 'link-status.json') ($stale|ConvertTo-Json -Depth 8)
+    Check ((Finish (Worker 'stale')) -eq 0 -and (Status).pid -ne $upgraded.pid) 'stale backend state is not reused'
+    Remove-Item -LiteralPath (Join-Path $state 'freeze.flag')
     Check (@(Get-ChildItem $EvidenceDirectory -File | Where-Object {$_.Extension -in @('.out','.err') -and $_.Length -ne 0}).Count -eq 0) 'successful hidden workers emit no prompts or console output'
     $before=(Status).pid
     Put-File (Join-Path $state 'target-controls.json') 'corrupt'

@@ -29,6 +29,8 @@ namespace CMCP {
         bool exiting,updateNotice;
         internal bool ExitPending;
         internal Func<bool> ExitBackend;
+        Task<bool> backendInitialization;
+        internal bool BackendStarting {get;private set;}
         UpdateController updates;
         internal Action<string> Trace;
         void Mark(string message){if(Trace!=null)Trace(message);}
@@ -47,9 +49,9 @@ namespace CMCP {
             trayPosition=trayPositionOverride;
             if (stateOverride != null) stateDirectory = stateOverride;
             if (kitOverride != null) kit = kitOverride;
-            preview = demo;isolated=demo||stateOverride!=null; Preferences = demo ? new UiPreferences() : UiPreferences.Load(stateDirectory);
+            preview = demo;isolated=demo||stateOverride!=null; Preferences = demo ? new UiPreferences() : UiPreferences.Load(isolated?stateDirectory:PortableState.PreferencesPath);
             ExitBackend=isolated?(Func<bool>)(()=>true):(()=>BackendRestart.Run(kit,"manager-exit.ps1"));
-            Options=demo?new AppSettings():AppSettings.Load(stateDirectory,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
+            Options=demo?new AppSettings():AppSettings.Load(isolated?stateDirectory:PortableState.PreferencesPath,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
             Icon=System.Drawing.Icon.ExtractAssociatedIcon(Program.ExecutablePath);
             Font=new Font("Microsoft YaHei UI",11F);AutoScaleMode=AutoScaleMode.Dpi;
@@ -71,6 +73,17 @@ namespace CMCP {
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;if(Options.closeToTray&&!ExitPending)HideToTray();else ExitApplication();}};
             FormClosed+=delegate{timer.Stop();timer.Dispose();updates.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();EnsureTray();
+        }
+        internal async void InitializeBackend(Func<bool> initialize,Action<bool> initialized){
+            if(backendInitialization!=null||IsDisposed||ExitPending)return;
+            BackendStarting=true;notice="正在准备本机连接服务…";RefreshState();
+            backendInitialization=Task.Run(initialize);
+            bool healthy=false;try{healthy=await backendInitialization;}catch{}
+            if(IsDisposed||ExitPending)return;
+            BackendStarting=false;
+            notice=healthy?"":"本机连接服务未能就绪，请检查日志后重试连接。";
+            RefreshState();
+            if(initialized!=null)initialized(healthy);
         }
         void ApplyTheme(){
             BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);
@@ -102,7 +115,7 @@ namespace CMCP {
             if(name=="shortcut"){DesktopShortcut.Create(Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
             else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
-        void RunUpdate(){updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
+        void RunUpdate(){if(BackendStarting||ExitPending)return;updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
         void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.UpdateTip(message);if(Settings!=null)Settings.SetUpdateStatus(message);else if(updateNotice){notice=message;status.Text=L.Text(message);}}
         internal void SetUpdateProgress(UpdateProgress value){
             if(IsDisposed)return;
@@ -116,7 +129,7 @@ namespace CMCP {
         void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction,position:trayPosition);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.ActivationMenu,Visible=!isolated};tray.DoubleClick+=delegate{RestoreManager();};TrayVisible=true;SyncTray();}
         internal void HideToTray(){EnsureTray();SyncTray();Hide();}
         internal string[] TrayItems {get{return TrayCommands==null?new string[0]:TrayCommands.Menu.Items.OfType<ToolStripMenuItem>().Select(item=>item.Text).ToArray();}}
-        TrayTarget TrayValue(TargetCard card){bool blocked=updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login","recovering"}.Contains(card.Target.State);return new TrayTarget{Name=card.Target.Name,Label=card.Preference.label.Length>0?card.Preference.label:new Uri(card.Target.Url).Host,State=card.BusyStop?"正在停止":card.BusyConnect&&card.Target.State=="stopped"?"连接中":LocalState.Caption(card.Target.State),CanConnect=!blocked&&!card.BusyStop&&!active,CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Target.State!="stopped"),CanRename=!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name)};}
+        TrayTarget TrayValue(TargetCard card){bool blocked=BackendStarting||updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login","recovering"}.Contains(card.Target.State);return new TrayTarget{Name=card.Target.Name,Label=card.Preference.label.Length>0?card.Preference.label:new Uri(card.Target.Url).Host,State=card.BusyStop?"正在停止":card.BusyConnect&&card.Target.State=="stopped"?"连接中":LocalState.Caption(card.Target.State),CanConnect=!blocked&&!card.BusyStop&&!active,CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Target.State!="stopped"),CanRename=!BackendStarting&&!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name)};}
         void SyncTray(){if(TrayCommands!=null)TrayCommands.Sync(Preferences.Sort(targets).Where(t=>Cards.ContainsKey(t.Name)).Select(t=>TrayValue(Cards[t.Name])).ToList());}
         internal void TrayAction(string name,string action){TargetCard card;if(!Cards.TryGetValue(name,out card))return;var value=TrayValue(card);if(action=="connect"&&value.CanConnect)Launch("connect",card,"");else if(action=="stop"&&value.CanDisconnect)Launch("stop",card,"");else if(action=="rename"&&value.CanRename){RestoreManager();if(Settings!=null)CloseSettings();if(Editor!=null&&Editor.TargetName!=name){Editor.ShowError("请先保存或返回当前编辑页，再重命名其他云电脑。");return;}OpenEditor(name);if(Editor!=null){Editor.NameInput.Box.Focus();Editor.NameInput.Box.SelectAll();}}SyncTray();}
         internal async void ExitApplication(){
@@ -125,6 +138,10 @@ namespace CMCP {
             // Cancel only this manager's observers before saving a newer stop-all
             // request, so an old connect action cannot re-enable a target later.
             foreach(var pending in children){pending.Superseded=true;try{if(!pending.Process.HasExited)pending.Process.Kill();}catch{}}
+            // Initialization must finish before shutdown, otherwise it can start a
+            // new backend after the user's explicit exit has already stopped it.
+            if(backendInitialization!=null)try{await backendInitialization;}catch{}
+            BackendStarting=false;
             bool stopped=false;try{stopped=isolated?ExitBackend():await Task.Run(()=>ExitBackend());}catch{}
             if(IsDisposed)return;
             ExitPending=false;
@@ -140,6 +157,7 @@ namespace CMCP {
         void Select(TargetCard card){selected=card.Target.Name;foreach(var other in Cards.Values){other.Selected=other==card;other.Apply(colors);}}
         bool IsBusy(string name){return children.Any(p=>p.Name==name&&!p.Superseded);}
         void Launch(string action,TargetCard card,string initialUrl){
+            if(BackendStarting||ExitPending)return;
             if(updates.Installing){Error("正在下载并校验更新…");return;}
             if(preview){if(card!=null&&(action=="connect"||action=="stop")){card.Target.State=action=="connect"?"connected":"stopped";card.Target.Detail=LocalState.Detail(card.Target.State);card.RefreshTarget(card.Target);}return;}
             if(action!="add"&&card==null)return;
@@ -158,6 +176,7 @@ namespace CMCP {
         void ConnectCard(TargetCard card){Select(card);bool active=card.Target.State=="connected"||card.BusyConnect||card.Target.State=="connecting"||card.Target.State=="configuring"||card.Target.State=="waiting-login";if(active)StopCard(card);else Launch("connect",card,"");}
         void StopCard(TargetCard card){Launch("stop",card,"");}
         internal void OpenAdd(){
+            if(BackendStarting||ExitPending)return;
             if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;
             ShowEditor(new Target{Name="",Url=""},new CardPreference());
         }
@@ -168,6 +187,7 @@ namespace CMCP {
         }
         void EditCard(TargetCard card){OpenEditor(card.Target.Name);}
         internal void OpenEditor(string name){
+            if(BackendStarting||ExitPending)return;
             TargetCard card;if(Editor!=null||Settings!=null||!Cards.TryGetValue(name,out card))return;
             Select(card);editorScroll=ScrollOffset;
             ShowEditor(card.Target,card.Preference);
@@ -253,6 +273,7 @@ namespace CMCP {
             count.Text="云电脑  ·  "+targets.Count;
             status.Text=notice.Length>0?notice:preview?"交互预览 · 示例数据，不会连接 VPS":snapshot.ReadError?"本地状态暂时无法完整读取，将自动刷新":Preferences.ReadError?"界面偏好文件无法读取，已保留原文件":snapshot.Stale?"后台状态未更新，请检查连接":snapshot.Running?targets.Count(t=>t.State=="connected")+" 台已连接 · 每台云电脑独立控制":"后台尚未运行 · 打开界面不会自动连接";
             if(L.Language=="en"){count.Text="Cloud PCs  ·  "+targets.Count;status.Text=snapshot.Running&&notice.Length==0&&!preview&&!snapshot.ReadError&&!snapshot.Stale?targets.Count(t=>t.State=="connected")+" connected · Each PC is controlled independently":L.Message(status.Text);empty.Text="No cloud PCs yet\r\nAdd a cloud PC to get started.";}else empty.Text="还没有云电脑\r\n点击右上角「添加云电脑」，保存地址后即可连接。";
+            toolbar.Enabled=list.Enabled=!BackendStarting;
             foreach(var key in Cards.Keys.Where(key=>!targets.Any(t=>t.Name==key)).ToArray()){var old=Cards[key];Cards.Remove(key);list.Controls.Remove(old);old.Dispose();}
             if(!targets.Any(t=>t.Name==selected))selected=targets.Count>0?targets[0].Name:"";
             foreach(var target in targets){TargetCard card;if(!Cards.TryGetValue(target.Name,out card)){card=CreateCard(target);Cards.Add(target.Name,card);list.Controls.Add(card);}

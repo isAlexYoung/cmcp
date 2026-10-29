@@ -6,11 +6,11 @@ using System.Text;
 namespace CMCP {
     internal static class BackendRestart {
         // Demo, screenshots and self-tests never enter the live launch path.
-        internal static bool Run(string kit,string entry="manager-restart.ps1") {
+        internal static bool Run(string kit,string entry="manager-restart.ps1",bool forceRestart=false) {
             try {
                 string script=Path.Combine(kit,entry);
                 if(!File.Exists(script))return false;
-                string command="& "+Actions.Quote(script);
+                string command="& "+Actions.Quote(script)+(forceRestart?" -ForceRestart":"");
                 var info=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))) {
                     UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=kit,RedirectStandardOutput=true,RedirectStandardError=true
                 };

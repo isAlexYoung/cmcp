@@ -37,6 +37,18 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     }
     func tr(_ zh: String, _ en: String) -> String { language == "en" ? en : zh }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if !testing, let identifier = bundle.bundleIdentifier,
+           let existing = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first(where: {
+               guard $0.processIdentifier != ProcessInfo.processInfo.processIdentifier, $0.bundleURL?.standardizedFileURL == bundle.bundleURL.standardizedFileURL else { return false }
+               let previous = $0.launchDate ?? Date.distantPast, current = NSRunningApplication.current.launchDate ?? Date.distantPast
+               return previous < current || (previous == current && $0.processIdentifier < ProcessInfo.processInfo.processIdentifier)
+           }) {
+            if !startup {
+                DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("com.cmcp.manager.restore"), object: bundle.bundleURL.standardizedFileURL.path, userInfo: nil, deliverImmediately: true)
+                existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            }
+            exitApproved = true; NSApp.terminate(nil); return
+        }
         NSApp.setActivationPolicy(.regular)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -47,6 +59,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "CMCP"; window.minSize = NSSize(width: 660, height: 500); window.center(); window.delegate = self
         window.contentView = web; window.isReleasedWhenClosed = false
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(restoreExistingWindow(_:)), name: NSNotification.Name("com.cmcp.manager.restore"), object: bundle.bundleURL.standardizedFileURL.path)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "desktopcomputer", accessibilityDescription: "CMCP")
         rebuildMenu()
@@ -61,6 +74,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 try JSONSerialization.data(withJSONObject: config).write(to: stateDirectory.appendingPathComponent("targets.json"))
             }
             startBackend()
+            if testing {
+                guard window.isVisible && !ready else { finishTests(error: "The native window must appear before backend readiness"); return }
+                testResults.append("native window appears before asynchronous backend readiness")
+            }
         } catch { fail("无法准备运行环境。") }
     }
     func rebuildMenu() {
@@ -157,6 +174,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         show(); web.evaluateJavaScript("window.cmcpRenameTarget(..." + args + ")", completionHandler: nil)
     }
     func startBackend() {
+        if exitPending || exitApproved { return }
         let child = Process(), output = Pipe(), errors = Pipe()
         child.executableURL = resources.appendingPathComponent("runtime/node")
         child.arguments = ["--use-system-ca", resources.appendingPathComponent("macos/desktop.mjs").path]
@@ -164,6 +182,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         for name in ["NODE_OPTIONS", "NODE_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "LD_PRELOAD"] { environment.removeValue(forKey: name) }
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         environment["CMCP_STATE_DIR"] = stateDirectory.path
+        environment["CMCP_FORCE_RESTART"] = updateRequest == nil ? "0" : "1"
         if testing { environment["CMCP_NATIVE_SELF_TEST"] = "1" }
         child.environment = environment; child.currentDirectoryURL = resources
         child.standardOutput = output; child.standardError = errors
@@ -177,7 +196,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         }
         child.terminationHandler = { [weak self] child in DispatchQueue.main.async {
             guard let self = self else { return }
-            if self.exitPending || self.exitApproved { return }
+            if self.exitApproved { return }
+            if self.exitPending { self.exitApproved = true; NSApp.reply(toApplicationShouldTerminate: true); return }
             if !self.ready { self.fail("后台未能启动，请检查应用完整性。 status=" + String(child.terminationStatus)); return }
             if child.terminationStatus != 0 && !self.testing {
                 self.crashTimes = self.crashTimes.filter { Date().timeIntervalSince($0) < 60 }
@@ -192,7 +212,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         } }
         process = child
         do { try child.run() } catch { fail("无法启动内置后台，请完整解压应用。"); return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in if self?.process === child && self?.ready == false { self?.fail("后台启动超时。") } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            guard let self = self, self.process === child, !self.ready else { return }
+            if self.exitPending { child.terminate() } else { self.fail("后台启动超时。") }
+        }
     }
     func consume(_ bytes: Data) {
         pendingOutput.append(bytes)
@@ -204,6 +227,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                   let url = URL(string: address), url.scheme == "http", url.host == "127.0.0.1", url.port != nil,
                   secret.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { continue }
             origin = address; token = secret; ready = true
+            if exitPending { finishExit(); return }
             trayTimer?.invalidate(); trayTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshTray() }
             if let timer = trayTimer { RunLoop.main.add(timer, forMode: .common) }; refreshTray()
             web.load(URLRequest(url: URL(string: address + "/#" + secret)!))
@@ -211,6 +235,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         }
     }
     @objc func show() { NSApp.setActivationPolicy(.regular); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    @objc func restoreExistingWindow(_ notification: Notification) { DispatchQueue.main.async { self.show() } }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return false }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -221,7 +246,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if exitApproved { return .terminateNow }
         if exitPending { return .terminateLater }
+        if !ready && process?.isRunning != true { exitApproved = true; return .terminateNow }
         exitPending = true
+        if ready { finishExit() }
+        return .terminateLater
+    }
+    func finishExit() {
         request("/api/exit", [:]) { [weak self] result in
             guard let self = self else { return }
             switch result {
@@ -234,9 +264,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 self.alert(self.tr("未能确认全部连接已停止，请重试退出。", "Could not confirm all connections have stopped. Try exiting again."))
             }
         }
-        return .terminateLater
     }
-    func applicationWillTerminate(_ notification: Notification) { trayTimer?.invalidate(); if process?.isRunning == true { process?.terminate() }; NSStatusBar.system.removeStatusItem(item) }
+    func applicationWillTerminate(_ notification: Notification) { DistributedNotificationCenter.default().removeObserver(self); trayTimer?.invalidate(); if process?.isRunning == true { process?.terminate() }; if let item = item { NSStatusBar.system.removeStatusItem(item) } }
     func request(_ route: String, _ body: [String: Any], completion: @escaping (Result<[String: Any], Error>) -> Void) {
         guard let url = URL(string: origin + route), !token.isEmpty else { completion(.failure(NSError(domain: "CMCP", code: 1))); return }
         var request = URLRequest(url: url); request.httpMethod = "POST"; request.timeoutInterval = route.contains("update") ? 900 : route == "/api/tray" ? 5 : 20
@@ -369,6 +398,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func alert(_ text: String) { let alert = NSAlert(); alert.messageText = text; alert.runModal() }
     func fail(_ text: String) { if testing { finishTests(error: text) } else { if updateRequest == nil { alert(text) }; exitApproved = true; NSApp.terminate(nil) } }
     func runTests() {
+        let runningBackend = process
+        window.orderOut(nil)
+        _ = applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
+        guard window.isVisible && process === runningBackend && ready else { finishTests(error: "Reopening must restore the existing window and backend"); return }
+        testResults.append("reopening restores the native window without replacing its backend process")
         guard item.isVisible, trayTargets.count == 2, trayRows.count == 2 else { finishTests(error: "Resident tray cloud list missing"); return }
         testResults.append("resident menu bar icon lists every cloud")
         guard let nativeMenu = item.menu, let button = item.button, button.window != nil, nativeMenu.delegate === self else { finishTests(error: "Status menu must remain attached to the native menu bar button"); return }

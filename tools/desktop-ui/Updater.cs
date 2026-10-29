@@ -12,7 +12,7 @@ namespace CMCP {
     internal static class ManagerSignal {
         [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterWindowMessage(string name);
         [DllImport("user32.dll")]static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);
-        internal static readonly int Message=(int)RegisterWindowMessage("CMCP.RestoreManager."+Environment.UserName);
+        internal static readonly int Message=(int)RegisterWindowMessage("CMCP.RestoreManager."+Environment.UserName+(Environment.GetEnvironmentVariable("CMCP_STATE_DIR")==null?"":"."+PortableState.InstanceKey));
         internal static void Restore(){PostMessage(new IntPtr(0xffff),(uint)Message,IntPtr.Zero,IntPtr.Zero);}
     }
     internal sealed class UpdateController : IDisposable {

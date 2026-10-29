@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.4.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.4.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.4.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.4.2.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -206,17 +206,18 @@ namespace CMCP {
             if (args.Length != 0&&!startup&&!updated) return 64;
             Environment.CurrentDirectory=AppDomain.CurrentDomain.BaseDirectory;
             if(startup&&!AppSettings.Load(PortableState.PreferencesPath).autoStart)return 0;
-            bool healthy=BackendRestart.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app"));
-            if(!Directory.Exists(PortableState.DirectoryPath))return 1;
-            string account = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string key; using (var hash = SHA256.Create()) key = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(account.ToLowerInvariant()))).Replace("-", "").Substring(0, 20);
             bool created;
-            using (var mutex = new Mutex(true, "Local\\ClaudeMcpManager-" + key, out created)) {
+            using (var mutex = new Mutex(true, "Local\\ClaudeMcpManager-" + PortableState.InstanceKey, out created)) {
                 if (!created) {if(!startup)ManagerSignal.Restore();return 0;}
                 try {
-                    L.Set(AppSettings.Load(PortableState.DirectoryPath).language);if(!startup&&!updated)ShortcutPrompt.AskBeforeManager();
                     using(var form=new Manager(false)){
-                        form.Shown+=delegate{if(startup)form.BeginInvoke(new Action(form.HideToTray));if(updated)UpdateController.Acknowledge(args[1],healthy);};
+                        form.Shown+=delegate{
+                            if(startup)form.BeginInvoke(new Action(form.HideToTray));
+                            form.InitializeBackend(()=>BackendRestart.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app"),forceRestart:updated),healthy=>{
+                                if(updated)UpdateController.Acknowledge(args[1],healthy);
+                                if(healthy&&!startup&&!updated&&form.Visible)ShortcutPrompt.AskBeforeManager();
+                            });
+                        };
                         Application.Run(form);
                     }return 0;
                 }

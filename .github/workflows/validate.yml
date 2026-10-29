@@ -133,13 +133,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/shared-auto-save.json -Raw | ConvertFrom-Json
           if ($r.passed -ne 18 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete automatic login credential regression' }
-      - name: Silent manager backend restart and state preservation
+      - name: Manager backend reuse, upgrade restart and state preservation
         shell: pwsh
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-restart.test.ps1 -EvidenceDirectory test-results/restart | Set-Content test-results/restart-stdout.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/restart/restart.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 15 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete silent backend restart regression' }
+          if ($r.passed -ne 17 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete backend reuse and restart regression' }
+      - name: Responsive manager startup and duplicate executable opens
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-startup.test.ps1 -ManagerExe "$PWD/CMCP.exe" -EvidenceDirectory test-results/startup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/startup/startup.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 11 -or $r.failed -ne 0) { throw 'Incomplete manager startup regression' }
       - name: Real isolated browser shared automatic login
         shell: pwsh
         run: |
