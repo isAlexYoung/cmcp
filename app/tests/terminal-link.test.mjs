@@ -79,8 +79,8 @@ test('synchronous send failure clears acknowledgements for unsent chunks', { tim
   assert.equal(link.acks.size, 0);
 });
 
-async function desktop(t, native, shared = false, nativeStatus = 404, requiredCookie = '') {
-  const counts = { login: 0, native: 0, terminal: 0, uploads: 0, invalidations: 0, sessionChecks: 0 };
+async function desktop(t, native, shared = false, nativeStatus = 404, requiredCookie = '', readFaults = 0) {
+  const counts = { login: 0, native: 0, terminal: 0, uploads: 0, invalidations: 0, sessionChecks: 0, readFaults:0 };
   const server = http.createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     let body = '';
@@ -95,6 +95,7 @@ async function desktop(t, native, shared = false, nativeStatus = 404, requiredCo
       counts.login++; res.setHeader('set-cookie', 'wd_session=test; HttpOnly'); res.end('{}');
     } else if (req.url.startsWith('/api/sys/info')) res.end(JSON.stringify({ home: '/home/user' }));
     else if (req.url.startsWith('/api/sys/fs') && req.method === 'GET') {
+      if(new URL(req.url,'http://fixture').searchParams.get('path')==='/home/user/.local/share/cloudpc-link'&&counts.readFaults<readFaults){counts.readFaults++;res.destroy();return;}
       res.end(JSON.stringify({ entries: ['.local', 'share', 'cloudpc-link'].map(name => ({ name, kind: 'folder' })) }));
     } else { counts.uploads++; res.end('{}'); }
   });
@@ -160,6 +161,14 @@ test('shared session authenticates terminal APIs and WebSocket without password 
   assert.equal(d.counts.login, 0);
   assert.equal(d.counts.terminal, 1);
   assert.equal(d.replies.length, 1);
+});
+
+test('interrupted relay preparation recovers the real terminal transport and forwards a tool without another login', {timeout:7000},async t=>{
+  const d=await desktop(t,false,true,404,'wd_cmcp=fixture-tool-token',2);
+  assert.equal(d.counts.readFaults,2);assert.equal(d.counts.login,0);assert.equal(d.counts.invalidations,0);
+  assert.equal(d.counts.uploads,1);assert.equal(d.counts.terminal,1);assert.equal(d.replies.length,1);
+  assert(d.states.some(s=>s.state==='recovering'&&s.message.includes('重试当前步骤')));
+  assert.equal(d.states.at(-1).state,'connected');
 });
 
 test('a dedicated socket 401 with a valid browser session selects terminal without logging the browser out', { timeout:7000 }, async t => {

@@ -15,7 +15,7 @@ import tls from 'node:tls';
 import {performance} from 'node:perf_hooks';
 import {randomBytes} from 'node:crypto';
 import WebSocket from 'ws';
-import { openTerminalLink,cloudApi } from './terminal-link.mjs';
+import { openTerminalLink,cloudApi,isTransientCloudError } from './terminal-link.mjs';
 import { authHeaders, authSocketUrl, socketHeaders, requiresSharedSession, requestBuffered } from './desktop-auth.mjs';
 import { RequestRecovery } from './request-recovery.mjs';
 
@@ -61,6 +61,7 @@ function connectAgent(proxyUrl) {
       // Anything before the tunnel is up is a problem with the system network setting, not the cloud computer.
       const wrapped = new Error(`proxy ${proxy.host}: ${error?.code || ''} ${error?.message || error}`);
       wrapped.code = 'PROXY_FAILED';
+      wrapped.cause = error;
       callback(wrapped);
     };
     const proxyOptions = { port: Number(proxy.port) || (proxy.protocol === 'https:' ? 443 : 80), host: proxy.hostname.replace(/^\[|\]$/g, '') };
@@ -221,6 +222,14 @@ export function startLink({ name, target, machine, version, forward, askPassword
     const line = `[${name}] ${state} ${message}${detail ? ' | ' + detail : ''}`;
     if (line !== lastLog) { lastLog = line; log(line); }
   };
+  const relayCache = {};
+  const relayProgress = event => {
+    if(stopped)return;
+    const suffix=event.state==='retry' ? `，正在重试当前步骤（${event.attempt}/${event.maxAttempts}）`
+      : event.state==='reconcile' ? '，正在核对上次写入结果' : '';
+    say(event.state==='retry'||event.state==='reconcile'?'recovering':'connecting',event.label+suffix);
+    if(event.state==='retry')log(`[${name}] relay retry stage=${event.stage} method=${event.method} path=${event.endpoint} code=${event.code} attempt=${event.attempt}/${event.maxAttempts} delayMs=${event.delayMs}`);
+  };
 
   const connect = async (url, auth, agent, terminal = false) => {
     health(false);
@@ -229,10 +238,13 @@ export function startLink({ name, target, machine, version, forward, askPassword
     let ws;
     try {
       const wsUrl = authSocketUrl(url.replace(/^http/, 'ws') + LINK_PATH, auth);
-      ws = terminal ? await openTerminalLink(url, auth, agent, controller.signal) : new WebSocket(wsUrl, {
+      ws = terminal ? await openTerminalLink(url, auth, agent, controller.signal, {cache:relayCache,onProgress:relayProgress}) : new WebSocket(wsUrl, {
         headers: socketHeaders(url,auth), agent, rejectUnauthorized: true, perMessageDeflate: false, maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000,
       });
-    } catch (error) { return { error, http: error.status, welcomed: false, lasted: 0 }; }
+    } catch (error) {
+      if(!stopped)log(`[${name}] connection preparation failed stage=${error.stage||'socket-handshake'} method=${error.method||'GET'} path=${error.endpoint||'/api/term/ws'} code=${/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code||'')?error.code:'REQUEST_FAILED'} http=${error.status||0} attempts=${error.attempts||1}`);
+      return { error, http: error.status, welcomed: false, lasted: 0 };
+    }
     if (stopped) { ws.on('error', () => {}); ws.close(); return { welcomed: false, lasted: 0 }; }
     return new Promise(resolve => {
       socket = ws;
@@ -336,6 +348,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
       if (!settings) { say('stopped', '这台云电脑的设置已被删除'); return; }
       const nextStamp = JSON.stringify(settings.stamp ?? null);
       if (settings.url !== url || nextStamp !== stamp) {
+        delete relayCache.entry;
         if (settings.url !== url) terminal = false;
         url = settings.url; stamp = nextStamp; credential = null; proxyDirty = true;
       }
@@ -463,8 +476,12 @@ export function startLink({ name, target, machine, version, forward, askPassword
         notify('云电脑连接已切换', '另一台电脑已连接到这台云电脑。如需改回本机，请双击 Start-CMCP.bat。');
         return;
       }
+      const retryable=result.error ? isTransientCloudError(result.error) : !result.http || [408,429,500,502,503,504].includes(result.http);
+      const reconnectWait=Math.max(!retryable?30000:Math.min(backoff,result.welcomed?30000:5000),Math.min(result.error?.retryAfterMs||0,86400000));
       if (result.error && !result.welcomed) {
-        say('offline', '建立连接失败：' + describeNetworkError(result.error) + '，稍后自动重试');
+        say(retryable?'recovering':'offline',retryable&&result.error.preparationLabel
+          ? `${result.error.preparationLabel}，连接暂时中断，${Math.ceil(reconnectWait/1000)} 秒后继续`
+          : `建立连接失败：${result.http?'HTTP '+result.http:describeNetworkError(result.error)}，${Math.ceil(reconnectWait/1000)} 秒后继续`);
         // A TLS/proxy reset is not evidence of an expired login. Keep the cookie.
         proxyDirty = true;
       } else if (result.http) {
@@ -473,13 +490,13 @@ export function startLink({ name, target, machine, version, forward, askPassword
         proxyDirty = true;
         say('recovering', '连接中断，正在恢复', `close=${result.code || 0}`);
       }
-      await sleep(backoff);
+      await sleep(reconnectWait);
       backoff = Math.min(backoff * 2, 30000);
     }
   })().catch(error => { if (!stopped) say('error', '连接程序发生意外错误', error.stack || error.message); }).finally(() => agent?.destroy());
 
   return { done, stop() {
-    stopped = true; controller.abort(); recovery.reset();
+    stopped = true; controller.abort(); recovery.reset(); delete relayCache.entry;
     try { if (socket?.shutdown) return socket.shutdown(); socket?.close(1000, 'stop'); } catch {}
   } };
 }

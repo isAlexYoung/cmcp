@@ -279,8 +279,7 @@ namespace CMCP {
             foreach(var target in targets){TargetCard card;if(!Cards.TryGetValue(target.Name,out card)){card=CreateCard(target);Cards.Add(target.Name,card);list.Controls.Add(card);}
                 card.BusyConnect=children.Any(p=>p.Name==target.Name&&p.Action=="connect"&&!p.Superseded);card.BusyStop=children.Any(p=>p.Name==target.Name&&(p.Action=="stop"||p.Action=="remove"));
                 string message;if(progress.TryGetValue(target.Name,out message)){
-                    bool waiting=card.BusyConnect&&message.StartsWith("[4/5]")&&(target.State=="waiting-login"||target.State=="offline"||target.State=="configuring");
-                    target.Detail=waiting?LocalState.Caption(target.State)+" · "+target.Detail:message;
+                    target.Detail=LocalState.WorkerDetail(target,message,card.BusyConnect);
                 }
                 if(target.AutoLogin&&(target.State=="password"||target.State=="locked"||target.State=="expired"))target.Detail=LocalState.Detail(target.State);
                 card.RefreshTarget(target);card.Edit.Enabled=card.Delete.Enabled=!IsBusy(target.Name);

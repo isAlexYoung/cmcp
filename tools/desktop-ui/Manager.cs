@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.7.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.7.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.7.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.7.1.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -79,6 +79,18 @@ namespace CMCP {
                 default: return "点击连接开始；进度会显示在此处，可随时停止。";
             }
         }
+        internal static string PreparationDetail(string state, string message) {
+            if (state != "connecting" && state != "recovering") return null;
+            // Only fixed local stage text is displayed, never arbitrary backend
+            // errors, URLs, paths, cookies or credential-bearing values.
+            const string pattern = @"^(正在检查云端连接能力|正在准备连接组件目录（[1-3]/3）|正在检查云端连接组件|正在校验云端连接组件|正在更新云端连接组件|连接组件已就绪，正在建立 MCP 通道)(，正在重试当前步骤（[2-4]/4）|，正在核对上次写入结果|，连接暂时中断，[1-9][0-9]{0,4} 秒后继续)?$";
+            return message != null && message.Length < 160 && System.Text.RegularExpressions.Regex.IsMatch(message,pattern) ? message : null;
+        }
+        internal static string WorkerDetail(Target target, string message, bool busyConnect) {
+            bool waiting=busyConnect&&message.StartsWith("[4/5]")&&
+                (new[]{"waiting-login","offline","configuring","recovering","unstable"}.Contains(target.State)||PreparationDetail(target.State,target.Detail)!=null);
+            return waiting ? Caption(target.State)+" · "+target.Detail : message;
+        }
         internal static Snapshot Load(string directory) {
             var result = new Snapshot();
             result.Stopped = File.Exists(Path.Combine(directory, "stopped.flag"));
@@ -127,7 +139,7 @@ namespace CMCP {
                 string message = Text(Get(entry, "message"));
                 bool auto=Text(Get(d,"authMode"))=="shared-browser"&&Object.Equals(Get(d,"autoLogin"),true);
                 result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"共享网页自动登录":"共享网页登录") : "自动识别 / 旧版", State = state,
-                    Detail = (auto&&state=="waiting-login"?"等待共享网页使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "") });
+                    Detail = PreparationDetail(state,message) ?? ((auto&&state=="waiting-login"?"等待共享网页使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "")) });
             }
             return result;
         }
@@ -245,6 +257,11 @@ namespace CMCP {
                 File.WriteAllText(file, "[{\"name\":\"demo\",\"url\":\"https://desktop.example.com\",\"password\":\"DO-NOT-DISPLAY\",\"authMode\":\"shared-browser\"}]", Encoding.UTF8);
                 var s = LocalState.Load(temp); check(s.Targets.Count == 1 && s.Targets[0].State == "stopped", "saved target without backend is stopped");
                 check(!s.Targets[0].Detail.Contains("DO-NOT-DISPLAY"), "password is not part of view model");
+                check(LocalState.PreparationDetail("connecting","正在检查云端连接组件") == "正在检查云端连接组件", "connection preparation stage is visible");
+                check(LocalState.PreparationDetail("recovering","正在校验云端连接组件，正在重试当前步骤（2/4）") != null, "current preparation retry is visible");
+                check(LocalState.PreparationDetail("recovering","正在检查云端连接组件 cookie=DO-NOT-DISPLAY") == null, "arbitrary status text cannot expose credentials");
+                check(LocalState.PreparationDetail("stopped","正在检查云端连接组件") == null, "stopped connections do not display stale preparation stages");
+                check(LocalState.WorkerDetail(new Target{State="connecting",Detail="正在校验云端连接组件"},"[4/5] 正在连接云电脑...",true).Contains("正在校验云端连接组件"), "pending start worker preserves the precise backend preparation stage");
                 File.WriteAllText(Path.Combine(temp, "link-status.json"), "{\"pid\":2147483647,\"targets\":{\"demo\":{\"state\":\"connected\"}}}");
                 check(LocalState.Load(temp).Targets[0].State == "stopped", "dead PID never reports connected");
                 File.WriteAllText(file, "[{\"name\":\"bad\",\"url\":\"https://user:secret@example.com\"}]"); check(LocalState.Load(temp).Targets.Count == 0, "credential-bearing URL is rejected");

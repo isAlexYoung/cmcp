@@ -99,7 +99,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         editTop.submenu = edit; main.addItem(editTop); NSApp.mainMenu = main
     }
     func trayState(_ state: String) -> String {
-        let names = ["connected": ("已连接", "Connected"), "connecting": ("连接中", "Connecting"), "configuring": ("正在配置 Claude", "Setting up Claude"), "waiting-login": ("等待网页登录", "Waiting for browser sign-in"), "offline": ("等待网络恢复", "Waiting for network"), "replaced": ("连接已被接管", "Connection replaced"), "password": ("需要更新密码", "Update password"), "locked": ("登录暂时锁定", "Sign-in locked"), "expired": ("访问已过期", "Access expired"), "stale": ("状态已过期", "Status unavailable"), "stopped": ("已停止", "Stopped")]
+        let names = ["connected": ("已连接", "Connected"), "recovering": ("正在恢复", "Recovering"), "unstable": ("正在恢复", "Recovering"), "connecting": ("连接中", "Connecting"), "configuring": ("正在配置 Claude", "Setting up Claude"), "waiting-login": ("等待网页登录", "Waiting for browser sign-in"), "offline": ("等待网络恢复", "Waiting for network"), "replaced": ("连接已被接管", "Connection replaced"), "password": ("需要更新密码", "Update password"), "locked": ("登录暂时锁定", "Sign-in locked"), "expired": ("访问已过期", "Access expired"), "stale": ("状态已过期", "Status unavailable"), "stopped": ("已停止", "Stopped")]
         let value = names[state] ?? ("连接异常", "Connection error"); return tr(value.0, value.1)
     }
     func updateTrayMenu() {
@@ -128,7 +128,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             guard let id = target["id"] as? String, let row = trayRows[id], let sub = row.submenu else { continue }
             let state = target["state"] as? String ?? "stopped", enabled = target["enabled"] as? Bool == true
             row.title = (target["label"] as? String ?? "CMCP") + " · " + trayState(state); row.toolTip = row.title
-            let active = ["connected", "connecting", "configuring", "waiting-login"].contains(state)
+            let active = ["connected", "connecting", "configuring", "waiting-login", "recovering", "unstable"].contains(state)
             let blocked = !ready || exitPending || trayUpdating || trayPending.contains(id)
             sub.items[0].title = tr("连接云电脑", "Connect cloud PC"); sub.items[0].isEnabled = !blocked && !active
             sub.items[1].title = tr("断开云电脑", "Disconnect cloud PC"); sub.items[1].isEnabled = !blocked && enabled

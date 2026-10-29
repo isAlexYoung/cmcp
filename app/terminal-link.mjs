@@ -3,7 +3,8 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { EventEmitter } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
 import WebSocket from 'ws';
@@ -15,7 +16,14 @@ const CHUNK_SIZE = 8192;
 const WINDOW = 4;
 const relaySource = () => fs.readFileSync(new URL('./cloudpc-relay.py', import.meta.url), 'utf8');
 
-export function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', body, signal) {
+export function isTransientCloudError(error) {
+  if ([408,429,500,502,503,504].includes(error?.status)) return true;
+  return ['ECONNRESET','EPIPE','ETIMEDOUT','ESOCKETTIMEDOUT','EAI_AGAIN','ECONNREFUSED'].includes(error?.code)
+    || error?.code === 'PROXY_FAILED' && isTransientCloudError(error.cause);
+}
+const failureCode = error => /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code || '') ? error.code : error?.status ? 'HTTP_'+error.status : 'REQUEST_FAILED';
+
+function cloudRequest(baseUrl, auth, agent, endpoint, method, body, signal, timeout) {
   return new Promise((resolve, reject) => {
     const data = body === undefined ? null : Buffer.from(JSON.stringify(body));
     const url = new URL(endpoint, baseUrl);
@@ -29,7 +37,7 @@ export function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', body, s
       let size = 0;
       res.on('data', chunk => {
         size += chunk.length;
-        if (size > 2 * 1024 * 1024) req.destroy(new Error('Cloud API response is too large'));
+        if (size > 2 * 1024 * 1024) req.destroy(Object.assign(new Error('Cloud API response is too large'),{code:'RESPONSE_TOO_LARGE'}));
         else chunks.push(chunk);
       });
       res.on('error', reject);
@@ -40,45 +48,110 @@ export function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', body, s
         if (res.statusCode >= 200 && res.statusCode < 300 && value) return resolve(value);
         const error = new Error(`兼容连接配置失败（HTTP ${res.statusCode}）`);
         error.status = res.statusCode;
+        const retry=res.headers['retry-after'];
+        if(retry){const ms=/^\d+$/.test(retry)?Number(retry)*1000:Date.parse(retry)-Date.now();if(Number.isFinite(ms))error.retryAfterMs=Math.max(0,Math.min(ms,86400000));}
         reject(error);
       });
     });
-    const deadline = setTimeout(() => req.destroy(Object.assign(new Error('request deadline'), {code:'ETIMEDOUT'})), 30000);
+    const deadline = setTimeout(() => req.destroy(Object.assign(new Error('request deadline'), {code:'ETIMEDOUT'})), timeout);
     req.once('close', () => clearTimeout(deadline));
-    req.setTimeout(30000, () => req.destroy(Object.assign(new Error('request timeout'), { code: 'ETIMEDOUT' })));
+    req.setTimeout(timeout, () => req.destroy(Object.assign(new Error('request timeout'), { code: 'ETIMEDOUT' })));
     req.on('error', reject);
     req.end(data);
   });
 }
 
-export async function prepareRelay(url, auth, agent, signal) {
-  const api = (endpoint, method, body) => cloudApi(url, auth, agent, endpoint, method, body, signal);
-  const info = await api('/api/sys/info?lite=1');
+// Retry only reads. A write with an uncertain result is reconciled by prepareRelay.
+export async function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', body, signal, options={}) {
+  const started=Date.now(),budget=25000,attempts=method==='GET'?4:1;
+  for(let attempt=1;attempt<=attempts;attempt++){
+    signal?.throwIfAborted();
+    try{return await cloudRequest(baseUrl,auth,agent,endpoint,method,body,signal,method==='GET'?Math.max(1,Math.min(8000,budget-(Date.now()-started))):30000);}
+    catch(error){
+      if(signal?.aborted)signal.throwIfAborted();
+      Object.assign(error,{attempts:attempt,stage:options.stage||'cloud-api',endpoint:new URL(endpoint,baseUrl).pathname,method});
+      const wait=Math.max([250,750,1500][attempt-1]||0,error.retryAfterMs||0);
+      if(attempt===attempts || !isTransientCloudError(error) || Date.now()-started+wait>=budget)throw error;
+      options.onRetry?.({attempt:attempt+1,maxAttempts:attempts,delayMs:wait,code:failureCode(error),method,endpoint:error.endpoint});
+      await delay(wait,undefined,{signal});
+    }
+  }
+}
+
+export async function prepareRelay(url, auth, agent, signal, options={}) {
+  signal?.throwIfAborted();
+  const progress=event=>options.onProgress?.(event);
+  const key=createHash('sha256').update(url+'\0'+JSON.stringify(authHeaders(auth))).digest('hex');
+  const cache=options.cache||{};
+  if(cache.entry?.key!==key || cache.entry.until<=Date.now())cache.entry={key,until:Date.now()+60000,folders:[]};
+  const entry=cache.entry;
+  const checkpoint=()=>{entry.until=Date.now()+60000;};
+  let stage='relay-info',label='正在检查云端连接能力';
+  const step=(code,text)=>{signal?.throwIfAborted();stage=code;label=text;progress({state:'start',stage,label});};
+  const api = (endpoint, method='GET', body) => cloudApi(url,auth,agent,endpoint,method,body,signal,{stage,onRetry:event=>progress({...event,state:'retry',stage,label})});
+  const fileEntry=async(dir,name)=>{
+    const listing=await api('/api/sys/fs?hidden=1&path='+encodeURIComponent(dir));
+    if(!Array.isArray(listing.entries))throw Object.assign(new Error('云电脑目录响应异常'),{code:'INVALID_RESPONSE'});
+    return listing.entries.find(entry=>entry.name===name);
+  };
+  // A lost POST/PUT response never authorizes a second write. Read back the
+  // fixed bootstrap object and continue only when its type/content are proven.
+  const write=async(endpoint,method,body,confirmed)=>{
+    try{await api(endpoint,method,body);}
+    catch(error){
+      if(!isTransientCloudError(error) || signal?.aborted)throw error;
+      progress({state:'reconcile',stage,label});
+      if(!await confirmed())throw error;
+    }
+  };
+  try{
+  if(entry.ready){progress({state:'cached',stage:'relay-ready',label:'连接组件已就绪，正在建立 MCP 通道'});return entry.ready;}
+  step('relay-info','正在检查云端连接能力');
+  const info = entry.info || await api('/api/sys/info?lite=1');
   if(info.cmcp?.protocol===1 && info.cmcp.available!==true)throw Error('CC 的终端系统层需要管理员更新，尚未启用 CMCP 兼容连接');
   const home = info.home;
   if (typeof home !== 'string' || !/^\/[a-zA-Z0-9_./-]+$/.test(home) || home.split('/').includes('..')) {
     throw new Error('云电脑的用户目录异常');
   }
+  entry.info=info;checkpoint();
   let dir = home;
+  let index=0;
   for (const name of ['.local', 'share', 'cloudpc-link']) {
-    const listing = await api('/api/sys/fs?hidden=1&path=' + encodeURIComponent(dir));
-    const entry = listing.entries?.find(entry => entry.name === name);
-    if (!entry) await api('/api/sys/fs', 'POST', { dir, name, kind: 'folder' });
-    else if (entry.kind !== 'folder' || entry.link) throw new Error('云电脑的连接组件目录异常');
+    step('relay-folder','正在准备连接组件目录（'+(++index)+'/3）');
+    if(!entry.folders.includes(name)){
+      const found=await fileEntry(dir,name);
+      const valid=e=>e?.kind==='folder'&&!e.link;
+      if(!found)await write('/api/sys/fs','POST',{dir,name,kind:'folder'},async()=>valid(await fileEntry(dir,name)));
+      else if(!valid(found))throw new Error('云电脑的连接组件目录异常');
+      entry.folders.push(name);checkpoint();
+    }
     dir += '/' + name;
   }
   const file = dir + '/cloudpc-relay.py';
-  const listing = await api('/api/sys/fs?hidden=1&path=' + encodeURIComponent(dir));
-  const existing = listing.entries?.find(entry => entry.name === 'cloudpc-relay.py');
+  step('relay-check','正在检查云端连接组件');
+  const existing = await fileEntry(dir,'cloudpc-relay.py');
   if (existing && (existing.kind !== 'file' || existing.link)) throw new Error('云电脑的连接组件文件异常');
   const content = relaySource();
+  const confirmed=async()=>{
+    const found=await fileEntry(dir,'cloudpc-relay.py');
+    if(!found||found.kind!=='file'||found.link)return false;
+    return (await api('/api/sys/fs?read=1&path='+encodeURIComponent(file))).content===content;
+  };
   if (existing) {
+    step('relay-read','正在校验云端连接组件');
     const previous = await api('/api/sys/fs?read=1&path=' + encodeURIComponent(file));
-    if (previous.content !== content) await api('/api/sys/fs', 'PUT', { path: file, content });
+    if (previous.content !== content){step('relay-write','正在更新云端连接组件');await write('/api/sys/fs','PUT',{path:file,content},confirmed);}
   } else {
-    await api('/api/sys/fs', 'POST', { dir, name: 'cloudpc-relay.py', kind: 'file', content });
+    step('relay-write','正在更新云端连接组件');
+    await write('/api/sys/fs','POST',{dir,name:'cloudpc-relay.py',kind:'file',content},confirmed);
   }
-  return { home, file, cc:info.cmcp?.protocol===1 };
+  signal?.throwIfAborted();entry.ready={home,file,cc:info.cmcp?.protocol===1};checkpoint();
+  progress({state:'ready',stage:'relay-ready',label:'连接组件已就绪，正在建立 MCP 通道'});
+  return entry.ready;
+  }catch(error){
+    if(!isTransientCloudError(error))delete cache.entry;
+    Object.assign(error,{stage: error.stage||stage,preparationLabel:label});throw error;
+  }
 }
 
 // WebSocket-shaped adapter: startLink keeps its existing login, heartbeat, reconnect,
@@ -228,8 +301,8 @@ export class TerminalLink extends EventEmitter {
   }
 }
 
-export async function openTerminalLink(baseUrl, auth, agent, signal) {
-  const { home, file,cc } = await prepareRelay(baseUrl, auth, agent, signal);
+export async function openTerminalLink(baseUrl, auth, agent, signal, options) {
+  const { home, file,cc } = await prepareRelay(baseUrl, auth, agent, signal, options);
   signal?.throwIfAborted();
   const url = new URL(baseUrl.replace(/^http/, 'ws') + '/api/term/ws');
   url.search = new URLSearchParams({ sid: 'pclink-' + randomUUID(), cols: '200', rows: '30', cwd: home,
