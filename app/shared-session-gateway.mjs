@@ -6,6 +6,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { authHeaders, requestBuffered } from './desktop-auth.mjs';
 import {autoFillSource, injectAutoFill} from './shared-autofill.mjs';
 import {recoveryPage} from './web-recovery.mjs';
+import {staticAssets} from './static-assets.mjs';
 
 const SESSION_RE = /^[A-Za-z0-9._~-]{16,4096}$/;
 const HOP_HEADERS = new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade','host']);
@@ -48,7 +49,7 @@ function localError(res, status, message) {
   res.end(body);
 }
 
-export async function createSharedSessionGateway({ name, baseUrl, agent, onSession = () => {}, onInvalidate = () => {}, diagnostic = () => {}, autoPassword, httpRecoveryOptions={} }) {
+export async function createSharedSessionGateway({ name, baseUrl, agent, onSession = () => {}, onInvalidate = () => {}, diagnostic = () => {}, autoPassword, httpRecoveryOptions={}, assetCache=staticAssets }) {
   const retryDelays=httpRecoveryOptions.delays??[500,1500];
   const headerTimeout=httpRecoveryOptions.headerTimeout??10000;
   if(!Array.isArray(retryDelays)||retryDelays.length>4||retryDelays.some(n=>!Number.isFinite(n)||n<0||n>5000)||!Number.isFinite(headerTimeout)||headerTimeout<50||headerTimeout>60000)throw Error('Invalid HTTP recovery policy');
@@ -244,6 +245,9 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
   function proxyHttp(req, res, local) {
     const target = upstreamUrl(local);
     if (req.method === 'POST' && local.pathname === '/api/auth/login') return void proxyLogin(req, res, target);
+    const cacheKey=local.search?null:assetCache.key(target,req.method,req.headers);
+    const cached=assetCache.get(cacheKey);
+    if(cached){req.resume();report('web asset cache hit');res.writeHead(200,cached.headers);res.end(req.method==='HEAD'?undefined:cached.body);return;}
     // Never replay submissions, uploads, or a request with a body. Streaming
     // responses cannot be replayed once headers/data reached the browser.
     const safe=['GET','HEAD'].includes(req.method)&&!req.headers['transfer-encoding']&&!Number(req.headers['content-length']||0);
@@ -306,6 +310,7 @@ export async function createSharedSessionGateway({ name, baseUrl, agent, onSessi
           });return;
         }
         settled=true;
+        if(req.method==='GET')assetCache.capture(cacheKey,upstreamRes,outputHeaders,()=>!cancelled&&!closed);
         if(attempt)report(`web ${category} recovered attempts=${attempt+1}`);
         res.writeHead(upstreamRes.statusCode||502,outputHeaders);
         upstreamRes.on('error',()=>res.destroy());upstreamRes.pipe(res);

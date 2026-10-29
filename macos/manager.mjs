@@ -13,6 +13,7 @@ import {agentFor} from '../app/link-client.mjs';
 import {requiresSharedSession} from '../app/desktop-auth.mjs';
 import {createTargetConnections} from '../app/target-connections.mjs';
 import {managedTargetFactory} from '../app/managed-target.mjs';
+import {staticAssets} from '../app/static-assets.mjs';
 import {checkRelease,downloadUpdate} from './updates.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
@@ -23,7 +24,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
   let machine;try{machine=fs.readFileSync(machineFile,'utf8').trim();if(!/^[a-f0-9-]{36}$/.test(machine))throw Error();}catch{machine=randomUUID();atomicWrite(machineFile,machine);}
   const status={set(name,state,message){if(state==='password')message='保存的密码不正确或不可用。请停止此连接后编辑密码。';states[name]={state,message,at:new Date().toISOString()};}};
-  const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);const recovery=/\] ((?:web (?:document|api|asset) (?:(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) attempt=[1-5] code=(?:ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|HTTP_50[234]) tls=(?:true|false)|recovered attempts=[2-5]|failed code=NON_TRANSIENT))|heartbeat (?:delayed; retaining connection|recovered without reconnect))$/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+(recovery?recovery[1]:name[2]):'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
+  const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);const recovery=/\] ((?:web (?:document|api|asset) (?:(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) attempt=[1-5] code=(?:ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|HTTP_50[234]) tls=(?:true|false)|recovered attempts=[2-5]|cache hit|failed code=NON_TRANSIENT))|heartbeat (?:delayed; retaining connection|recovered without reconnect))$/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+(recovery?recovery[1]:name[2]):'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
   const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
     create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
@@ -34,7 +35,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
   async function entry(id){for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===id);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(id)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
-  async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
+  async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
     '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled})=>({id,label,state,enabled})),language:store.preferences.language,updating}),

@@ -17,6 +17,7 @@ import net from 'node:net';
 import os from 'node:os';
 import { StatusBoard, machineId } from './link-client.mjs';
 import { managedTargetFactory } from './managed-target.mjs';
+import {staticAssets} from './static-assets.mjs';
 import { createTargetConnections, readTargetControls } from './target-connections.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -263,6 +264,7 @@ async function stop(code = 0) {
   await windows.close().catch(() => {});
   try { binary.close(); } catch {}
   await backend.close().catch(() => {});
+  staticAssets.clear();
   process.exit(code);
 }
 process.on('SIGINT', () => stop());
