@@ -34,6 +34,9 @@ async function desktop(password,{lateHydration=false,realReact=false}={}){
   const s={posts:0,upgrades:0,session:'',sockets:[]};
   const server=http.createServer(async(req,res)=>{
     if(req.url==='/'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'self'; script-src 'nonce-fixtureAutoNonce123'; connect-src 'self'"});return res.end(realReact?react.html:lateHydration?html.replace('autocomplete="current-password" disabled','autocomplete="current-password"'):html);}
+    // This fixture represents a pre-1.9 WebDesktop without the new endpoint.
+    // Unknown routes return 404, not the protected session API's 401.
+    if(req.url==='/api/auth/cmcp'){res.writeHead(404,{'content-type':'application/json'});return res.end('{}');}
     if(req.url==='/login-fixture.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(realReact?react.script:lateHydration?'setTimeout(()=>{'+formScript+'\nfield.value="";window.fixtureHydrated=true;},1000);':formScript);}
     const chunks=[];for await(const c of req)chunks.push(c);res.setHeader('content-type','application/json');
     if(req.url==='/api/auth/login'){
