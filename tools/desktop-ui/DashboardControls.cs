@@ -103,7 +103,7 @@ namespace CMCP {
             tips.SetToolTip(Settings,"设置");tips.SetToolTip(UpdateButton,"检查更新");tips.SetToolTip(Theme,"切换浅色 / 深色主题");tips.SetToolTip(Add,"添加新的云电脑，不会自动连接");
         }
         internal void UpdateTip(string value){tips.SetToolTip(UpdateButton,value);UpdateButton.AccessibleDescription=L.Text(value);}
-        internal void Apply(Palette colors){Colors=colors;BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=b==Settings||b==UpdateButton?colors.Subtle:colors.Surface;b.Invalidate();}Invalidate();}
+        internal void Apply(Palette colors){Colors=colors;tips.Apply(colors);BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=b==Settings||b==UpdateButton?colors.Subtle:colors.Surface;b.Invalidate();}Invalidate();}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(166,20,32,32);UpdateButton.Bounds=new Rectangle(204,20,32,32);Theme.Bounds=new Rectangle(Width-231,17,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(e.Graphics,new Rectangle(160,16,82,40),10,Colors.Subtle,Colors.Subtle);using(var f=new Font(Font.FontFamily,14,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
         protected override void Dispose(bool disposing){if(disposing)tips.Dispose();base.Dispose(disposing);}

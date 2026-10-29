@@ -101,7 +101,7 @@ namespace CMCP {
         }
 
         internal void Apply(Palette colors) {
-            Colors=colors;BackColor=colors.Page;
+            Colors=colors;tips.Apply(colors);BackColor=colors.Page;
             Color fill=Selected?colors.Selected:colors.Surface;
             Details.Apply(colors);Details.BackColor=fill;
             StatusText.BackColor=fill;

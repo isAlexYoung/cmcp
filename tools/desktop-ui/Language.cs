@@ -110,11 +110,4 @@ namespace CMCP {
             return result;
         }
     }
-    internal sealed class LocalToolTip : ToolTip {
-        readonly Dictionary<Control,string> source=new Dictionary<Control,string>();
-        internal LocalToolTip(){L.Changed+=RefreshLanguage;}
-        public new void SetToolTip(Control control,string text){source[control]=text;base.SetToolTip(control,L.Text(text));}
-        void RefreshLanguage(){foreach(var pair in source)if(!pair.Key.IsDisposed)base.SetToolTip(pair.Key,L.Text(pair.Value));}
-        protected override void Dispose(bool disposing){if(disposing){L.Changed-=RefreshLanguage;source.Clear();}base.Dispose(disposing);}
-    }
 }

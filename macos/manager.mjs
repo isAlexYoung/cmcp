@@ -52,7 +52,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     try{
       if(req.headers.host!==new URL(origin).host)return json(res,421,{error:'Host not allowed'});
       const url=new URL(req.url,origin);
-      if(req.method==='GET'&&['/','/ui/app.js','/ui/style.css'].includes(url.pathname)){
+      if(req.method==='GET'&&['/','/ui/app.js','/ui/tooltips.js','/ui/style.css'].includes(url.pathname)){
         const file=url.pathname==='/'?'index.html':url.pathname.split('/').at(-1);
         res.writeHead(200,{'content-type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'application/javascript; charset=utf-8':'text/css; charset=utf-8','cache-control':'no-store',
           'content-security-policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",'x-content-type-options':'nosniff'});

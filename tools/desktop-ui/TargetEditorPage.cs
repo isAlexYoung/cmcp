@@ -113,6 +113,7 @@ namespace CMCP {
         }
         internal bool LayoutFits { get { return NameInput.Right<=sheet.Width-20 && UrlInput.Right<=sheet.Width-20 && Save.Right<=footer.Width && Back.Right<title.Left; } }
         internal void Apply(Palette colors) {
+            tips.Apply(colors);
             BackColor=header.BackColor=viewport.BackColor=footer.BackColor=colors.Page;
             sheet.BackColor=colors.Page;sheet.Colors=colors;sheet.ForeColor=colors.Text;
             title.ForeColor=nameLabel.ForeColor=urlLabel.ForeColor=passwordLabel.ForeColor=colors.Text;help.ForeColor=colors.Muted;error.ForeColor=colors.Danger;

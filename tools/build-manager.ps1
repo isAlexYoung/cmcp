@@ -18,6 +18,8 @@ $inline = Join-Path $PSScriptRoot 'desktop-ui\InlineWorker.cs'
 $cardList = Join-Path $PSScriptRoot 'desktop-ui\CardList.cs'
 $settings = Join-Path $PSScriptRoot 'desktop-ui\AppSettings.cs'
 $language = Join-Path $PSScriptRoot 'desktop-ui\Language.cs'
+$tooltips = Join-Path $PSScriptRoot 'desktop-ui\LocalToolTip.cs'
+$tooltipTests = Join-Path $PSScriptRoot 'desktop-ui\ToolTipTests.cs'
 $settingsPage = Join-Path $PSScriptRoot 'desktop-ui\SettingsPage.cs'
 $updater = Join-Path $PSScriptRoot 'desktop-ui\Updater.cs'
 $updateProgress = Join-Path $PSScriptRoot 'desktop-ui\UpdateProgress.cs'
@@ -34,6 +36,6 @@ if ($PreviewOnly) {
     $defines += '/define:CMCP_PREVIEW'
     if (!$PSBoundParameters.ContainsKey('OutputFile')) { $output = Join-Path (Split-Path $PSScriptRoot -Parent) 'CMCP-UI-Preview.exe' }
 }
-& $compiler /nologo /target:winexe /platform:anycpu /optimize+ /utf8output /codepage:65001 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Core.dll "/win32manifest:$manifest" "/win32icon:$icon" "/out:$output" @defines $source $portable $shortcuts $shortcutTests $dashboard $manager $preferences $dashboardTests $card $editor $frame $inline $cardList $restart $settings $language $settingsPage $updater $updateProgress $updateProgressTests $settingsTests $trayMenu $trayTests
+& $compiler /nologo /target:winexe /platform:anycpu /optimize+ /utf8output /codepage:65001 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Core.dll "/win32manifest:$manifest" "/win32icon:$icon" "/out:$output" @defines $source $portable $shortcuts $shortcutTests $dashboard $manager $preferences $dashboardTests $card $editor $frame $inline $cardList $restart $settings $language $tooltips $tooltipTests $settingsPage $updater $updateProgress $updateProgressTests $settingsTests $trayMenu $trayTests
 if ($LASTEXITCODE -ne 0) { throw "编译失败，退出码 $LASTEXITCODE" }
 Get-FileHash -LiteralPath $output -Algorithm SHA256 | Select-Object Path,Hash

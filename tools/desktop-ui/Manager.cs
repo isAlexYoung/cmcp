@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.4.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.4.2.0")]
+[assembly: System.Reflection.AssemblyVersion("4.5.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.5.0.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -167,7 +167,7 @@ namespace CMCP {
     internal static class Program {
         internal static string ExecutablePath {get{string canonical=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMCP.exe");return File.Exists(canonical)?canonical:Application.ExecutablePath;}}
         [STAThread] static int Main(string[] args) {
-            if(args.Length==2&&args[0]=="--self-test")Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+            if(args.Length==2&&(args[0]=="--self-test"||args[0]=="--test-tooltips"))Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             if(args.Length==2&&args[0]=="--self-test")AppDomain.CurrentDomain.UnhandledException+=delegate(object sender,UnhandledExceptionEventArgs e){try{File.WriteAllText(args[1]+".unhandled.txt",Convert.ToString(e.ExceptionObject),Encoding.UTF8);}catch{}};
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
 #if CMCP_PREVIEW
@@ -176,6 +176,7 @@ namespace CMCP {
             if (args.Length == 0) { Application.Run(new Manager(true)); return 0; }
             return 64;
 #else
+            if(args.Length==2&&args[0]=="--test-tooltips")return ToolTipTests.Run(Path.GetFullPath(args[1]));
             if (args.Length == 2 && args[0] == "--self-test") return SelfTest(args[1]);
             if(args.Length==3&&args[0]=="--preview-tray"){TrayTests.Capture(args[1],args[2]=="dark");return 0;}
             if (args.Length == 1 && args[0] == "--demo") { Application.Run(new Manager(true)); return 0; }
