@@ -1,6 +1,6 @@
 {
   "name": "cmcp-mac",
-  "version": "4.6.1",
+  "version": "4.7.0",
   "description": "macOS outbound MCP bridge with native and terminal transports",
   "private": true,
   "keywords": [],

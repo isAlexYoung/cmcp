@@ -5,7 +5,7 @@ import https from 'node:https';
 export function authHeaders(auth) {
   if (typeof auth === 'string') return {cookie: auth};
   if (!auth || typeof auth.sessionId !== 'string' || !/^[A-Za-z0-9._~-]{16,4096}$/.test(auth.sessionId)) throw Error('Invalid desktop session');
-  if (auth.cookie !== undefined && (typeof auth.cookie !== 'string' || !/^wd_session=[\x21-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/.test(auth.cookie))) throw Error('Invalid desktop cookie');
+  if (auth.cookie !== undefined && (typeof auth.cookie !== 'string' || !/^wd_(?:session|cmcp)=[\x21-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/.test(auth.cookie))) throw Error('Invalid desktop cookie');
   return {'X-Desktop-Session': auth.sessionId, ...(auth.cookie ? {cookie:auth.cookie} : {})};
 }
 export function authSocketUrl(url, auth) {

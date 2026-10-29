@@ -2,6 +2,7 @@ import {agentFor, startLink} from './link-client.mjs';
 import {requiresSharedSession} from './desktop-auth.mjs';
 import {createSharedSessionGateway} from './shared-session-gateway.mjs';
 import {Cloud} from './cloud-connector.mjs';
+import {supportsDirectBrowser,createDirectBrowser} from './direct-browser.mjs';
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
@@ -23,8 +24,8 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
       closed = true;
       stopping = (async () => {
         await record.link?.stop();
-        record.agent?.destroy();
         await record.gateway?.close();
+        record.agent?.destroy();
       })();
       return stopping;
     };
@@ -39,7 +40,8 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
       signal.throwIfAborted();
       if (!current()) throw Error('Target stopped');
       if (shared) {
-        record.gateway = await createSharedSessionGateway({name:t.name, baseUrl:t.url, agent:record.agent, diagnostic:message => log(`[${t.name}] ${message}`),
+        const gateway = await supportsDirectBrowser(t.url,record.agent,signal) ? createDirectBrowser : createSharedSessionGateway;
+        record.gateway = await gateway({name:t.name, baseUrl:t.url, agent:record.agent, diagnostic:message => log(`[${t.name}] ${message}`),
           autoPassword:t.autoLogin===true ? async signal=>{if(!current()||signal.aborted)throw Error('Target stopped');const password=await passwordFor(t.name,signal);if(!current()||signal.aborted)throw Error('Target stopped');return password;} : undefined});
         if (!current()) { await record.gateway.close(); throw Error('Target stopped'); }
       }
