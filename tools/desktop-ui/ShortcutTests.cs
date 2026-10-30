@@ -35,8 +35,16 @@ namespace CMCP {
                 check(!StartupPreferences.ShouldPrompt(state,exe,Path.Combine(root,"missing-desktop"),desktop),"desktop detection accepts a later desktop location and ignores missing locations");
                 var properties = DesktopShortcut.Read(shortcut);
                 check(String.Equals(properties[0],exe,StringComparison.OrdinalIgnoreCase) && String.Equals(properties[1],app,StringComparison.OrdinalIgnoreCase),"shortcut points at current EXE with portable working directory");
-                check(properties[2].Trim('"').EndsWith("CMCP.exe,0",StringComparison.OrdinalIgnoreCase) && properties[3]=="", "shortcut uses embedded Claude icon and no startup arguments");
-                using (var icon = Icon.ExtractAssociatedIcon(exe)) check(icon!=null && icon.Width>0,"Claude icon is embedded and available without Claude installation");
+                check(properties[2].Trim('"').EndsWith("CMCP.exe,0",StringComparison.OrdinalIgnoreCase) && properties[3]=="", "shortcut uses embedded CMCP icon and no startup arguments");
+                using (var icon = Icon.ExtractAssociatedIcon(exe)) check(icon!=null && icon.Width>0,"CMCP icon is embedded in the executable");
+                string iconState=Path.Combine(root,"icon-state");Directory.CreateDirectory(iconState);
+                string notifiedExe=null;System.Collections.Generic.IList<string> notifiedLinks=null;int notifications=0;
+                Action<string,System.Collections.Generic.IList<string>> recorder=(target,links)=>{notifications++;notifiedExe=target;notifiedLinks=links;};
+                check(ShellIconRefresh.RefreshOnce(exe,iconState,recorder,desktop)&&notifications==1&&String.Equals(notifiedExe,exe,StringComparison.OrdinalIgnoreCase)&&notifiedLinks.Contains(shortcut),"first start of a version refreshes the icon of the exe and its desktop shortcut");
+                check(!ShellIconRefresh.RefreshOnce(exe,iconState,recorder,desktop)&&notifications==1,"the same version and path do not refresh icons again");
+                check(ShellIconRefresh.RefreshOnce(movedExe,iconState,recorder,desktop)&&notifications==2,"another installation path refreshes once");
+                string missingState=Path.Combine(root,"missing-state");
+                check(!ShellIconRefresh.RefreshOnce(exe,missingState,recorder,desktop)&&notifications==2&&!Directory.Exists(missingState),"icon refresh never creates the portable state directory");
                 StartupPreferences.Apply(true,true,exe,desktop,state);
                 check(!StartupPreferences.ShouldPrompt(state),"Yes with checkbox persists suppression");
                 DesktopShortcut.Create(movedExe,desktop);

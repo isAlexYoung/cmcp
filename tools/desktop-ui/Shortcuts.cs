@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -64,29 +65,72 @@ namespace CMCP {
                 link.SetPath(exe); link.SetWorkingDirectory(Path.GetDirectoryName(exe));link.SetArguments("");
                 link.SetIconLocation(exe,0);link.SetDescription(Description);link.SetShowCmd(1);
                 ((System.Runtime.InteropServices.ComTypes.IPersistFile)shell).Save(temporary,true);
-                if (original == null) File.Move(temporary,destination);
+                if (original == null) { File.Move(temporary,destination); ShellNotify.Created(destination); }
                 else {
                     string before = Convert.ToBase64String(original);
                     if (!File.Exists(destination) || Convert.ToBase64String(File.ReadAllBytes(destination)) != before) throw new IOException("快捷方式已被其他程序修改，请重试。");
                     File.Replace(temporary,destination,null);
+                    ShellNotify.Updated(destination);
                 }
                 return destination;
             } finally { Release(shell); if (File.Exists(temporary)) File.Delete(temporary); }
         }
-        internal static bool Exists(string executable,params string[] desktops) {
+        internal static bool Exists(string executable,params string[] desktops) { return Links(executable,desktops).Any(); }
+        internal static IEnumerable<string> Links(string executable,params string[] desktops) {
             string exe=Path.GetFullPath(executable);
             foreach(string desktop in desktops) {
                 if(String.IsNullOrWhiteSpace(desktop)||!Directory.Exists(desktop))continue;
-                try { foreach(string file in Directory.EnumerateFiles(desktop,"*.lnk").Take(1024)) {
+                string[] files;
+                try { files=Directory.EnumerateFiles(desktop,"*.lnk").Take(1024).ToArray(); } catch { continue; }
+                foreach(string file in files) {
+                    bool match=false;
                     try {
                         var link=Read(file);string target=link[0];
                         if(link[3].Length!=0||target.Length<3||target[1]!=':'||target[2]!='\\')continue;
                         bool owned=link[4]==Description&&(String.Equals(Path.GetFileName(target),"CMCP.exe",StringComparison.OrdinalIgnoreCase)||String.Equals(Path.GetFileName(target),"Claude-MCP.exe",StringComparison.OrdinalIgnoreCase));
-                        if((owned||String.Equals(Path.GetFullPath(target),exe,StringComparison.OrdinalIgnoreCase))&&File.Exists(target))return true;
+                        match=(owned||String.Equals(Path.GetFullPath(target),exe,StringComparison.OrdinalIgnoreCase))&&File.Exists(target);
                     }catch{}
-                }}catch{}
+                    if(match)yield return file;
+                }
             }
-            return false;
+        }
+    }
+
+    // Explorer caches icons by path. Without a notification a new or replaced
+    // shortcut may not appear until the desktop refreshes, and an updated
+    // CMCP.exe at the same path keeps showing its previous icon.
+    internal static class ShellNotify {
+        [DllImport("shell32.dll")] static extern void SHChangeNotify(int eventId,uint flags,[MarshalAs(UnmanagedType.LPWStr)] string item1,IntPtr item2);
+        [DllImport("shell32.dll",EntryPoint="SHChangeNotify")] static extern void SHChangeNotifyIds(int eventId,uint flags,IntPtr item1,IntPtr item2);
+        const int CREATE=0x2,UPDATEDIR=0x1000,UPDATEITEM=0x2000,ASSOCCHANGED=0x08000000;
+        const uint PATH=0x5,FLUSHNOWAIT=0x3000;
+        static void Path(int eventId,string path){try{SHChangeNotify(eventId,PATH|FLUSHNOWAIT,path,IntPtr.Zero);}catch{}}
+        internal static void Created(string file){Path(CREATE,file);Path(UPDATEDIR,System.IO.Path.GetDirectoryName(file));}
+        internal static void Updated(string file){Path(UPDATEITEM,file);Path(UPDATEDIR,System.IO.Path.GetDirectoryName(file));}
+        internal static void IconsChanged(string exe,IList<string> links){
+            Path(UPDATEITEM,exe);foreach(string link in links)Updated(link);
+            try{SHChangeNotifyIds(ASSOCCHANGED,0,IntPtr.Zero,IntPtr.Zero);}catch{}
+        }
+    }
+
+    internal static class ShellIconRefresh {
+        internal const string MarkerName="shell-icon-version.txt";
+        // Once per CMCP.exe version and path: refresh Explorer's icon for the exe and
+        // its desktop shortcuts. Only an existing state directory is used, so the
+        // portable preferences location never changes because of this marker.
+        internal static bool RefreshOnce(string executable,string stateDirectory,Action<string,IList<string>> notify,params string[] desktops){
+            try{
+                if(String.IsNullOrWhiteSpace(stateDirectory)||!Directory.Exists(stateDirectory))return false;
+                string exe=Path.GetFullPath(executable);
+                string stamp=(FileVersionInfo.GetVersionInfo(exe).FileVersion??"")+"|"+exe.ToLowerInvariant();
+                string marker=Path.Combine(stateDirectory,MarkerName);
+                if(File.Exists(marker)&&new FileInfo(marker).Length<=4096&&File.ReadAllText(marker,Encoding.UTF8)==stamp)return false;
+                (notify??ShellNotify.IconsChanged)(exe,DesktopShortcut.Links(exe,desktops).ToList());
+                string temp=marker+"."+Guid.NewGuid().ToString("N")+".tmp";
+                try{File.WriteAllText(temp,stamp,new UTF8Encoding(false));if(File.Exists(marker))File.Replace(temp,marker,null);else File.Move(temp,marker);}
+                finally{if(File.Exists(temp))File.Delete(temp);}
+                return true;
+            }catch{return false;}
         }
     }
 

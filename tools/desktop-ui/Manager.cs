@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.8.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.8.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.8.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.8.1.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -224,6 +224,7 @@ namespace CMCP {
             bool created;
             using (var mutex = new Mutex(true, "Local\\ClaudeMcpManager-" + PortableState.InstanceKey, out created)) {
                 if (!created) {if(!startup)ManagerSignal.Restore();return 0;}
+                ThreadPool.QueueUserWorkItem(delegate{ShellIconRefresh.RefreshOnce(ExecutablePath,PortableState.PreferencesPath,null,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));});
                 try {
                     using(var form=new Manager(false)){
                         form.Shown+=delegate{
