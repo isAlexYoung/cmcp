@@ -77,8 +77,9 @@ namespace CMCP {
                 check(File.ReadAllText(StartupPreferences.FileName(state)).Contains("keep"),"saving prompt preference preserves other settings");
                 check(!File.Exists(Path.Combine(state,"config.json")) && !File.Exists(Path.Combine(state,"cloudpc-targets.json")) && !File.Exists(Path.Combine(state,"stopped.flag")),"shortcut feature does not create credentials, targets or service stop flag");
             } finally {
-                foreach(string file in new string[]{shortcut,exe,movedExe,StartupPreferences.FileName(state)}) if(File.Exists(file))File.Delete(file);
-                foreach(string directory in new string[]{desktop,state,moved,app,root}) if(Directory.Exists(directory))Directory.Delete(directory,false);
+                string iconStateDirectory=Path.Combine(root,"icon-state");
+                foreach(string file in new string[]{shortcut,exe,movedExe,StartupPreferences.FileName(state),Path.Combine(iconStateDirectory,ShellIconRefresh.MarkerName)}) if(File.Exists(file))File.Delete(file);
+                foreach(string directory in new string[]{desktop,state,moved,app,iconStateDirectory,root}) if(Directory.Exists(directory))Directory.Delete(directory,false);
             }
         }
     }
