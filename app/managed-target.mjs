@@ -3,13 +3,15 @@ import {requiresSharedSession} from './desktop-auth.mjs';
 import {createSharedSessionGateway} from './shared-session-gateway.mjs';
 import {Cloud} from './cloud-connector.mjs';
 import {supportsDirectBrowser,createDirectBrowser} from './direct-browser.mjs';
+import {connectionDetail} from './connection-transport.mjs';
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
 export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log, deviceName, recoveryOptions, healthOptions,
-  passwordFor, session = false, onReplaced, install = (t, auth, agent, signal) => new Cloud(t.url, auth, agent, signal).install()}) {
+  passwordFor, session = false, onReplaced, install = (t, auth, agent, signal, preparation) => new Cloud(t.url, auth, agent, signal,preparation).install()}) {
   return async (t, {signal, current, status}) => {
     const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null,connected:false,connectionEpoch:0};
+    const preparationCache={};
     // Soft probe failures must not revoke setup leases or discard confirmed config.
     let unstable=false,confirmed;
     const publish=(name,state,message)=>{
@@ -55,7 +57,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
         const sameSession = () => current() && epoch===record.connectionEpoch && (!shared || used === record.gateway.getSessionId());
         publish(t.name, 'configuring', '正在配置此云电脑的 Claude MCP');
         try {
-          const changed = await install(t, record.auth, record.agent, signal);
+          const changed = await install(t, record.auth, record.agent, signal,{cache:preparationCache});
           if (sameSession()&&record.connected) {
             record.installed = used;
             publish(t.name, 'connected', changed ? '共享会话已连接；MCP 配置已更新，请重启云端 Claude' : '共享会话已连接，Claude MCP 配置已确认');
@@ -63,13 +65,13 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
         } catch (error) {
           if (sameSession()&&record.connected) {
             publish(t.name, 'config-error', '共享连接已建立，但 Claude 配置失败，30 秒后重试');
-            log(`[${t.name}] shared connector setup failed (${error.status || error.code || 'setup'})`);
+            log(`[${t.name}] shared connector setup failed (${error.status || error.code || 'setup'}) ${connectionDetail(error)}`);
             record.retryAt = Date.now() + 30000;
           }
         } finally { record.installing = false; }
       };
       const linkStatus={set:(name,state,message)=>{if(['offline','recovering','waiting-login','replaced','stopped'].includes(state)){record.connected=false;record.installed=null;record.connectionEpoch++;}publish(name,state,message);}};
-      record.link = startLink({name:t.name, machine, version, askPassword, notify,status:linkStatus,log, session, onReplaced, deviceName, recoveryOptions, healthOptions,
+      record.link = startLink({name:t.name, machine, version, askPassword, notify,status:linkStatus,log, session, onReplaced, deviceName, recoveryOptions, healthOptions,preparationCache,
         onHealth:value=>{unstable=value;if(confirmed)publish(confirmed.name,confirmed.state,confirmed.message);},
         forward:msg => { if (!current()) throw Error('Target stopped'); return forward(msg); },
         onConnected:async auth => { if (current()) { record.auth = auth;record.connected=true;record.retryAt=0;await record.setup(); }return {statusHandled:true}; },

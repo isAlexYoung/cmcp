@@ -16,6 +16,7 @@ $required += @('tools\desktop-ui\TargetCard.cs','tools\desktop-ui\TargetEditorPa
 $required += @('app\manager-events.ps1','app\manager-save.ps1','tools\desktop-ui\InlineWorker.cs','tools\desktop-ui\CardList.cs')
 $required += @('app\shared-autofill.mjs','app\web-recovery.mjs','app\static-assets.mjs')
 $required += @('app\direct-browser.mjs')
+$required += @('app\connection-transport.mjs')
 $required += @('app\manager-restart.ps1','tools\desktop-ui\BackendRestart.cs')
 $required += @('app\update.ps1','app\update-core.ps1','app\update-apply.ps1','tools\desktop-ui\SettingsPage.cs','tools\desktop-ui\AppSettings.cs','tools\desktop-ui\Language.cs','tools\desktop-ui\Updater.cs','tools\desktop-ui\SettingsTests.cs')
 $required += @('app\request-recovery.mjs','app\manager-exit.ps1')

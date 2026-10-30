@@ -1,6 +1,7 @@
 // Authentication values stay in memory. Never include them in logs or errors.
 import http from 'node:http';
 import https from 'node:https';
+import {observeRequest} from './connection-transport.mjs';
 
 export function authHeaders(auth) {
   if (typeof auth === 'string') return {cookie: auth};
@@ -33,6 +34,7 @@ export function requestBuffered(url, {method='GET', headers={}, body, agent, sig
       res.on('error',reject);
       res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(chunks)}));
     });
+    observeRequest(req);
     const timer=setTimeout(()=>req.destroy(Object.assign(Error('Request timed out'),{code:'ETIMEDOUT'})),timeout);
     req.once('close',()=>clearTimeout(timer));req.on('error',reject);req.end(body);
   });

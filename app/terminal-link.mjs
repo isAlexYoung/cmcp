@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
 import WebSocket from 'ws';
 import { authHeaders, authSocketUrl, socketHeaders } from './desktop-auth.mjs';
+import {observeRequest,finishSocketRequest} from './connection-transport.mjs';
 
 const PREFIX = 'CPCMCP1:';
 const MAX_MESSAGE = 40 * 1024 * 1024;
@@ -53,6 +54,7 @@ function cloudRequest(baseUrl, auth, agent, endpoint, method, body, signal, time
         reject(error);
       });
     });
+    observeRequest(req);
     const deadline = setTimeout(() => req.destroy(Object.assign(new Error('request deadline'), {code:'ETIMEDOUT'})), timeout);
     req.once('close', () => clearTimeout(deadline));
     req.setTimeout(timeout, () => req.destroy(Object.assign(new Error('request timeout'), { code: 'ETIMEDOUT' })));
@@ -72,7 +74,7 @@ export async function cloudApi(baseUrl, auth, agent, endpoint, method = 'GET', b
       Object.assign(error,{attempts:attempt,stage:options.stage||'cloud-api',endpoint:new URL(endpoint,baseUrl).pathname,method});
       const wait=Math.max([250,750,1500][attempt-1]||0,error.retryAfterMs||0);
       if(attempt===attempts || !isTransientCloudError(error) || Date.now()-started+wait>=budget)throw error;
-      options.onRetry?.({attempt:attempt+1,maxAttempts:attempts,delayMs:wait,code:failureCode(error),method,endpoint:error.endpoint});
+      options.onRetry?.({attempt:attempt+1,maxAttempts:attempts,delayMs:wait,code:failureCode(error),method,endpoint:error.endpoint,connectionPhase:error.connectionPhase,connectionMs:error.connectionMs,reusedConnection:error.reusedConnection});
       await delay(wait,undefined,{signal});
     }
   }
@@ -83,9 +85,9 @@ export async function prepareRelay(url, auth, agent, signal, options={}) {
   const progress=event=>options.onProgress?.(event);
   const key=createHash('sha256').update(url+'\0'+JSON.stringify(authHeaders(auth))).digest('hex');
   const cache=options.cache||{};
-  if(cache.entry?.key!==key || cache.entry.until<=Date.now())cache.entry={key,until:Date.now()+60000,folders:[]};
+  if(cache.entry?.key!==key || cache.entry.until<=Date.now())cache.entry={key,until:Date.now()+300000,folders:[]};
   const entry=cache.entry;
-  const checkpoint=()=>{entry.until=Date.now()+60000;};
+  const checkpoint=()=>{entry.until=Date.now()+300000;};
   let stage='relay-info',label='正在检查云端连接能力';
   const step=(code,text)=>{signal?.throwIfAborted();stage=code;label=text;progress({state:'start',stage,label});};
   const api = (endpoint, method='GET', body) => cloudApi(url,auth,agent,endpoint,method,body,signal,{stage,onRetry:event=>progress({...event,state:'retry',stage,label})});
@@ -168,7 +170,7 @@ export class TerminalLink extends EventEmitter {
     this.queuedMessages = 0;
     this.buffer = '';
     this.decoder = new StringDecoder('utf8');
-    this.timer = setTimeout(() => this.fail(new Error('云电脑兼容连接启动超时，请确认已安装 Python 3.9 或更新版本')), 30000);
+    this.timer = setTimeout(() => this.fail(Object.assign(new Error('云电脑兼容连接启动超时，请确认已安装 Python 3.9 或更新版本'),{code:'RELAY_START_FAILED'})), 30000);
     this.ws.on('unexpected-response', (req, res) => this.emit('unexpected-response', req, res));
     this.ws.on('error', error => this.fail(error));
     this.ws.on('close', (code, reason) => this.finish(code, reason));
@@ -177,8 +179,8 @@ export class TerminalLink extends EventEmitter {
         if (!binary) {
           const message = JSON.parse(data.toString());
           if(!message || typeof message !== 'object' || Array.isArray(message))return;
-          if (message.t === 'error') this.fail(new Error(message.message || '无法启动云电脑终端'));
-          if (message.t === 'exit' && !this.ended) this.fail(new Error(`云电脑兼容连接已退出（${message.code}）`));
+          if (message.t === 'error') this.fail(Object.assign(new Error(message.message || '无法启动云电脑终端'),{code:'RELAY_START_FAILED'}));
+          if (message.t === 'exit' && !this.ended) this.fail(Object.assign(new Error(`云电脑兼容连接已退出（${message.code}）`),{code:'RELAY_EXITED'}));
           return;
         }
         this.buffer += this.decoder.write(data);
@@ -202,7 +204,7 @@ export class TerminalLink extends EventEmitter {
           } else if (message.t === 'close') {
             this.close(message.code || 1000, message.reason || 'closed');
           } else if (message.t === 'error') {
-            this.fail(new Error(message.error || '云电脑兼容连接失败'));
+            this.fail(Object.assign(new Error(message.error || '云电脑兼容连接失败'),{code:'RELAY_START_FAILED'}));
           } else {
             this.emit('message', Buffer.from(JSON.stringify(message)), false);
           }
@@ -308,5 +310,5 @@ export async function openTerminalLink(baseUrl, auth, agent, signal, options) {
   url.search = new URLSearchParams({ sid: 'pclink-' + randomUUID(), cols: '200', rows: '30', cwd: home,
     cmd: `exec ${cc?'env CLOUDPC_CC_SHARED=1 ':''}python3 -u '${file}'` }).toString();
   return new TerminalLink(authSocketUrl(url, auth), { headers: socketHeaders(baseUrl,auth), agent, rejectUnauthorized: true, perMessageDeflate: false,
-    maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000 });
+    maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000, finishRequest:finishSocketRequest });
 }

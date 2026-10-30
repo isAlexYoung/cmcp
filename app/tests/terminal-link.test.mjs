@@ -39,6 +39,12 @@ test('terminal output accepts split frames, coalesced frames and shell noise', {
   assert.deepEqual(received, [{ t: 'req', id: '一', msg: '中文 🌱' }, { t: 'welcome' }]);
 });
 
+test('remote relay process exit is distinguishable from a transport reset',async t=>{
+  let remote;const link=await terminal(t,ws=>{remote=ws;});
+  const error=once(link,'error');remote.send(JSON.stringify({t:'exit',code:2}));
+  assert.equal((await error)[0].code,'RELAY_EXITED');
+});
+
 test('multi-megabyte responses retain content and bound packets awaiting acknowledgement', { timeout: 15000 }, async t => {
   let result;
   let maximum = 0;
@@ -187,6 +193,13 @@ test('terminal fallback preserves both cookie and exclusive-session credentials'
   assert.equal(d.counts.terminal,1);assert.equal(d.replies.length,1);
 });
 
+test('relay process exit invalidates preparation and repairs the component before reconnecting',{timeout:7000},async t=>{
+  const d=await desktop(t,false,true);assert.equal(d.counts.uploads,1);
+  d.connections[0].send(JSON.stringify({t:'exit',code:2}));
+  await until(()=>d.replies.length===2);
+  assert.equal(d.counts.uploads,2);assert.equal(d.counts.login,0);assert.equal(d.counts.invalidations,0);
+});
+
 test('HTTP 404 selects terminal transport; reconnect remembers it; takeover stops retrying', { timeout: 10000 }, async t => {
   const d = await desktop(t, false);
   assert.equal(d.counts.native, 1);
@@ -197,6 +210,7 @@ test('HTTP 404 selects terminal transport; reconnect remembers it; takeover stop
   await until(() => d.replies.length === 2);
   assert.equal(d.counts.native, 1);
   assert.equal(d.counts.terminal, 2);
+  assert.equal(d.counts.uploads, 1);
   d.connections[1].send(frame({ t: 'close', code: 4002, reason: 'replaced' }));
   await until(() => d.states.at(-1).state === 'replaced');
   await delay(1250);

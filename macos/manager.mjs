@@ -28,7 +28,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
     create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
-      install:install||((target,auth,agent,signal)=>new Cloud(target.url,auth,agent,signal).install())})});
+      install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   let origin='',closing=false,updates={state:'unchecked',version:null},updating=false;
   const snapshot=()=>({...store.view(states),version,platform:'macos-'+arch,updates});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};

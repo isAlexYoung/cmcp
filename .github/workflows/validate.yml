@@ -48,10 +48,10 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/relay-preparation.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 104' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 119' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |

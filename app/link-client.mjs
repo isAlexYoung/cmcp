@@ -9,9 +9,7 @@ import fs from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import http from 'node:http';
 import https from 'node:https';
-import net from 'node:net';
 import path from 'node:path';
-import tls from 'node:tls';
 import {performance} from 'node:perf_hooks';
 import {randomBytes} from 'node:crypto';
 import WebSocket from 'ws';
@@ -42,62 +40,8 @@ export function describeNetworkError(error) {
   return '网络连接失败';
 }
 
-/* ---------------- HTTP CONNECT agent (Windows proxy setting) ---------------- */
-
-function connectAgent(proxyUrl) {
-  const proxy = new URL(proxyUrl);
-  if (!['http:', 'https:'].includes(proxy.protocol)) throw new Error('Only HTTP/HTTPS CONNECT proxies are supported');
-  const auth = proxy.username ? 'Basic ' + Buffer.from(decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password)).toString('base64') : '';
-  const agent = new https.Agent({ keepAlive: false });
-  agent.createConnection = (options, callback) => {
-    const host = options.host || options.hostname;
-    const port = options.port || 443;
-    let done = false;
-    const fail = error => {
-      if (done) return;
-      done = true;
-      clearTimeout(tunnelTimer);
-      socket.destroy();
-      // Anything before the tunnel is up is a problem with the system network setting, not the cloud computer.
-      const wrapped = new Error(`proxy ${proxy.host}: ${error?.code || ''} ${error?.message || error}`);
-      wrapped.code = 'PROXY_FAILED';
-      wrapped.cause = error;
-      callback(wrapped);
-    };
-    const proxyOptions = { port: Number(proxy.port) || (proxy.protocol === 'https:' ? 443 : 80), host: proxy.hostname.replace(/^\[|\]$/g, '') };
-    const socket = proxy.protocol === 'https:' ? tls.connect({ ...proxyOptions, rejectUnauthorized: true, servername: net.isIP(proxyOptions.host) ? undefined : proxyOptions.host }) : net.connect(proxyOptions);
-    const tunnelTimer = setTimeout(() => fail(Object.assign(new Error('proxy timeout'), { code: 'ETIMEDOUT' })), 20000);
-    socket.setTimeout(20000, () => fail(Object.assign(new Error('proxy timeout'), { code: 'ETIMEDOUT' })));
-    socket.once('error', fail);
-    socket.once(proxy.protocol === 'https:' ? 'secureConnect' : 'connect', () => {
-      socket.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n` + (auth ? `Proxy-Authorization: ${auth}\r\n` : '') + '\r\n');
-    });
-    let head = Buffer.alloc(0);
-    const onData = chunk => {
-      head = Buffer.concat([head, chunk]);
-      const end = head.indexOf('\r\n\r\n');
-      if (end < 0) { if (head.length > 16384) fail(new Error('proxy response too large')); return; }
-      socket.removeListener('data', onData);
-      const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(head.toString('latin1'))?.[1]);
-      if (status !== 200) return fail(new Error('proxy CONNECT status ' + status));
-      if (head.length > end + 4) return fail(new Error('Unexpected proxy tunnel bytes'));
-      socket.setTimeout(0);
-      clearTimeout(tunnelTimer);
-      socket.removeListener('error', fail);
-      const secure = tls.connect({ ...options, socket, rejectUnauthorized: true, servername: options.servername || host, ALPNProtocols: ['http/1.1'] });
-      done = true;
-      callback(null, secure);
-    };
-    socket.on('data', onData);
-    return undefined;
-  };
-  return agent;
-}
-
-export function agentFor(url, proxyUrl) {
-  if (!proxyUrl || !url.startsWith('https:')) return undefined;
-  return connectAgent(proxyUrl);
-}
+import {agentFor,observeRequest,finishSocketRequest,connectionDetail} from './connection-transport.mjs';
+export {agentFor} from './connection-transport.mjs';
 
 /* ---------------- Login ---------------- */
 
@@ -116,6 +60,7 @@ function postJson(url, body, agent, timeout, signal) {
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
       res.on('error', reject);
     });
+    observeRequest(req);
     const timer = setTimeout(() => req.destroy(Object.assign(new Error('request deadline'), {code:'ETIMEDOUT'})), timeout);
     req.once('close', () => clearTimeout(timer));
     req.setTimeout(timeout, () => req.destroy(Object.assign(new Error('request timeout'), { code: 'ETIMEDOUT' })));
@@ -200,7 +145,7 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
-export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={},onHealth }) {
+export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={},onHealth,preparationCache }) {
   const interval=healthOptions.interval??1000,timeout=healthOptions.timeout??5000,hardTimeout=healthOptions.hardTimeout??30000;
   if(!Number.isFinite(interval)||!Number.isFinite(timeout)||interval<50||timeout<interval*2||timeout>60000||!Number.isFinite(hardTimeout)||hardTimeout<timeout+interval||hardTimeout>120000)throw Error('Invalid connection health policy');
   let stopped = false;
@@ -222,13 +167,13 @@ export function startLink({ name, target, machine, version, forward, askPassword
     const line = `[${name}] ${state} ${message}${detail ? ' | ' + detail : ''}`;
     if (line !== lastLog) { lastLog = line; log(line); }
   };
-  const relayCache = {};
+  const relayCache = preparationCache || {};
   const relayProgress = event => {
     if(stopped)return;
     const suffix=event.state==='retry' ? `，正在重试当前步骤（${event.attempt}/${event.maxAttempts}）`
       : event.state==='reconcile' ? '，正在核对上次写入结果' : '';
     say(event.state==='retry'||event.state==='reconcile'?'recovering':'connecting',event.label+suffix);
-    if(event.state==='retry')log(`[${name}] relay retry stage=${event.stage} method=${event.method} path=${event.endpoint} code=${event.code} attempt=${event.attempt}/${event.maxAttempts} delayMs=${event.delayMs}`);
+    if(event.state==='retry')log(`[${name}] relay retry stage=${event.stage} method=${event.method} path=${event.endpoint} code=${event.code} attempt=${event.attempt}/${event.maxAttempts} delayMs=${event.delayMs} ${connectionDetail(event)}`);
   };
 
   const connect = async (url, auth, agent, terminal = false) => {
@@ -239,10 +184,10 @@ export function startLink({ name, target, machine, version, forward, askPassword
     try {
       const wsUrl = authSocketUrl(url.replace(/^http/, 'ws') + LINK_PATH, auth);
       ws = terminal ? await openTerminalLink(url, auth, agent, controller.signal, {cache:relayCache,onProgress:relayProgress}) : new WebSocket(wsUrl, {
-        headers: socketHeaders(url,auth), agent, rejectUnauthorized: true, perMessageDeflate: false, maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000,
+        headers: socketHeaders(url,auth), agent, rejectUnauthorized: true, perMessageDeflate: false, maxPayload: 48 * 1024 * 1024, handshakeTimeout: 30000, finishRequest:finishSocketRequest,
       });
     } catch (error) {
-      if(!stopped)log(`[${name}] connection preparation failed stage=${error.stage||'socket-handshake'} method=${error.method||'GET'} path=${error.endpoint||'/api/term/ws'} code=${/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code||'')?error.code:'REQUEST_FAILED'} http=${error.status||0} attempts=${error.attempts||1}`);
+      if(!stopped)log(`[${name}] connection preparation failed stage=${error.stage||'socket-handshake'} method=${error.method||'GET'} path=${error.endpoint||'/api/term/ws'} code=${/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code||'')?error.code:'REQUEST_FAILED'} http=${error.status||0} attempts=${error.attempts||1} ${connectionDetail(error)}`);
       return { error, http: error.status, welcomed: false, lasted: 0 };
     }
     if (stopped) { ws.on('error', () => {}); ws.close(); return { welcomed: false, lasted: 0 }; }
@@ -328,7 +273,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
       ws.on('close', (code, reason) => finish({ code, reason: reason.toString() }));
       ws.on('error', error => {
         if (finished) return;
-        log(`[${name}] socket error: ${error.code || ''} ${describeNetworkError(error)}`);
+        log(`[${name}] socket error: ${error.code || ''} ${describeNetworkError(error)} ${connectionDetail(error)}`);
         finish({ error });
         ws.terminate();
       });
@@ -342,6 +287,8 @@ export function startLink({ name, target, machine, version, forward, askPassword
     let url = '';
     let stamp;
     let proxyDirty = true;
+    let currentProxy;
+    let agentUrl;
     let terminal = false;
     while (!stopped) {
       const settings = target();
@@ -355,7 +302,9 @@ export function startLink({ name, target, machine, version, forward, askPassword
       if (proxyDirty) {
         try {
           const proxy = await settings.proxy();
-          agent?.destroy(); agent = agentFor(url, proxy); proxyDirty = false;
+          const nextProxy=proxy||'';
+          if(currentProxy!==nextProxy||agentUrl!==url){agent?.destroy();agent=agentFor(url,nextProxy);currentProxy=nextProxy;agentUrl=url;}
+          proxyDirty=false;
         } catch (error) {
           say('offline', '无法读取或使用系统网络设置，稍后重试', describeNetworkError(error));
           await sleep(backoff); backoff = Math.min(backoff * 2, 30000); continue;
@@ -387,7 +336,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
           await sleep(30000); continue;
         }
         if (stopped) break;
-        say('connecting', agent ? '正在登录云电脑（已使用系统网络设置）' : '正在登录云电脑');
+        say('connecting', currentProxy ? '正在登录云电脑（已使用系统网络设置）' : '正在登录云电脑');
         try {
           credential = await login(url, password, agent, !session, controller.signal);
         } catch (error) {
@@ -421,8 +370,10 @@ export function startLink({ name, target, machine, version, forward, askPassword
       say('connecting', '登录成功，正在建立连接');
       const result = await connect(url, credential, agent, terminal);
       if (stopped) break;
+      const relayInvalid=terminal&&['RELAY_START_FAILED','RELAY_EXITED'].includes(result.error?.code);
+      if(relayInvalid)delete relayCache.entry;
       if (result.sessionChanged) { credential = null; backoff = 1000; continue; }
-      if (result.welcomed || result.lasted > 60000) backoff = 1000;
+      if (result.lasted >= 60000) backoff = 1000;
       if (result.http === 401 || result.code === 4001) {
         const invalid = credential;
         if (settings.authMode === 'shared-browser') {
@@ -476,8 +427,8 @@ export function startLink({ name, target, machine, version, forward, askPassword
         notify('云电脑连接已切换', '另一台电脑已连接到这台云电脑。如需改回本机，请双击 Start-CMCP.bat。');
         return;
       }
-      const retryable=result.error ? isTransientCloudError(result.error) : !result.http || [408,429,500,502,503,504].includes(result.http);
-      const reconnectWait=Math.max(!retryable?30000:Math.min(backoff,result.welcomed?30000:5000),Math.min(result.error?.retryAfterMs||0,86400000));
+      const retryable=result.error ? relayInvalid||isTransientCloudError(result.error) : !result.http || [408,429,500,502,503,504].includes(result.http);
+      const reconnectWait=Math.max(!retryable?30000:Math.min(backoff,30000),Math.min(result.error?.retryAfterMs||0,86400000));
       if (result.error && !result.welcomed) {
         say(retryable?'recovering':'offline',retryable&&result.error.preparationLabel
           ? `${result.error.preparationLabel}，连接暂时中断，${Math.ceil(reconnectWait/1000)} 秒后继续`

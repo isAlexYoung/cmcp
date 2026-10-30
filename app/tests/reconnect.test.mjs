@@ -7,7 +7,7 @@ import {WebSocketServer} from 'ws';
 import {startLink} from '../link-client.mjs';
 
 async function until(check,timeout=7000){const deadline=Date.now()+timeout;while(!check()){if(Date.now()>deadline)throw Error('condition timeout');await delay(10);}}
-async function fixture(t,{rejectUpgrades=0,unauthorized=false,passwordRejected=false}={}){
+async function fixture(t,{rejectUpgrades=0,unauthorized=false,passwordRejected=false,flapWelcomes=0}={}){
   const counts={login:0,upgrade:0,proxy:0},times=[],states=[];
   const server=http.createServer((req,res)=>{
     req.resume();
@@ -25,7 +25,7 @@ async function fixture(t,{rejectUpgrades=0,unauthorized=false,passwordRejected=f
       return;
     }
     wss.handleUpgrade(req,socket,head,ws=>{
-      connections.push(ws);ws.on('message',raw=>{const m=JSON.parse(raw);if(m.t==='hello'){ws.send('null');ws.send('[]');ws.send(JSON.stringify({t:'welcome'}));}});
+      connections.push(ws);ws.on('message',raw=>{const m=JSON.parse(raw);if(m.t==='hello'){ws.send('null');ws.send('[]');ws.send(JSON.stringify({t:'welcome'}));if(counts.upgrade<=flapWelcomes)setImmediate(()=>ws.close(1000,'transient'));}});
     });
   });
   server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -56,4 +56,15 @@ test('same-machine takeover stops instead of competing with the newer connection
 test('rejected password is not retried and stop cancels the settings wait',{timeout:5000},async t=>{
   const d=await fixture(t,{passwordRejected:true});await until(()=>d.states.at(-1)?.state==='password');await delay(1100);
   assert.equal(d.counts.login,1);d.link.stop();await d.link.done;
+});
+
+test('repeated short-lived welcomes back off beyond five seconds without logging in again',{timeout:23000},async t=>{
+  const d=await fixture(t,{flapWelcomes:4});await until(()=>d.connections.length===5,21000);
+  assert.equal(d.counts.login,1);assert.equal(d.counts.upgrade,5);
+  assert.ok(d.times[2]-d.times[1]>=1900);assert.ok(d.times[3]-d.times[2]>=3900);assert.ok(d.times[4]-d.times[3]>=7900);
+});
+
+test('stop interrupts recovery backoff and prevents another upgrade',{timeout:4000},async t=>{
+  const d=await fixture(t,{rejectUpgrades:10});await until(()=>d.states.at(-1)?.state==='recovering');
+  d.link.stop();await d.link.done;await delay(1200);assert.equal(d.counts.upgrade,1);assert.equal(d.counts.login,1);
 });

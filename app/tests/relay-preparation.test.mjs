@@ -5,6 +5,7 @@ import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 import test from 'node:test';
 import {cloudApi,prepareRelay,isTransientCloudError} from '../terminal-link.mjs';
+import {Cloud} from '../cloud-connector.mjs';
 
 const auth={sessionId:'test-session-123456789',cookie:'wd_cmcp=fixture-only'};
 const home='/home/guest',dir=home+'/.local/share/cloudpc-link';
@@ -107,4 +108,15 @@ test('certificate, proxy authentication and oversized-response errors are not tr
   for(const code of ['CERT_HAS_EXPIRED','ERR_TLS_CERT_ALTNAME_INVALID','RESPONSE_TOO_LARGE'])assert(!isTransientCloudError({code}));
   assert(!isTransientCloudError({code:'PROXY_FAILED',cause:new Error('proxy CONNECT status 407')}));
   assert(isTransientCloudError({code:'PROXY_FAILED',cause:{code:'ECONNRESET'}}));
+});
+
+test('Claude setup shares verified relay preparation with the active transport',async t=>{
+  const d=await fixture(t),cache={};await prepareRelay(d.url,auth,undefined,undefined,{cache});
+  const reads=d.count('GET',dir+'/cloudpc-relay.py');
+  const cloud=new Cloud(d.url,auth,undefined,undefined,{cache});
+  cloud.command=async()=> 'Connected: 3 Windows tools\nConfig changed: 0\n';
+  await cloud.install();
+  assert.equal(d.count('GET',dir+'/cloudpc-relay.py'),reads);
+  assert.equal(d.state.counts.get('GET /api/sys/info '),1);
+  assert.equal(d.state.counts.get('POST /api/sys/fs '),1);
 });
