@@ -25,10 +25,9 @@ for(const name of shared)fs.copyFileSync(path.join(root,'app',name),path.join(re
 fs.cpSync(path.join(root,'macos/node_modules'),path.join(resources,'node_modules'),{recursive:true,filter:source=>!source.split(path.sep).includes('.bin')});
 fs.copyFileSync(process.execPath,path.join(resources,'runtime/node'));fs.chmodSync(path.join(resources,'runtime/node'),0o755);
 fs.copyFileSync(path.join(root,'macos/runtime/NODE-LICENSE.txt'),path.join(resources,'runtime/LICENSE'));
-// Extract an existing PNG resource from the original ICO; do not redraw the icon.
-const ico=fs.readFileSync(path.join(root,'app/assets/claude-desktop.ico'));let image;
-for(let i=0;i<ico.readUInt16LE(4);i++){const entry=6+16*i,offset=ico.readUInt32LE(entry+12),size=ico.readUInt32LE(entry+8),bytes=ico.subarray(offset,offset+size);if(bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))&&(!image||bytes.length>image.length))image=bytes;}
-if(!image)throw Error('Missing original PNG icon');
+// The original 1024 px master (tools/draw-cmcp-icon.py) feeds every Retina size; nothing is upscaled.
+const image=fs.readFileSync(path.join(root,'app/assets/cmcp-icon-1024.png'));
+if(!image.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||image.readUInt32BE(16)!==1024||image.readUInt32BE(20)!==1024)throw Error('CMCP icon master must be a 1024 px PNG');
 const icons=path.join(output,'AppIcon.iconset');fs.mkdirSync(icons);const base=path.join(output,'icon-base.png');fs.writeFileSync(base,image);
 for(const size of [16,32,128,256,512])for(const scale of [1,2])execFileSync('/usr/bin/sips',['-z',String(size*scale),String(size*scale),base,'--out',path.join(icons,`icon_${size}x${size}${scale===2?'@2x':''}.png`)],{stdio:'ignore'});
 execFileSync('/usr/bin/iconutil',['-c','icns',icons,'-o',path.join(resources,'AppIcon.icns')]);
