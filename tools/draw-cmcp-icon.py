@@ -1,4 +1,4 @@
-"""CMCP application icon: a bold clay "C" with a hub and a remote node.
+"""CMCP application icon: a bold cream "C" with a hub and a remote node on a clay tile.
 
 Original artwork drawn for CMCP (no third-party artwork). Every raster size is rendered directly from the geometry with 8x
 supersampling (not downscaled from one bitmap), so small sizes stay crisp.
@@ -10,40 +10,36 @@ import io, math, struct, sys
 from pathlib import Path
 from PIL import Image, ImageDraw
 
-CREAM = (246, 240, 230, 255)
-EDGE = (226, 214, 196, 255)      # hairline so the cream tile holds on light backgrounds
-CLAY = (201, 100, 66, 255)
-CLAY_D = (168, 78, 50, 255)
+TILE = (201, 100, 66, 255)       # clay tile: stays visible on light and dark taskbars
+MARK = (246, 240, 230, 255)      # cream "C", hub and remote node
 # Geometry in units of the full canvas (1.0 = icon width).
-MARGIN, RADIUS, EDGE_W = 0.07, 0.225, 0.012
+MARGIN, RADIUS = 0.07, 0.225
 ARC_R, ARC_W, ARC_FROM, ARC_TO = 0.255, 0.13, 40, 320
 HUB_R, NODE_X, NODE_R = 0.085, 0.27, 0.05
 
 # Small sizes (<= 24 px) get a hinted variant: no remote node, wider opening and
 # less margin, so the "C" still reads as a C instead of a target.
-SMALL = dict(MARGIN=0.02, EDGE_W=0.0, ARC_R=0.27, ARC_W=0.17, ARC_FROM=58, ARC_TO=302, HUB_R=0.095, NODE_R=0.0)
+SMALL = dict(MARGIN=0.02, ARC_R=0.27, ARC_W=0.17, ARC_FROM=58, ARC_TO=302, HUB_R=0.095, NODE_R=0.0)
 
 def render(size, ss=8):
-    g = dict(MARGIN=MARGIN, EDGE_W=EDGE_W, ARC_R=ARC_R, ARC_W=ARC_W, ARC_FROM=ARC_FROM, ARC_TO=ARC_TO, HUB_R=HUB_R, NODE_R=NODE_R)
+    g = dict(MARGIN=MARGIN, ARC_R=ARC_R, ARC_W=ARC_W, ARC_FROM=ARC_FROM, ARC_TO=ARC_TO, HUB_R=HUB_R, NODE_R=NODE_R)
     if size <= 24: g.update(SMALL)
     S = size * ss
     im = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     m = g['MARGIN'] * S
-    d.rounded_rectangle([m, m, S - m, S - m], radius=RADIUS * S, fill=EDGE)
-    e = g['EDGE_W'] * S
-    d.rounded_rectangle([m + e, m + e, S - m - e, S - m - e], radius=RADIUS * S - e, fill=CREAM)
+    d.rounded_rectangle([m, m, S - m, S - m], radius=RADIUS * S, fill=TILE)
     c, r, w = S / 2, g['ARC_R'] * S, g['ARC_W'] * S
     steps = max(360, int(S / 2))
     for i in range(steps + 1):
         a = math.radians(g['ARC_FROM'] + (g['ARC_TO'] - g['ARC_FROM']) * i / steps)
         x, y = c + r * math.cos(a), c + r * math.sin(a)
-        d.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=CLAY)
+        d.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=MARK)
     hr = g['HUB_R'] * S
-    d.ellipse([c - hr, c - hr, c + hr, c + hr], fill=CLAY)
+    d.ellipse([c - hr, c - hr, c + hr, c + hr], fill=MARK)
     if g['NODE_R']:
         nx, nr = c + NODE_X * S, g['NODE_R'] * S
-        d.ellipse([nx - nr, c - nr, nx + nr, c + nr], fill=CLAY_D)
+        d.ellipse([nx - nr, c - nr, nx + nr, c + nr], fill=MARK)
     return im.resize((size, size), Image.LANCZOS)
 
 def bmp_entry(img):
@@ -79,14 +75,13 @@ def svg():
     c, r = s / 2, ARC_R * s
     x0, y0 = c + r * math.cos(a0), c + r * math.sin(a0)
     x1, y1 = c + r * math.cos(a1), c + r * math.sin(a1)
-    m, e = p(MARGIN), p(EDGE_W)
+    m = p(MARGIN)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>CMCP</title>
-  <rect x="{m}" y="{m}" width="{s - 2 * m}" height="{s - 2 * m}" rx="{p(RADIUS)}" fill="#E2D6C4"/>
-  <rect x="{m + e}" y="{m + e}" width="{s - 2 * (m + e)}" height="{s - 2 * (m + e)}" rx="{p(RADIUS) - e}" fill="#F6F0E6"/>
-  <path d="M {x0:.2f} {y0:.2f} A {r:.2f} {r:.2f} 0 1 1 {x1:.2f} {y1:.2f}" fill="none" stroke="#C96442" stroke-width="{p(ARC_W)}" stroke-linecap="round"/>
-  <circle cx="{c}" cy="{c}" r="{p(HUB_R)}" fill="#C96442"/>
-  <circle cx="{c + p(NODE_X)}" cy="{c}" r="{p(NODE_R)}" fill="#A84E32"/>
+  <rect x="{m}" y="{m}" width="{s - 2 * m}" height="{s - 2 * m}" rx="{p(RADIUS)}" fill="#C96442"/>
+  <path d="M {x0:.2f} {y0:.2f} A {r:.2f} {r:.2f} 0 1 1 {x1:.2f} {y1:.2f}" fill="none" stroke="#F6F0E6" stroke-width="{p(ARC_W)}" stroke-linecap="round"/>
+  <circle cx="{c}" cy="{c}" r="{p(HUB_R)}" fill="#F6F0E6"/>
+  <circle cx="{c + p(NODE_X)}" cy="{c}" r="{p(NODE_R)}" fill="#F6F0E6"/>
 </svg>
 '''
 

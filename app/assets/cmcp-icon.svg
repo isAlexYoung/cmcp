@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>CMCP</title>
-  <rect x="71.68" y="71.68" width="880.64" height="880.64" rx="230.4" fill="#E2D6C4"/>
-  <rect x="83.97" y="83.97" width="856.06" height="856.06" rx="218.11" fill="#F6F0E6"/>
-  <path d="M 712.03 679.84 A 261.12 261.12 0 1 1 712.03 344.16" fill="none" stroke="#C96442" stroke-width="133.12" stroke-linecap="round"/>
-  <circle cx="512.0" cy="512.0" r="87.04" fill="#C96442"/>
-  <circle cx="788.48" cy="512.0" r="51.2" fill="#A84E32"/>
+  <rect x="71.68" y="71.68" width="880.64" height="880.64" rx="230.4" fill="#C96442"/>
+  <path d="M 712.03 679.84 A 261.12 261.12 0 1 1 712.03 344.16" fill="none" stroke="#F6F0E6" stroke-width="133.12" stroke-linecap="round"/>
+  <circle cx="512.0" cy="512.0" r="87.04" fill="#F6F0E6"/>
+  <circle cx="788.48" cy="512.0" r="51.2" fill="#F6F0E6"/>
 </svg>
