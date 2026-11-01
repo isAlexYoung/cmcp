@@ -45,6 +45,16 @@ namespace CMCP {
                     check(form.list.ClientWidthsSeen.All(w=>w==stable)&&cardWidths.Count==1&&cardWidths.Single()==stable-2&&!form.list.NativeBarsVisible,
                         "wheel scrolling keeps the card list width and card right edges fixed (usable widths "+stable+" seen ["+String.Join(",",form.list.ClientWidthsSeen)+"] cards ["+String.Join(",",cardWidths)+"])");
                 }
+                {
+                    // A real wheel notch glides: it moves at once but only part way, keeps animating, then settles on the whole notch.
+                    var probe=form.Cards.Values.First();form.ScrollOffset=0;Application.DoEvents();
+                    int start=form.ScrollOffset,max=form.list.DisplayRectangle.Height-form.list.ClientSize.Height,goal=Math.Min(start+120,max);
+                    NativeWheel(probe,-120);int first=form.ScrollOffset;bool gliding=form.list.Gliding;
+                    var clock=System.Diagnostics.Stopwatch.StartNew();while(form.list.Gliding&&clock.ElapsedMilliseconds<2000){Application.DoEvents();System.Threading.Thread.Sleep(5);}
+                    int settled=form.ScrollOffset;
+                    check(goal>start&&gliding&&first>start&&first<goal&&settled==goal&&!form.list.Gliding&&!form.list.NativeBarsVisible,
+                        "a wheel notch glides to the whole notch instead of jumping (start "+start+" first "+first+" settled "+settled+" goal "+goal+")");
+                }
                 int clicked=0;var button=form.Cards.Values.First().Toggle;button.Click+=delegate{clicked++;};button.AccessibilityObject.DoDefaultAction();check(clicked==1,"custom button provides a real accessible default action");
             }
             using(var exitForm=new Manager(true)){

@@ -16,7 +16,38 @@ namespace CMCP {
     internal class EditorViewport : ResizePanel {
         [DllImport("user32.dll")] static extern bool ShowScrollBar(IntPtr window,int bar,bool show);
         [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr window,int index);
+        [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint period);
+        [DllImport("winmm.dll")] static extern uint timeEndPeriod(uint period);
         bool hiding;
+        // Wheel notches glide to an accumulated target with a short ease-out instead
+        // of jumping 120 px in one repaint. The first frame is applied while the wheel
+        // message is handled; the timer finishes the rest, and any other scroll change
+        // (focus into view, restored offset, layout clamp) cancels the glide.
+        const double GlideMilliseconds=170,GlideFrame=16;
+        readonly Timer glide=new Timer{Interval=8};
+        readonly System.Diagnostics.Stopwatch glideClock=new System.Diagnostics.Stopwatch();
+        int glideFrom,glideTarget,glideApplied;
+        bool fineTimer;
+        internal bool Gliding {get{return glide.Enabled;}}
+        internal EditorViewport(){glide.Tick+=delegate{if(-AutoScrollPosition.Y!=glideApplied)StopGlide();else{GlideStep();Update();}};}
+        bool GlideWheel(int delta){
+            int max=Math.Max(0,DisplayRectangle.Height-ClientSize.Height),current=-AutoScrollPosition.Y;
+            if(delta==0||max==0)return false;
+            if(!glide.Enabled)glideTarget=current;
+            glideTarget=Math.Max(0,Math.Min(max,glideTarget-delta));
+            glideFrom=current;glideClock.Restart();
+            // The default 15.6 ms system tick would cap the glide near 64 frames per second.
+            if(!fineTimer){fineTimer=true;try{timeBeginPeriod(1);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}
+            glide.Start();GlideStep();
+            return true;
+        }
+        void GlideStep(){
+            double t=Math.Min(1,(glideClock.Elapsed.TotalMilliseconds+GlideFrame)/GlideMilliseconds);
+            int next=glideFrom+(int)Math.Round((glideTarget-glideFrom)*(1-Math.Pow(1-t,3)));
+            AutoScrollPosition=new Point(-AutoScrollPosition.X,next);glideApplied=-AutoScrollPosition.Y;HideBars();
+            if(t>=1)StopGlide();
+        }
+        void StopGlide(){glide.Stop();if(fineTimer){fineTimer=false;try{timeEndPeriod(1);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}}
         protected override CreateParams CreateParams { get { var value=base.CreateParams;value.Style&=~0x00300000;return value; } }
         void HideBars(){if(hiding||!IsHandleCreated)return;hiding=true;try{ShowScrollBar(Handle,3,false);}finally{hiding=false;}}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);HideBars();}
@@ -26,6 +57,7 @@ namespace CMCP {
         // the whole (borderless) window, and the hidden bar never takes mouse input.
         protected override void WndProc(ref Message m){
             if(m.Msg==0x83){m.Result=IntPtr.Zero;return;}
+            if(m.Msg==0x20a&&GlideWheel((short)(((long)m.WParam>>16)&0xffff))){m.Result=IntPtr.Zero;return;}
             base.WndProc(ref m);
             if(m.Msg==0x84&&(m.Result==(IntPtr)6||m.Result==(IntPtr)7))m.Result=(IntPtr)1;
             if(m.Msg==0x85||m.Msg==0x5||m.Msg==0x7d||m.Msg==0x47||m.Msg==0x20a)HideBars();
@@ -35,7 +67,8 @@ namespace CMCP {
         internal readonly System.Collections.Generic.List<int> ClientWidthsSeen=new System.Collections.Generic.List<int>();
         internal bool TraceClientWidth;
         protected override void OnClientSizeChanged(EventArgs e){if(TraceClientWidth)ClientWidthsSeen.Add(ClientSize.Width);base.OnClientSizeChanged(e);}
-        internal void Wheel(int delta){base.OnMouseWheel(new MouseEventArgs(MouseButtons.None,0,20,20,delta));HideBars();}
+        internal void Wheel(int delta){StopGlide();base.OnMouseWheel(new MouseEventArgs(MouseButtons.None,0,20,20,delta));HideBars();}
+        protected override void Dispose(bool disposing){if(disposing){StopGlide();glide.Dispose();}base.Dispose(disposing);}
     }
     internal sealed class RoundedSheet : ResizePanel {
         internal Palette Colors = Palette.Create(false);

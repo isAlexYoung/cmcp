@@ -82,7 +82,7 @@ namespace CMCP {
         }
 
         internal sealed class TipWindow : Form {
-            [DllImport("user32.dll")]static extern uint GetDpiForWindow(IntPtr window);
+            [DllImport("user32.dll")]static extern uint GetDpiForSystem();
             Palette colors=Palette.Create(false);
             string content="";
             float scale=1;
@@ -95,7 +95,7 @@ namespace CMCP {
             internal void Apply(Palette value){colors=value;BackColor=value.Subtle;ForeColor=value.Text;Invalidate();}
             internal void SetContent(string text,Palette value){
                 content=text;AccessibleName=text;Apply(value);
-                try{scale=Math.Max(1,GetDpiForWindow(Handle)/96f);}catch(EntryPointNotFoundException){using(var g=CreateGraphics())scale=g.DpiX/96f;}
+                try{scale=Math.Max(1,GetDpiForSystem()/96f);}catch(EntryPointNotFoundException){using(var g=CreateGraphics())scale=g.DpiX/96f;}
                 padX=(int)Math.Round(12*scale);padY=(int)Math.Round(8*scale);
                 // Control.Font keeps its existing object when an equal font is
                 // assigned. Reuse that object instead of disposing a live font.
