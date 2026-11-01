@@ -20,8 +20,21 @@ namespace CMCP {
         protected override CreateParams CreateParams { get { var value=base.CreateParams;value.Style&=~0x00300000;return value; } }
         void HideBars(){if(hiding||!IsHandleCreated)return;hiding=true;try{ShowScrollBar(Handle,3,false);}finally{hiding=false;}}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);HideBars();}
-        protected override void WndProc(ref Message m){base.WndProc(ref m);if(m.Msg==0x83||m.Msg==0x85||m.Msg==0x5||m.Msg==0x7d||m.Msg==0x47||m.Msg==0x20a)HideBars();}
+        // AutoScroll re-shows the native bar for an instant while the wheel scrolls; if it
+        // took client space, the usable width dropped by a bar width and card right
+        // edges were clipped or laid out narrower. The client area is therefore always
+        // the whole (borderless) window, and the hidden bar never takes mouse input.
+        protected override void WndProc(ref Message m){
+            if(m.Msg==0x83){m.Result=IntPtr.Zero;return;}
+            base.WndProc(ref m);
+            if(m.Msg==0x84&&(m.Result==(IntPtr)6||m.Result==(IntPtr)7))m.Result=(IntPtr)1;
+            if(m.Msg==0x85||m.Msg==0x5||m.Msg==0x7d||m.Msg==0x47||m.Msg==0x20a)HideBars();
+        }
         internal bool NativeBarsVisible {get{return IsHandleCreated&&(GetWindowLong(Handle,-16)&0x00300000)!=0;}}
+        // Test trace: every usable width this viewport passed through, including transient ones.
+        internal readonly System.Collections.Generic.List<int> ClientWidthsSeen=new System.Collections.Generic.List<int>();
+        internal bool TraceClientWidth;
+        protected override void OnClientSizeChanged(EventArgs e){if(TraceClientWidth)ClientWidthsSeen.Add(ClientSize.Width);base.OnClientSizeChanged(e);}
         internal void Wheel(int delta){base.OnMouseWheel(new MouseEventArgs(MouseButtons.None,0,20,20,delta));HideBars();}
     }
     internal sealed class RoundedSheet : ResizePanel {

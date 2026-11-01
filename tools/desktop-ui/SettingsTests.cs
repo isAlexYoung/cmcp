@@ -36,6 +36,15 @@ namespace CMCP {
                 form.Options.closeToTray=false;
                 foreach(bool dark in new[]{false,true,false,true}){form.SetTheme(dark);foreach(var card in form.Cards.Values)card.SetExpanded(true,false);form.ClientSize=new Size(700,500);Application.DoEvents();check(!form.list.NativeBarsVisible,"expanded card list hides native scrollbars after theme switch "+dark);}
                 int before=form.ScrollOffset;form.list.Wheel(-120);Application.DoEvents();check(form.ScrollOffset>before,"main list retains wheel scrolling without native scrollbars");
+                {
+                    // Real wheel messages over a card must keep the list's usable width and every card width fixed (stable right edge).
+                    var probe=form.Cards.Values.First();int stable=form.list.ClientSize.Width;var cardWidths=new System.Collections.Generic.HashSet<int>();
+                    form.list.ClientWidthsSeen.Clear();form.list.TraceClientWidth=true;
+                    for(int i=0;i<16;i++){NativeWheel(probe,i<8?-120:120);foreach(var c in form.Cards.Values)cardWidths.Add(c.Width);}
+                    form.list.TraceClientWidth=false;
+                    check(form.list.ClientWidthsSeen.All(w=>w==stable)&&cardWidths.Count==1&&cardWidths.Single()==stable-2&&!form.list.NativeBarsVisible,
+                        "wheel scrolling keeps the card list width and card right edges fixed (usable widths "+stable+" seen ["+String.Join(",",form.list.ClientWidthsSeen)+"] cards ["+String.Join(",",cardWidths)+"])");
+                }
                 int clicked=0;var button=form.Cards.Values.First().Toggle;button.Click+=delegate{clicked++;};button.AccessibilityObject.DoDefaultAction();check(clicked==1,"custom button provides a real accessible default action");
             }
             using(var exitForm=new Manager(true)){
