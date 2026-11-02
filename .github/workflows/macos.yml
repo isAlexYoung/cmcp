@@ -1,7 +1,7 @@
 name: Validate Mac CMCP
 on:
   push:
-    branches: [main, codex/macos-parity]
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
