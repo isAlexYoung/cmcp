@@ -31,8 +31,9 @@ function Run-Case([string]$Name,[bool]$Delete){
         if($Delete){
             $removed=Worker (Script 'remove-cloudpc.ps1' '-TargetName ''A'' -ManagerMode') 60
             Check ($removed -eq 0) ($Name+': card is deleted while its connection is active')
-            $saved=@(Get-Content -LiteralPath (Join-Path $state 'cloudpc-targets.json') -Raw -Encoding UTF8|ConvertFrom-Json)
-            Check ($saved.Count -eq 0 -or $null -eq $saved[0]) ($Name+': deleted card leaves no saved target')
+            # Windows PowerShell does not enumerate an empty JSON array, so compare the text.
+            $saved=[IO.File]::ReadAllText((Join-Path $state 'cloudpc-targets.json'))
+            Check ($saved -match '^\s*\[\s*\]\s*$') ($Name+': deleted card leaves no saved target')
         }
         $code=Worker (Script 'manager-exit.ps1')
         $log=Join-Path $state 'error.log'
