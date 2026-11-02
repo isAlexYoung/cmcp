@@ -93,7 +93,7 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/update-apply.test.ps1 | Set-Content test-results/update-apply.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/update-apply.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 21 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete external update helper regression' }
+          if ($r.passed -ne 22 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete external update helper regression' }
       - name: Build and exercise real WinForms and Shell shortcuts
         shell: pwsh
         run: |

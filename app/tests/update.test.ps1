@@ -32,11 +32,6 @@ try{
     Reject {Test-CmcpChecksum $blob ($hash+'  '+$name) $name ('sha256:'+('0'*64))} 'GitHub digest mismatch rejected'
     foreach($path in @('../evil','/absolute','a\b','a:stream','a/../b','a/CON.txt','a./file','a//b')){Reject {Test-CmcpRelative $path} ('unsafe path rejected: '+$path)}
     $install=Join-Path $temporary 'portable 中文';Write-Tree $install '4.1.0';Check ((Test-CmcpTree $install).version -eq '4.1.0') 'UTF8 manifest and Chinese file names validate without BOM'
-    $legacy=Join-Path $temporary 'legacy';Write-Tree $legacy '4.1.0'
-    Move-Item -LiteralPath (Join-Path $legacy 'CMCP.exe') -Destination (Join-Path $legacy 'Claude-MCP.exe')
-    $legacyManifest=Join-Path $legacy 'app/distribution-manifest.json'
-    [IO.File]::WriteAllText($legacyManifest,([IO.File]::ReadAllText($legacyManifest).Replace('CMCP.exe','Claude-MCP.exe')))
-    if((Test-CmcpTree $legacy).version -ne '4.1.0' -or (Get-CmcpManagerPath $legacy) -ne (Join-Path $legacy 'Claude-MCP.exe') -or (Get-CmcpManagerPath $install) -ne (Join-Path $install 'CMCP.exe')){throw 'Manager rename compatibility failed'}
     $unknown=Join-Path $install 'personal.txt';[IO.File]::WriteAllText($unknown,'preserve');Reject {Test-CmcpTree $install} 'unknown user file prevents update';Check ((Get-Content -LiteralPath $unknown -Raw) -eq 'preserve') 'unknown user file is not changed';Remove-Item -LiteralPath $unknown
     $program=Join-Path $install 'CMCP.exe';[IO.File]::AppendAllText($program,'changed');Reject {Test-CmcpTree $install} 'modified installed code prevents update';Write-Tree $install '4.1.0'
     $git=Join-Path $install '.git';[IO.File]::WriteAllText($git,'gitdir: other');Reject {Assert-CmcpInstallRoot $install} 'git worktree source checkout is protected';Remove-Item -LiteralPath $git

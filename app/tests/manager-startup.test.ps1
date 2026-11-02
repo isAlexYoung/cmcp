@@ -40,9 +40,6 @@ function Visible($p){$p.Refresh();return !$p.HasExited -and $p.MainWindowHandle 
 function Close-Manager($p){$p.Refresh();[void][CmcpStartupWindow]::PostMessage($p.MainWindowHandle,0x112,[IntPtr]0xf060,[IntPtr]::Zero)}
 try {
     Copy-Item -LiteralPath $ManagerExe -Destination (Join-Path $temporary 'CMCP.exe')
-    $buildAlias=Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'tools\build-legacy-launcher.ps1'
-    & $buildAlias -OutputFile (Join-Path $temporary 'Claude-MCP.exe') -Version ([Diagnostics.FileVersionInfo]::GetVersionInfo($ManagerExe).FileVersion -replace '\.0$','')
-    if($LASTEXITCODE -ne 0){throw 'Compatibility launcher build failed'}
     Put (Join-Path $state 'application-preferences.json') '{"schema":1,"autoStart":true,"closeAction":"exit"}'
     Put (Join-Path $state 'manager-preferences.json') '{"schema":1,"suppressDesktopShortcutPrompt":true}'
     Put (Join-Path $kit 'manager-restart.ps1') @'
@@ -69,11 +66,11 @@ exit 0
     [void][CmcpStartupWindow]::ShowWindow($first.MainWindowHandle,0)
     $automatic=Launch 'CMCP.exe' '--startup'
     Check ($automatic.WaitForExit(3000) -and $automatic.ExitCode -eq 0 -and !(Visible $first) -and (Get-Content (Join-Path $state 'starts.txt')).Count -eq 1) 'duplicate automatic startup neither raises the hidden window nor restarts its backend'
-    $watch.Restart();$second=Launch 'Claude-MCP.exe'
-    Check ($second.WaitForExit(3000) -and $second.ExitCode -eq 0) 'opening the other executable exits immediately while initialization is pending'
+    $watch.Restart();$second=Launch 'CMCP.exe'
+    Check ($second.WaitForExit(3000) -and $second.ExitCode -eq 0) 'opening the executable again exits immediately while initialization is pending'
     Until {Visible $first} 3000
     $times.existing_window_restore_ms=$watch.ElapsedMilliseconds
-    Check ((Get-Content (Join-Path $state 'starts.txt')).Count -eq 1) 'second executable only restores the existing window and never invokes the backend worker'
+    Check ((Get-Content (Join-Path $state 'starts.txt')).Count -eq 1) 'a second launch only restores the existing window and never invokes the backend worker'
     # A real shell shortcut uses exactly the same production entry point.
     $shell=New-Object -ComObject WScript.Shell
     $link=$shell.CreateShortcut((Join-Path $temporary 'CMCP.lnk'))

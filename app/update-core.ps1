@@ -69,8 +69,7 @@ function Test-CmcpTree([string]$Root,[string]$Version='',[scriptblock]$Progress=
     if ($data.schema -ne 1 -or $data.platform -cne 'windows-x64' -or ($Version -and $data.version -cne $Version)) { throw 'Wrong distribution manifest' }
     $null=Get-CmcpVersion $data.version
     $inventory=@{};foreach($entry in $data.files){$null=Test-CmcpRelative $entry.path;if($entry.path -match '^(?i:user)(/|$)' -or $entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $inventory.ContainsKey($entry.path)){throw 'Invalid manifest entry'};$inventory[$entry.path]=$entry.sha256}
-    $managerName=if($inventory.ContainsKey('CMCP.exe')){'CMCP.exe'}else{'Claude-MCP.exe'}
-    foreach($required in @($managerName,'app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
+    foreach($required in @('CMCP.exe','app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
     $seen=@{};$watch=[Diagnostics.Stopwatch]::StartNew();if($Progress){& $Progress 0 $inventory.Count};foreach($item in Get-CmcpFiles $full){$relative=$item.FullName.Substring($full.Length+1).Replace('\','/');if($relative -ceq 'app/distribution-manifest.json'){continue};if(!$inventory.ContainsKey($relative) -or (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inventory[$relative]){throw 'Installation contains unknown or modified files; download manually'};$seen[$relative]=$true;if($Progress -and $watch.ElapsedMilliseconds -ge 250){& $Progress $seen.Count $inventory.Count;$watch.Restart()}}
     if($Progress){& $Progress $seen.Count $inventory.Count}
     if($seen.Count -ne $inventory.Count){throw 'Installation file missing'}
@@ -133,12 +132,11 @@ function Complete-CmcpUpdate([string]$Install,[string]$Backup,[string]$Transacti
 }
 
 function Get-CmcpManagerPath([string]$Root) {
-    $name=if(Test-Path -LiteralPath (Join-Path $Root 'CMCP.exe')){'CMCP.exe'}else{'Claude-MCP.exe'}
-    return Join-Path $Root $name
+    return Join-Path $Root 'CMCP.exe'
 }
 
 function Test-CmcpManagerPath([string]$Root,[string]$Executable) {
-    return ($Executable -ieq (Join-Path $Root 'CMCP.exe') -or $Executable -ieq (Join-Path $Root 'Claude-MCP.exe'))
+    return $Executable -ieq (Join-Path $Root 'CMCP.exe')
 }
 function Get-CmcpUpdateFailureCode($Failure,[string]$Phase) {
     $errorValue=$Failure.Exception

@@ -41,7 +41,7 @@ try{
     $oldRestored=$false
     if($canRecover){try{$oldRestored=(Test-CmcpTree $install).version -ceq $request.oldVersion}catch{}}
     if($oldRestored){
-        $running=@(Get-Process -Name 'CMCP','Claude-MCP' -ErrorAction SilentlyContinue | Where-Object {(Test-CmcpManagerPath $install $_.Path)})
+        $running=@(Get-Process -Name 'CMCP' -ErrorAction SilentlyContinue | Where-Object {(Test-CmcpManagerPath $install $_.Path)})
         if(!$running.Count){Start-Process -FilePath (Get-CmcpManagerPath $install) -ArgumentList @('--updated',$Transaction)}
     }
     exit 1

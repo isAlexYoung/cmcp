@@ -87,7 +87,7 @@ namespace CMCP {
                     try {
                         var link=Read(file);string target=link[0];
                         if(link[3].Length!=0||target.Length<3||target[1]!=':'||target[2]!='\\')continue;
-                        bool owned=link[4]==Description&&(String.Equals(Path.GetFileName(target),"CMCP.exe",StringComparison.OrdinalIgnoreCase)||String.Equals(Path.GetFileName(target),"Claude-MCP.exe",StringComparison.OrdinalIgnoreCase));
+                        bool owned=link[4]==Description&&String.Equals(Path.GetFileName(target),"CMCP.exe",StringComparison.OrdinalIgnoreCase);
                         match=(owned||String.Equals(Path.GetFullPath(target),exe,StringComparison.OrdinalIgnoreCase))&&File.Exists(target);
                     }catch{}
                     if(match)yield return file;
