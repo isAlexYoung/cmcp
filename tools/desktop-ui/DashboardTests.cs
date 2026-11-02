@@ -100,7 +100,7 @@ namespace CMCP {
                 check(!File.Exists(Path.Combine(directory,"config.json")),"all UI tests use isolated state and never create a bridge token");
                 check(form.Text=="CMCP","native title contains only CMCP");
                 check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");
-                check(a.Font.Size==11F&&a.Connect.Height==40&&a.Edit.Width==36&&a.Connect.Width==136,"card text and interactive controls are enlarged together");
+                check(Math.Abs(a.Font.Size-11F*UiFont.Scale)<0.01f&&a.Connect.Height==40&&a.Edit.Width==36&&a.Connect.Width==136,"card text and interactive controls are enlarged together");
                 b.ClearPointer();form.RefreshState();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
                 b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
                 b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");

@@ -13,7 +13,7 @@ namespace CMCP {
         readonly string kit = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app");
         readonly string stateDirectory = PortableState.DirectoryPath;
         readonly bool preview;
-        readonly DashboardToolbar toolbar = new DashboardToolbar();
+        internal readonly DashboardToolbar toolbar = new DashboardToolbar();
         internal readonly CardList list = new CardList();
         readonly Label status = new Label(), count = new Label(), empty = new Label();
         readonly ResizePanel content = new ResizePanel();
@@ -96,6 +96,16 @@ namespace CMCP {
             Invalidate(true);
         }
         protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);if(colors!=null)NativeFrame.Apply(Handle,colors);}
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+        float fontScale=1;
+        protected override void OnLoad(EventArgs e){try{FollowMonitor((int)GetDpiForWindow(Handle));}catch(EntryPointNotFoundException){}base.OnLoad(e);}
+        internal void FollowMonitor(int dpi){
+            float next=UiFont.ScaleFor(dpi);UiFont.Scale=next;
+            if(Math.Abs(next-fontScale)<0.001f)return;
+            float factor=next/fontScale;fontScale=next;
+            SuspendLayout();try{UiFont.Rescale(this,factor);}finally{ResumeLayout(false);}
+            Arrange();PerformLayout();Invalidate(true);
+        }
         protected override bool ProcessCmdKey(ref Message m,Keys keys){
             if(keys==Keys.Tab||keys==(Keys.Shift|Keys.Tab))foreach(var card in Cards.Values)card.BeginKeyboardNavigation();
             return base.ProcessCmdKey(ref m,keys);
@@ -149,7 +159,7 @@ namespace CMCP {
             Enabled=true;timer.Start();RestoreManager();Error("未能确认全部连接已断开，请稍后重试退出。");
         }
         internal void RestoreManager(){EnsureTray();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
-        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
+        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
         protected override void Dispose(bool disposing){if(disposing){TrayVisible=false;if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(TrayCommands!=null){TrayCommands.Dispose();TrayCommands=null;}}base.Dispose(disposing);}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
         void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}

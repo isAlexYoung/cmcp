@@ -27,7 +27,7 @@ namespace CMCP {
         internal void ShowAbout(){isAbout=true;Build();}
         internal event Action BackRequested;
         internal SettingsPage(AppSettings values,Palette palette,Action<AppSettings> changed,Action<string> invoked){
-            Dock=DockStyle.Fill;Font=new Font("Microsoft YaHei UI",11F);settings=values;colors=palette;change=changed;action=invoked;
+            Dock=DockStyle.Fill;Font=UiFont.Points(11F);settings=values;colors=palette;change=changed;action=invoked;
             header.Controls.AddRange(new Control[]{Back,title,tabs});tabs.Controls.AddRange(new Control[]{general,about});Viewport.Controls.Add(sheet);Controls.Add(Viewport);Controls.Add(header);
             Back.Bounds=new Rectangle(28,20,40,40);title.Bounds=new Rectangle(84,20,300,40);title.Font=new Font(Font,FontStyle.Bold);
             Back.Click+=delegate{if(BackRequested!=null)BackRequested();};general.Click+=delegate{isAbout=false;Build();};about.Click+=delegate{isAbout=true;Build();};

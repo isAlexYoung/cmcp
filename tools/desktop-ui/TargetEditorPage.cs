@@ -115,7 +115,7 @@ namespace CMCP {
         internal string IconData;
 
         internal TargetEditorPage(Target target, CardPreference preference, Palette colors) {
-            TargetName=target.Name;IconData=preference.icon;Dock=DockStyle.Fill;Font=new Font("Microsoft YaHei UI",11F);
+            TargetName=target.Name;IconData=preference.icon;Dock=DockStyle.Fill;Font=UiFont.Points(11F);
             initialUrl=target.Url;storedAutoPassword=target.AutoLogin&&target.HasSavedPassword;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;

@@ -5,6 +5,25 @@ using System.Linq;
 using System.Windows.Forms;
 
 namespace CMCP {
+    // Text follows the monitor the window is on. Point sizes resolve against the system
+    // DPI on every monitor, so Scale (window DPI / system DPI) corrects them. Layout stays in pixels.
+    internal static class UiFont {
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetDpiForSystem();
+        internal static float Scale=1;
+        internal static int SystemDpi {get{try{return (int)GetDpiForSystem();}catch(EntryPointNotFoundException){return 0;}}}
+        internal static float ScaleFor(int dpi){int system=SystemDpi;return system>0&&dpi>0?dpi/(float)system:1;}
+        internal static Font Points(float size){return new Font("Microsoft YaHei UI",size*Scale);}
+        internal static void Rescale(Control root,float factor){
+            var all=new System.Collections.Generic.List<Control>();var old=new System.Collections.Generic.List<Font>();
+            Action<Control> visit=null;visit=c=>{all.Add(c);old.Add(c.Font);foreach(Control child in c.Controls)visit(child);};visit(root);
+            var made=new System.Collections.Generic.Dictionary<string,Font>();
+            for(int i=0;i<all.Count;i++){
+                var f=old[i];string key=f.Name+"|"+f.Size+"|"+f.Style;Font next;
+                if(!made.TryGetValue(key,out next)){next=new Font(f.FontFamily,f.Size*factor,f.Style);made[key]=next;}
+                all[i].Font=next;
+            }
+        }
+    }
     internal sealed class Palette {
         internal bool Dark;
         internal Color Page, Surface, Subtle, Border, Text, Muted, Blue, Selected, SelectionBorder, Danger, Success;
@@ -105,7 +124,7 @@ namespace CMCP {
         internal void UpdateTip(string value){tips.SetToolTip(UpdateButton,value);UpdateButton.AccessibleDescription=L.Text(value);}
         internal void Apply(Palette colors){Colors=colors;tips.Apply(colors);BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=b==Settings||b==UpdateButton?colors.Subtle:colors.Surface;b.Invalidate();}Invalidate();}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(166,20,32,32);UpdateButton.Bounds=new Rectangle(204,20,32,32);Theme.Bounds=new Rectangle(Width-231,17,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
-        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(e.Graphics,new Rectangle(160,16,82,40),10,Colors.Subtle,Colors.Subtle);using(var f=new Font(Font.FontFamily,14,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
+        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(e.Graphics,new Rectangle(160,16,82,40),10,Colors.Subtle,Colors.Subtle);using(var f=new Font(Font.FontFamily,14*UiFont.Scale,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
         protected override void Dispose(bool disposing){if(disposing)tips.Dispose();base.Dispose(disposing);}
     }
     internal sealed class ConnectionDetails : Panel {
