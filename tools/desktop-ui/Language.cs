@@ -23,7 +23,7 @@ namespace CMCP {
             {"关闭窗口时","When closing the window"},{"直接退出程序","Exit application"},{"隐藏到系统托盘","Hide to system tray"},{"直接退出会断开全部云电脑；隐藏到系统托盘会保留已连接的云电脑。","Exiting disconnects all cloud PCs. Hiding to the system tray keeps connections active."},
             {"桌面快捷方式","Desktop shortcut"},{"创建快捷方式","Create shortcut"},{"为当前程序创建 CMCP 桌面快捷方式。","Create a CMCP desktop shortcut for this installation."},{"快捷方式已创建。","Desktop shortcut created."},
             {"版本","Version"},{"检查更新","Check for updates"},{"前往发布页","Open releases"},{"程序文件夹","Program folder"},{"日志文件夹","Log folder"},{"打开主界面","Open main window"},{"退出程序","Exit application"},
-            {"未能确认全部连接已断开，请稍后重试退出。","Could not confirm all connections have stopped. Please try exiting again."},
+            {"部分后台进程未能结束，请稍后重试退出；详情已记录到 user\\error.log。","Some background processes could not be stopped. Please try exiting again; details are in user\\error.log."},
             {"正在检查更新…","Checking for updates…"},{"已是最新版","You are up to date"},{"有可用更新","Update available"},{"检查失败，请重试","Could not check; try again"},{"正在下载并校验更新…","Downloading and verifying update…"},{"更新已准备，正在重新启动…","Update verified. Restarting…"},{"更新未完成，请查看本机日志。","Update did not complete. See local logs."},
             {"源码目录不会自动覆盖，请从发布页下载便携包。","Source checkouts are protected. Download a portable package from Releases."},{"请先完成或取消正在处理的卡片操作。","Finish or cancel the current card action first."},
             {"切换浅色 / 深色主题","Switch light / dark theme"},{"添加新的云电脑，不会自动连接","Add a cloud PC without starting it"},{"设置和更新入口将在后续版本开放","Settings and updates"},

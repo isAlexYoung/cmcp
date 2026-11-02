@@ -119,13 +119,14 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-exit.test.ps1 -EvidenceDirectory test-results/exit | Set-Content test-results/manager-exit.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/manager-exit.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 8 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete application exit regression' }
+          if ($r.passed -ne 13 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete application exit regression' }
       - name: Exit after delete with a real backend
         shell: pwsh
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/manager-exit-real.test.ps1 -EvidenceDirectory test-results/exit-real | Set-Content test-results/manager-exit-real.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-Content test-results/manager-exit-real.json
+          $r = Get-Content test-results/manager-exit-real.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 12 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete real application exit regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |

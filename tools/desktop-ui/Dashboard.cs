@@ -156,7 +156,7 @@ namespace CMCP {
             if(IsDisposed)return;
             ExitPending=false;
             if(stopped){exiting=true;Close();return;}
-            Enabled=true;timer.Start();RestoreManager();Error("未能确认全部连接已断开，请稍后重试退出。");
+            Enabled=true;timer.Start();RestoreManager();Error("部分后台进程未能结束，请稍后重试退出；详情已记录到 user\\error.log。");
         }
         internal void RestoreManager(){EnsureTray();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
         protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}

@@ -22,6 +22,7 @@ $script:StopFlag=Join-Path $StateDir 'stopped.flag'
 $script:ErrorLog=Join-Path $StateDir 'error.log'
 function Get-ServiceProcesses {
     $server='"'+(Join-Path $KitDir 'server.mjs')+'"'
+    if (Test-Path -LiteralPath (Join-Path $StateDir 'stuck.flag')) { return @([pscustomobject]@{Name='node.exe';ProcessId=999999;CommandLine='fixture'}) }
     return @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains($server) })
 }
 function Register-AutoStart {throw 'UNEXPECTED AUTOSTART WRITE'}
@@ -57,6 +58,26 @@ try{
     Check ([IO.File]::ReadAllText((Join-Path $state 'cloudpc-targets.json')) -ceq $targets) 'saved target addresses and encrypted credentials remain untouched'
     Check ([IO.File]::ReadAllText((Join-Path $state 'application-preferences.json')) -ceq $settings) 'autostart and close preferences are preserved'
     Check ((Get-Item (Join-Path $EvidenceDirectory 'exit.out')).Length -eq 0 -and (Get-Item (Join-Path $EvidenceDirectory 'exit.err')).Length -eq 0) 'successful exit has no console or dialog output'
+    function Exit-Worker {
+        $process=Start-Process powershell.exe -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $kit 'manager-exit.ps1')+'"') -WindowStyle Hidden -PassThru
+        $null=$process.Handle
+        if(!$process.WaitForExit(60000)){$process.Kill();throw 'Exit worker timed out'}
+        return $process.ExitCode
+    }
+    # Damaged switches: the backend must still stop and the application must still exit.
+    $backend.Dispose()
+    Remove-Item -LiteralPath (Join-Path $state 'stopped.flag')
+    Put (Join-Path $state 'target-controls.json') 'not json'
+    $backend=Start-Process $node -ArgumentList ('"'+(Join-Path $kit 'server.mjs')+'"') -WindowStyle Hidden -PassThru
+    $deadline=[DateTime]::UtcNow.AddSeconds(8)
+    while(!(Test-Path -LiteralPath (Join-Path $state 'link-status.json'))){if([DateTime]::UtcNow -gt $deadline){throw 'Fixture backend failed to restart'};Start-Sleep -Milliseconds 50}
+    Check ((Exit-Worker) -eq 0) 'damaged connection switches do not block application exit'
+    Check ($backend.WaitForExit(5000)) 'damaged connection switches still stop the backend'
+    Check ([IO.File]::ReadAllText((Join-Path $state 'error.log')).Contains('saving stop switches')) 'a switch that could not be saved is recorded'
+    # A process that really survives is the only thing that may block exit, and it is named.
+    Put (Join-Path $state 'stuck.flag') 'fixture'
+    Check ((Exit-Worker) -ne 0) 'a surviving backend process blocks exit instead of being hidden'
+    Check ([IO.File]::ReadAllText((Join-Path $state 'error.log')).Contains('node.exe 999999')) 'the surviving process is named in the error log'
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks}|ConvertTo-Json
 }finally{
     foreach($process in @($worker,$backend)){if($process){try{if(!$process.HasExited){$process.Kill()}}catch{};$process.Dispose()}}
