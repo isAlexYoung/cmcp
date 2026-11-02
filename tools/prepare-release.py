@@ -72,9 +72,6 @@ def prepare(packages, output, version, commit):
             raise ValueError('Package checksum mismatch')
         inspect_package(file, version, commit, platform)
         selected.append(file)
-    notes = subprocess.check_output(['git', 'show', commit + ':.github/RELEASE_' + version + '.md']).decode('utf-8-sig').strip()
-    if not notes:
-        raise ValueError('Release notes required')
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError('Release staging directory must be empty')

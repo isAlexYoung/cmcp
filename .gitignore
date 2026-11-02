@@ -18,6 +18,11 @@
 /build-results/
 /test-results/
 
+# Documentation stays local; the repository keeps only .github/README.md.
+/docs/
+/*.md
+/.github/RELEASE_*.md
+
 # Per-user connection state and credentials must never be published.
 .env
 .env.*
