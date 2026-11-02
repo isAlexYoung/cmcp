@@ -11,7 +11,6 @@ try {
     }
     exit 0
 } catch {
-    $safe = [Management.Automation.ErrorRecord]::new([Exception]::new('Application exit could not confirm backend shutdown.'),'ManagerExitFailed','NotSpecified',$null)
-    Write-ErrorLog 'Exit application' $safe
+    Write-ErrorLog 'Exit application' $_
     exit 1
 }
