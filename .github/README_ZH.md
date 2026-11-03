@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="../app/assets/cmcp-icon-1024.png" alt="CMCP 图标" width="128" height="128" />
+
 # CMCP
 
 ### 让云电脑上的 Claude 使用这台电脑的文件、命令和桌面
@@ -85,4 +87,10 @@
 
 ## 许可证
 
-[MIT](../LICENSE)。内置的第三方组件保留各自的许可证，详见[第三方声明](../THIRD_PARTY_NOTICES.txt)。
+代码采用 [MIT 许可证](../LICENSE)。内置的第三方组件保留各自的许可证，详见[第三方声明](../THIRD_PARTY_NOTICES.txt)。
+
+### 应用图标
+
+CMCP 图标是为本项目创作的原创图标，版权归 CMCP 所有（© 2026 CMCP），保留所有权利，**不适用** MIT 许可证。
+
+图标只能用于指代 CMCP，或作为未经修改的 CMCP 安装包的一部分使用。未经书面许可，不得商用、修改，也不得用于其他产品或服务。分支项目和衍生产品必须更换图标。详见[完整声明](../THIRD_PARTY_NOTICES.txt)。

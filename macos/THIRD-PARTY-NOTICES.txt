@@ -1,5 +1,8 @@
 # Third-party software notices
 
+CMCP icon: original artwork drawn for CMCP. Copyright (c) 2026 CMCP. All rights reserved.
+The icon is not covered by the MIT license in LICENSE. You may use it only to refer to CMCP and as part of unmodified CMCP packages. Without written permission you may not use it commercially, modify it, or use it for another product or service. Forks and derivative products must replace it. The MIT license still covers the rest of the code.
+
 Node.js 22.23.3: https://nodejs.org/dist/v22.23.3/
 The complete Node.js license and bundled component notices are in runtime/NODE-LICENSE.txt.
 

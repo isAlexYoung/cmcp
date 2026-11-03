@@ -4,6 +4,12 @@
 
 `app/assets/cmcp.ico`, `app/assets/cmcp-icon-1024.png` and `app/assets/cmcp-icon.svg` are original artwork drawn for CMCP by `tools/draw-cmcp-icon.py`. They contain no Anthropic or Claude Desktop artwork. Earlier releases (up to 4.7.2) bundled the Claude Desktop icon; it is no longer included.
 
+Copyright (c) 2026 CMCP. All rights reserved.
+
+The CMCP icon is not covered by the MIT license in `LICENSE`. This applies to the files above, the drawing in `tools/draw-cmcp-icon.py`, any image that script produces, and the icon inside CMCP packages.
+
+You may use the icon only to refer to CMCP and as part of unmodified CMCP packages. Without written permission you may not use it commercially, modify it, or use it for another product or service. Forks and derivative products must replace it. The MIT license still covers the rest of the code, including commercial use of that code.
+
 ## Node.js
 
 Portable releases bundle the official Node.js Windows x64 runtime. Its license and third-party notices are included at `app/runtime/LICENSE`. The source repository omits `node.exe`; development and CI install or provide the runtime separately.

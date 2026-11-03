@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="../app/assets/cmcp-icon-1024.png" alt="CMCP icon" width="128" height="128" />
+
 # CMCP
 
 ### Let Claude on your cloud PC use this computer's files, commands and desktop
@@ -85,4 +87,10 @@ No. CMCP is an independent tool with no official affiliation with Anthropic.
 
 ## License
 
-[MIT](../LICENSE). Bundled third-party components keep their own licenses; see [third-party notices](../THIRD_PARTY_NOTICES.txt).
+The code is released under the [MIT License](../LICENSE). Bundled third-party components keep their own licenses; see [third-party notices](../THIRD_PARTY_NOTICES.txt).
+
+### App icon
+
+The CMCP icon is original artwork created for this project. It is © 2026 CMCP, all rights reserved, and is **not** covered by the MIT License.
+
+You may use it only to refer to CMCP and as part of unmodified CMCP packages. Without written permission, you may not use it commercially, modify it, or use it for another product or service. Forks and derivative products must replace it. See the [full notice](../THIRD_PARTY_NOTICES.txt).

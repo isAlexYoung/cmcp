@@ -1,6 +1,6 @@
 """CMCP application icon: a bold cream "C" with a hub and a remote node on a clay tile.
 
-Original artwork drawn for CMCP (no third-party artwork). Every raster size is rendered directly from the geometry with 8x
+Original artwork drawn for CMCP (no third-party artwork), not covered by the MIT license: see THIRD_PARTY_NOTICES.txt. Every raster size is rendered directly from the geometry with 8x
 supersampling (not downscaled from one bitmap), so small sizes stay crisp.
 
   python tools/draw-cmcp-icon.py app/assets   (requires Pillow; writes cmcp.ico,
