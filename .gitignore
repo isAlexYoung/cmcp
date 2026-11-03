@@ -18,7 +18,7 @@
 /build-results/
 /test-results/
 
-# Documentation stays local; the repository keeps only .github/README.md.
+# Documentation stays local; the repository keeps only the .github README files.
 /docs/
 /*.md
 /.github/RELEASE_*.md

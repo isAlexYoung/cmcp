@@ -5,7 +5,7 @@
   "private": true,
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "scripts": {
     "test": "node --test tests/*.test.mjs"

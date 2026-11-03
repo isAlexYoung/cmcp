@@ -1,16 +1,88 @@
+<div align="center">
+
 # CMCP
 
-CMCP 是一款桌面端 MCP 连接管理工具，让 Claude 使用本机的文件、命令和桌面操作能力。
+### Let Claude on your cloud PC use this computer's files, commands and desktop
 
-通过清晰的卡片界面管理连接，将连接状态、常用操作和详细信息集中呈现。
+**Manage every cloud PC from one card-based desktop app, with independent connections, automatic recovery and easy sign-in.**
 
-## 主要功能
+[![Version](https://img.shields.io/github/v/release/isAlexYoung/cmcp?color=blue&label=version)](https://github.com/isAlexYoung/cmcp/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg)](https://github.com/isAlexYoung/cmcp/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](../LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/isAlexYoung/cmcp/total)](https://github.com/isAlexYoung/cmcp/releases/latest)
 
-- **独立连接管理**：支持多个连接分别启动和停止。
-- **卡片式界面**：支持自定义名称与图标、拖动排序和折叠详情。
-- **连接恢复保护**：支持断线重连、请求等待、执行结果查询与去重。
-- **便捷登录**：支持共享网页登录，以及加密保存密码和自动登录。
-- **个性化设置**：支持明暗主题、简体中文与 English。
-- **桌面集成**：支持系统托盘、开机自启、桌面快捷方式和应用更新。
+English | [中文](README_ZH.md) | [Changelog](https://github.com/isAlexYoung/cmcp/releases)
 
-本项目为独立工具，与 Anthropic 无官方隶属关系。
+**[Download](#download) · [Quick Start](#quick-start) · [Features](#features) · [FAQ](#faq) · [License](#license)**
+
+</div>
+
+## Download
+
+Get the latest version from [Releases](https://github.com/isAlexYoung/cmcp/releases/latest). Each package has a matching `.sha256` file.
+
+| Platform | Package |
+|---|---|
+| Windows x64 | `CMCP-<version>-windows-x64.zip` |
+| macOS, Apple silicon | `CMCP-<version>-macos-arm64.zip` |
+| macOS, Intel | `CMCP-<version>-macos-x64.zip` |
+
+## Quick Start
+
+You need a cloud PC that is reachable at an HTTPS address and has Claude installed.
+
+**Windows**
+
+1. Extract the whole zip to a folder. Do not run it from inside the archive.
+2. Run `CMCP.exe`.
+3. Click **Add cloud PC** and enter its address.
+4. Start the connection and sign in to the cloud PC when asked.
+5. After adding a new cloud PC, fully quit and reopen Claude on it.
+
+Claude on the cloud PC can now use the tools on this computer.
+
+**macOS**
+
+1. Unzip the package and open `CMCP.app`. The manager opens in your browser.
+2. Follow steps 3 to 5 above.
+
+The app is ad-hoc signed rather than notarized, so macOS may ask you to confirm before it opens the first time.
+
+## Features
+
+- **Independent connections**: start and stop each cloud PC on its own.
+- **Card-based interface**: custom names and icons, drag to reorder, collapsible details.
+- **Connection recovery**: reconnection, request waiting, result lookup and de-duplication after a dropped connection.
+- **Easy sign-in**: share a browser sign-in, or save the password encrypted and sign in automatically.
+- **Personalization**: light and dark themes, English and Simplified Chinese.
+- **Desktop integration**: system tray, start with Windows, desktop shortcut and in-app updates.
+
+## FAQ
+
+**CMCP says the portable package is incomplete. What should I do?**
+
+Some files were not extracted. Extract the whole zip again to a new folder and run `CMCP.exe` from there.
+
+**Claude on the cloud PC does not show the tools.**
+
+Fully quit and reopen Claude on the cloud PC. A newly added configuration is only loaded when Claude starts.
+
+**What happens when I close the window?**
+
+It depends on **Settings → When closing the window**. Exiting disconnects every cloud PC; hiding to the system tray keeps connected cloud PCs running.
+
+**How do I update?**
+
+Open **Settings → Check for updates**. CMCP downloads and verifies the update for you.
+
+**Where are the logs?**
+
+Open **Settings → Log folder**. On Windows, errors are written to `user\error.log` in the program folder.
+
+**Is CMCP an Anthropic product?**
+
+No. CMCP is an independent tool with no official affiliation with Anthropic.
+
+## License
+
+[MIT](../LICENSE). Bundled third-party components keep their own licenses; see [third-party notices](../THIRD_PARTY_NOTICES.txt).
