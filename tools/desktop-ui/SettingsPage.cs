@@ -62,7 +62,8 @@ namespace CMCP {
                 updateLabel=new Label{Text=L.Text(UpdateStatus),Bounds=new Rectangle(24,128,100,30),Tag="wide"};sheet.Controls.Add(updateLabel);
                 updateView.Bounds=new Rectangle(24,168,100,128);updateView.Tag="wide";sheet.Controls.Add(updateView);updateView.Set(updateProgress);
                 Button("检查更新",310,24,220,delegate{action("update");},true);Button("前往发布页",366,24,220,delegate{action("releases");},false);
-                Button("程序文件夹",456,24,220,delegate{action("program");},false);Button("日志文件夹",512,24,220,delegate{action("logs");},false);sheet.Height=675;
+                Button("程序文件夹",456,24,220,delegate{action("program");},false);Button("日志文件夹",512,24,220,delegate{action("logs");},false);
+                Label("卸载 CMCP",586,false);Label("断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。程序文件夹和桌面快捷方式需要之后手动删除。",624,true);Button("卸载 CMCP",690,24,220,delegate{action("uninstall");},false);sheet.Height=850;
             }
             feedback.Bounds=new Rectangle(24,sheet.Height-72,100,60);feedback.Tag="wide";sheet.Controls.Add(feedback);RefreshControls();LayoutRows();
         }

@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 function Connect-CloudPc([string]$BaseUrl, [string]$Password) {
-    if ((Get-CloudAuthMode $BaseUrl) -eq 'shared-browser') { throw '这台云电脑使用共享网页会话，请通过 Open-CloudPC.bat 打开；禁止后台再次登录。' }
+    if ((Get-CloudAuthMode $BaseUrl) -eq 'shared-browser') { throw '这台云电脑使用共享网页会话，请在 CMCP 中点击“打开云电脑”；禁止后台再次登录。' }
     $script:CloudBase = $BaseUrl.TrimEnd('/')
     $script:CloudSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     $null = Invoke-CloudApi '/api/auth/login' 'POST' @{ password = $Password; remember = $false }

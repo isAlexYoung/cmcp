@@ -74,7 +74,7 @@ function postJson(url, body, agent, timeout, signal) {
 export async function login(baseUrl, password, agent, remember = true, signal) {
   // Even stale target settings must never make a background login on an
   // exclusive-session desktop. Only the browser gateway may submit its password.
-  if (await requiresSharedSession(baseUrl, agent, signal)) throw new LoginError('shared', '请通过 Open-CloudPC.bat 打开云电脑，与 MCP 共用网页登录');
+  if (await requiresSharedSession(baseUrl, agent, signal)) throw new LoginError('shared', '请在 CMCP 中点击“打开云电脑”，与 MCP 共用网页登录');
   let res;
   try {
     res = await postJson(baseUrl + '/api/auth/login', { password, remember }, agent, 30000, signal);
@@ -100,7 +100,7 @@ export async function login(baseUrl, password, agent, remember = true, signal) {
   throw new LoginError('url', '该地址不是云电脑连接地址', 0, `HTTP ${res.status} ${res.text.slice(0, 200)}`);
 }
 
-/* ---------------- Status file read by Start-CMCP ---------------- */
+/* ---------------- Status file read by the manager ---------------- */
 
 export class StatusBoard {
   constructor(file) {
@@ -332,7 +332,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
           say('connecting', '正在读取保存的密码');
           password = await settings.password();
         } catch (error) {
-          say('error', '无法读取保存的云电脑密码，请重新双击 Start-CMCP.bat', error.message);
+          say('error', '无法读取保存的云电脑密码，请在 CMCP 中重新启动连接', error.message);
           await sleep(30000); continue;
         }
         if (stopped) break;
@@ -424,7 +424,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
         // shared browser session intact and stop competing with the new link.
         say('replaced', result.reason === 'reconnected' ? '本机另一个连接已接管，当前连接已停止，避免重复抢占' : '另一台电脑已连接到这台云电脑，本机已停止连接');
         if (onReplaced) return onReplaced();
-        notify('云电脑连接已切换', '另一台电脑已连接到这台云电脑。如需改回本机，请双击 Start-CMCP.bat。');
+        notify('云电脑连接已切换', '另一台电脑已连接到这台云电脑。如需改回本机，请在 CMCP 中启动连接。');
         return;
       }
       const retryable=result.error ? relayInvalid||isTransientCloudError(result.error) : !result.http || [408,429,500,502,503,504].includes(result.http);

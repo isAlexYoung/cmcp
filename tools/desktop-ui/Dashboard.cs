@@ -29,6 +29,8 @@ namespace CMCP {
         bool exiting,updateNotice;
         internal bool ExitPending;
         internal Func<bool> ExitBackend;
+        internal Func<int> RunUninstall;
+        internal Func<bool> ConfirmUninstall;
         Task<bool> backendInitialization;
         internal bool BackendStarting {get;private set;}
         UpdateController updates;
@@ -51,6 +53,10 @@ namespace CMCP {
             if (kitOverride != null) kit = kitOverride;
             preview = demo;isolated=demo||stateOverride!=null; Preferences = demo ? new UiPreferences() : UiPreferences.Load(isolated?stateDirectory:PortableState.PreferencesPath);
             ExitBackend=isolated?(Func<bool>)(()=>true):(()=>BackendRestart.Run(kit,"manager-exit.ps1"));
+            if(!isolated){
+                RunUninstall=()=>{using(var process=Actions.Start(kit,"uninstall","")){process.WaitForExit();return process.ExitCode;}};
+                ConfirmUninstall=()=>MessageBox.Show(this,L.Text("确定要卸载 CMCP 吗？\r\n\r\n将断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。"),Text,MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)==DialogResult.Yes;
+            }
             Options=demo?new AppSettings():AppSettings.Load(isolated?stateDirectory:PortableState.PreferencesPath,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
             Icon=System.Drawing.Icon.ExtractAssociatedIcon(Program.ExecutablePath);
@@ -121,7 +127,7 @@ namespace CMCP {
         internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();}
         internal void CloseSettings(){if(Settings==null)return;var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;}
         void SettingsAction(string name){try{
-            if(name=="update"){RunUpdate();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
+            if(name=="update"){RunUpdate();return;}if(name=="uninstall"&&RunUninstall!=null){Uninstall();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
             if(name=="shortcut"){DesktopShortcut.Create(Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
             else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
@@ -142,6 +148,17 @@ namespace CMCP {
         TrayTarget TrayValue(TargetCard card){bool blocked=BackendStarting||updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login","recovering","unstable"}.Contains(card.Target.State);return new TrayTarget{Name=card.Target.Name,Label=card.Preference.label.Length>0?card.Preference.label:new Uri(card.Target.Url).Host,State=card.BusyStop?"正在停止":card.BusyConnect&&card.Target.State=="stopped"?"连接中":LocalState.Caption(card.Target.State),CanConnect=!blocked&&!card.BusyStop&&!active,CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Target.State!="stopped"),CanRename=!BackendStarting&&!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name)};}
         void SyncTray(){if(TrayCommands!=null)TrayCommands.Sync(Preferences.Sort(targets).Where(t=>Cards.ContainsKey(t.Name)).Select(t=>TrayValue(Cards[t.Name])).ToList());}
         internal void TrayAction(string name,string action){TargetCard card;if(!Cards.TryGetValue(name,out card))return;var value=TrayValue(card);if(action=="connect"&&value.CanConnect)Launch("connect",card,"");else if(action=="stop"&&value.CanDisconnect)Launch("stop",card,"");else if(action=="rename"&&value.CanRename){RestoreManager();if(Settings!=null)CloseSettings();if(Editor!=null&&Editor.TargetName!=name){Editor.ShowError("请先保存或返回当前编辑页，再重命名其他云电脑。");return;}OpenEditor(name);if(Editor!=null){Editor.NameInput.Box.Focus();Editor.NameInput.Box.SelectAll();}}SyncTray();}
+        async void Uninstall(){
+            if(BackendStarting||ExitPending||updates.Installing||children.Count>0){Settings.SetFeedback("请先完成或取消正在处理的卡片操作。",true);return;}
+            if(!ConfirmUninstall())return;
+            ExitPending=true;Enabled=false;timer.Stop();
+            int code=-1;try{code=await Task.Run(RunUninstall);}catch{}
+            if(IsDisposed)return;
+            ExitPending=false;
+            // The script already stopped the backend and deleted the state folder, so nothing may run or save again.
+            if(code==0){if(!isolated)try{StartupRegistration.Set(Program.ExecutablePath,false);}catch{}exiting=true;Close();return;}
+            Enabled=true;timer.Start();if(Settings!=null)Settings.SetFeedback("卸载未完成，请查看卸载窗口中的提示；未删除的内容仍然保留。",true);
+        }
         internal async void ExitApplication(){
             if(exiting||ExitPending)return;
             ExitPending=true;Enabled=false;timer.Stop();

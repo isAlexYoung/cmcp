@@ -479,7 +479,7 @@ function Stop-LinkService {
     if ($remaining -and $remaining.pid -and (Get-Process -Id ([int]$remaining.pid) -ErrorAction SilentlyContinue)) {
         $fresh = $false
         try { $fresh = ((Get-Date).ToUniversalTime() - [datetime]::Parse([string]$remaining.at).ToUniversalTime()).TotalSeconds -lt 20 } catch {}
-        if ($fresh) { throw '旧后台服务仍在运行，当前窗口无法停止它。请右键 Start-CMCP.bat 选择“以管理员身份运行”完成这次升级；新版以后可直接停止。' }
+        if ($fresh) { throw '旧后台服务仍在运行，当前窗口无法停止它。请右键 CMCP.exe 选择“以管理员身份运行”完成这次升级；新版以后可直接停止。' }
     }
     }
 }

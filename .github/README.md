@@ -77,6 +77,10 @@ It depends on **Settings → When closing the window**. Exiting disconnects ever
 
 Open **Settings → Check for updates**. CMCP downloads and verifies the update for you.
 
+**How do I uninstall?**
+
+On Windows, open **Settings → About → Uninstall CMCP**. It disconnects everything, removes the Claude configuration from cloud PCs where it can, and deletes saved addresses, passwords and settings. Then delete the program folder and desktop shortcut yourself.
+
 **Where are the logs?**
 
 Open **Settings → Log folder**. On Windows, errors are written to `user\error.log` in the program folder.

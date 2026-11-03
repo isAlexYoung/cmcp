@@ -25,6 +25,8 @@ $required += @('tools\desktop-ui\UpdateProgress.cs','tools\desktop-ui\UpdateProg
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($item in $items) { Copy-Item -LiteralPath (Join-Path $projectRoot $item) -Destination $destination -Recurse }
+# Regression tests run in CI; users do not need them.
+Remove-Item -LiteralPath (Join-Path $destination 'app\tests') -Recurse -Force
 $commit = $null
 if (Get-Command git.exe -ErrorAction SilentlyContinue) {
     $top = & git.exe -C $projectRoot rev-parse --show-toplevel 2>$null

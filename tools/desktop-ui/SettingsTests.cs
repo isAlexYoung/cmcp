@@ -75,6 +75,15 @@ namespace CMCP {
                 check(stops==0&&!trayForm.IsDisposed&&trayForm.TrayVisible,"default X hides without stopping connections");trayForm.ExitApplication();Application.DoEvents();
                 check(stops==1&&trayForm.IsDisposed,"explicit tray exit disconnects backend and closes manager");
             }
+            using(var uninstallForm=new Manager(true)){
+                int runs=0,stops=0;uninstallForm.ExitBackend=delegate{stops++;return true;};uninstallForm.ConfirmUninstall=()=>false;uninstallForm.RunUninstall=()=>{runs++;return 1;};
+                uninstallForm.Show();Application.DoEvents();uninstallForm.OpenSettings();Application.DoEvents();uninstallForm.Settings.ShowAbout();Application.DoEvents();
+                Action click=()=>uninstallForm.Settings.Viewport.Controls[0].Controls.OfType<ModernButton>().Single(b=>b.Text=="卸载 CMCP").AccessibilityObject.DoDefaultAction();
+                Action<Func<bool>> wait=done=>{var clock=System.Diagnostics.Stopwatch.StartNew();while(!done()&&clock.ElapsedMilliseconds<5000){Application.DoEvents();System.Threading.Thread.Sleep(5);}};
+                click();Application.DoEvents();check(runs==0&&uninstallForm.Enabled&&!uninstallForm.IsDisposed,"declining the uninstall question runs nothing");
+                uninstallForm.ConfirmUninstall=()=>true;click();wait(()=>runs==1&&uninstallForm.Enabled);check(runs==1&&stops==0&&uninstallForm.Enabled&&!uninstallForm.IsDisposed,"a failed uninstall keeps the manager open and usable");
+                uninstallForm.RunUninstall=()=>{runs++;return 0;};click();wait(()=>uninstallForm.IsDisposed);check(runs==2&&stops==0&&uninstallForm.IsDisposed,"a finished uninstall closes the manager without running the exit backend again");
+            }
             L.Set("zh-CN");check(!File.Exists(Path.Combine(state,"cloudpc-targets.json"))&&!File.Exists(Path.Combine(state,"config.json")),"settings tests never create target or credential state");
         }
         static void ToggleScrollTests(Action<bool,string> check){

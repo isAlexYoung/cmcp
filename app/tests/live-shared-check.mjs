@@ -84,7 +84,7 @@ try {
   const wanted = new URL(process.argv[2]).origin;
   const state = JSON.parse(fs.readFileSync(path.join(process.env.LOCALAPPDATA, 'ClaudeLocalMcp', 'browser-entries.json'), 'utf8'));
   const entry = state.targets.find(item => new URL(item.url).origin === wanted);
-  if (!entry) throw Error('Target has no shared browser entry; add it with Add-CloudPC.bat');
+  if (!entry) throw Error('Target has no shared browser entry; add it in CMCP');
   // A service started elevated can reject even signal 0 on Windows. The
   // authenticated claim below verifies the live gateway without process access.
   const launch = new URL(entry.launchUrl);

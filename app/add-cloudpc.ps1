@@ -1,5 +1,5 @@
 ﻿param([string]$TargetName = '', [string]$InitialUrl = '')
-# 双击 Add-CloudPC.bat 运行：添加另一台云电脑，或修改已有云电脑的地址/密码（输入相同地址即为修改）。
+# 由 CMCP 的“添加云电脑”调用：添加另一台云电脑，或修改已有云电脑的地址/密码（输入相同地址即为修改）。
 # 窗口出来之前的任何错误也用中文提示框显示（控制台是隐藏的）
 trap {
     Add-Type -AssemblyName System.Windows.Forms

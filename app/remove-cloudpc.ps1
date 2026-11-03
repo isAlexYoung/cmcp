@@ -5,7 +5,7 @@
 if ($ManagerMode) { . (Join-Path $PSScriptRoot 'manager-events.ps1') }
 try {
     if (!@(Get-CloudTargets | Where-Object { $_.name -ceq $TargetName }).Count) { throw '所选云电脑已不存在。' }
-    # Use the established selected stop entry, never the global BAT.
+    # Use the established selected stop entry, never a stop of every cloud PC.
     $command = '& ' + "'" + (Join-Path $PSScriptRoot 'stop.ps1').Replace("'", "''") + "' -TargetName '" + $TargetName.Replace("'", "''") + "'"
     if ($ManagerMode) { $command += ' -ManagerMode' }
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))

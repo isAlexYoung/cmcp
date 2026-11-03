@@ -2,10 +2,6 @@
 /CMCP.exe
 /Claude-MCP.exe
 /CMCP-UI-Preview.exe
-/CMCP-UI-Preview-v2.exe
-/CMCP-UI-Preview-v3.exe
-/CMCP-UI-Preview-v4.exe
-/CMCP-UI-Preview-v5.exe
 /app/node_modules/
 /tests/browser-fixture/node_modules/
 /app/runtime/node.exe

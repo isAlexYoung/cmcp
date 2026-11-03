@@ -153,12 +153,13 @@ namespace CMCP {
                 case "remove": return "remove-cloudpc.ps1";
                 case "stop": return "stop.ps1";
                 case "open": return "manager-open.ps1";
+                case "uninstall": return "uninstall.ps1";
                 default: throw new ArgumentException("Unknown action");
             }
         }
         internal static string Command(string kit, string action, string name, string initialUrl = "",long requestTime=0) {
             string command = "& " + Quote(Path.Combine(kit, Script(action)));
-            if (action != "add") {
+            if (action != "add" && action != "uninstall") {
                 if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Select a cloud computer first");
                 command += " -TargetName " + Quote(name);
                 if (action == "connect" || action == "stop") command += " -RequestTime " + requestTime.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -169,7 +170,7 @@ namespace CMCP {
         internal static Process Start(string kit, string action, string name, string initialUrl = "",string stateDirectory=null) {
             string script = Path.Combine(kit, Script(action));
             if (!File.Exists(script)) throw new FileNotFoundException("缺少文件，请完整解压便携包。", script);
-            if(action!="add"&&String.IsNullOrWhiteSpace(name))throw new ArgumentException("Select a cloud computer first");
+            if(action!="add"&&action!="uninstall"&&String.IsNullOrWhiteSpace(name))throw new ArgumentException("Select a cloud computer first");
             long order=action=="connect"||action=="stop"?ControlRequestOrder.Next(stateDirectory??PortableState.DirectoryPath):0;
             var command = Command(kit, action, name, initialUrl,order);
             string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -272,9 +273,10 @@ namespace CMCP {
                 foreach (string action in new string[] { "connect", "stop" }) {
                     check(Actions.Command("C:\\kit", action, "selected-A").Contains("-TargetName 'selected-A' -RequestTime "), action + " always passes selected target and request ordering");
                     bool empty = false; try { Actions.Command("C:\\kit", action, ""); } catch (ArgumentException) { empty = true; }
-                    check(empty, action + " with no selection cannot reach global BAT behaviour");
+                    check(empty, action + " with no selection cannot stop every cloud PC");
                 }
                 bool rejected = false; try { Actions.Script("arbitrary-command"); } catch (ArgumentException) { rejected = true; } check(rejected, "actions are a fixed allowlist");
+                check(Actions.Command("C:\\kit", "uninstall", "") == "& 'C:\\kit\\uninstall.ps1'", "uninstall runs its fixed script without a selected target");
                 string fixtureKit = Path.Combine(temp, "中文 folder's"); Directory.CreateDirectory(fixtureKit);
                 string fixtureOutput = Path.Combine(fixtureKit, "argument.txt");
                 File.WriteAllText(Path.Combine(fixtureKit, "manager-open.ps1"), "param([string]$TargetName)\r\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'argument.txt'), $TargetName)\r\n", Encoding.UTF8);
