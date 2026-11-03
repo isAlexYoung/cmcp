@@ -60,7 +60,7 @@ export function createTargetConnections({readTargets, readControls, create, stat
       const slot = {name, signature:d.signature, controller:new AbortController(), value:null};
       slots.set(name, slot);
       const current = () => !closed && !slot.controller.signal.aborted && slots.get(name) === slot && snapshot().get(name)?.signature === slot.signature;
-      const guardedStatus = {set:(name, state, message) => { if (current()) status.set(name, state, message, d.revision); }};
+      const guardedStatus = {set:(name, state, message) => { if (current()) status.set(name, state, message, d.revision); },clients:(name, value) => { if (current()) status.clients?.(name, value); }};
       slot.pending = Promise.resolve().then(() => create(d.target, {signal:slot.controller.signal, current, status:guardedStatus})).then(async value => {
         if (!current()) { await value.stop(); return; }
         slot.value = value;

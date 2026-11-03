@@ -79,14 +79,14 @@ def safe_parents(directory):
 CC_SHARED = os.environ.get("CLOUDPC_CC_SHARED") == "1"
 
 
-def shared_directory(directory, create=False):
+def shared_directory(directory, create=False, allow_home=False):
     """CC user-data grant: terminal and GUI may share Claude/MCP data only."""
     import pwd
     import stat
     home = Path("/home/wdguest")
     directory = Path(directory)
     allowed = (home / ".config/Claude", home / ".local/share/cloudpc-link")
-    if not any(directory == root or root in directory.parents for root in allowed):
+    if not (allow_home and directory == home) and not any(directory == root or root in directory.parents for root in allowed):
         raise ValueError("Outside shared Claude/MCP data")
     identities = [pwd.getpwnam(n) for n in ("wdguest", "wdterm", "wdgui")]
     group = identities[0].pw_gid
@@ -118,7 +118,8 @@ def shared_write(file, data):
     # Descriptor-relative operations cannot follow a substituted parent symlink.
     import stat
     import pwd
-    directory = shared_directory(file.parent, create=True)
+    # Claude CLI keeps its configuration directly in the home directory.
+    directory = shared_directory(file.parent, create=True, allow_home=file.name.startswith(".claude.json"))
     temporary = ".mcp-tmp-" + uuid.uuid4().hex
     try:
         try:
@@ -407,6 +408,23 @@ def transfer_file(link, name, args):
     return {"mac_path": args["mac_path"], "cloud_path": str(local), **info}
 
 
+def report_client(client_name):
+    """Tell the relay this Claude client is running. A failure here never affects requests."""
+    kind = "cli" if "code" in str(client_name).lower() else "desktop"
+    file = LINK_SOCKET.parent / "clients" / (kind + "-" + uuid.uuid4().hex)
+
+    def beat():
+        while True:
+            with contextlib.suppress(Exception):
+                if file.exists():
+                    os.utime(file)
+                else:
+                    atomic_write(file, b"{}\n")
+            time.sleep(10)
+
+    threading.Thread(target=beat, daemon=True).start()
+
+
 def run_server(private):
     link = Link()
     cache_file = private / "tools-cache.json"
@@ -458,6 +476,10 @@ def run_server(private):
                 "serverInfo": {"name": "mac-pc-files", "version": VERSION},
                 "instructions": state["catalog"].get("instructions") or DEFAULT_INSTRUCTIONS}})
             threading.Thread(target=refresh, daemon=True).start()
+            if not state.get("reported"):
+                state["reported"] = True
+                with contextlib.suppress(Exception):
+                    report_client(message.get("params", {}).get("clientInfo", {}).get("name", ""))
             return
         if method == "notifications/initialized":
             state["initialized"] = True
@@ -592,9 +614,9 @@ def apply_install(private, targets, catalog, name):
 
     safe_parents(private)
     if CC_SHARED:
-        expected = Path("/home/wdguest/.config/Claude/claude_desktop_config.json")
-        if targets != [expected]:
-            raise ValueError("CC shared install requires the fixed Claude Desktop config")
+        desktop = Path("/home/wdguest/.config/Claude/claude_desktop_config.json")
+        if targets not in ([desktop], [desktop, Path("/home/wdguest/.claude.json")]):
+            raise ValueError("CC shared install requires the fixed Claude configs")
         fd = shared_directory(private, create=True)
         os.close(fd)
     else:

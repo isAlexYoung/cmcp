@@ -20,6 +20,7 @@ namespace CMCP {
     internal sealed class Target {
         public string Name, Url, Mode, State, Detail;
         public bool AutoLogin, HasSavedPassword;
+        public bool? DesktopClient, CliClient;
     }
     internal sealed class Snapshot {
         public bool Running, Stopped, ReadError, Stale;
@@ -37,6 +38,14 @@ namespace CMCP {
                     var serializer = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024, RecursionLimit = 32 };
                     return serializer.DeserializeObject(reader.ReadToEnd());
                 }
+            }
+        }
+        internal static bool? ClientFlag(IDictionary<string, object> entry, string key) { object value; var clients = Obj(Get(entry, "clients")); return clients != null && clients.TryGetValue(key, out value) && value is bool ? (bool?)(bool)value : null; }
+        internal static string ClientState(string state, bool running) {
+            switch (state) {
+                case "connected": case "configuring": case "config-error": return running ? "已连接" : "未运行";
+                case "recovering": case "unstable": case "connecting": case "offline": case "waiting-login": return running ? "正在重连" : "未运行";
+                default: return "已断开";
             }
         }
         internal static string Caption(string state) {
@@ -138,7 +147,7 @@ namespace CMCP {
                 }
                 string message = Text(Get(entry, "message"));
                 bool auto=Text(Get(d,"authMode"))=="shared-browser"&&Object.Equals(Get(d,"autoLogin"),true);
-                result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"共享网页自动登录":"共享网页登录") : "自动识别 / 旧版", State = state,
+                result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,DesktopClient=ClientFlag(entry,"desktop"),CliClient=ClientFlag(entry,"cli"),Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"共享网页自动登录":"共享网页登录") : "自动识别 / 旧版", State = state,
                     Detail = PreparationDetail(state,message) ?? ((auto&&state=="waiting-login"?"等待共享网页使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "")) });
             }
             return result;
@@ -276,6 +285,11 @@ namespace CMCP {
                     check(empty, action + " with no selection cannot stop every cloud PC");
                 }
                 bool rejected = false; try { Actions.Script("arbitrary-command"); } catch (ArgumentException) { rejected = true; } check(rejected, "actions are a fixed allowlist");
+                check(LocalState.ClientState("connected", true) == "已连接" && LocalState.ClientState("connected", false) == "未运行" && LocalState.ClientState("recovering", true) == "正在重连" && LocalState.ClientState("stopped", true) == "已断开", "each Claude client reports connected, reconnecting, disconnected or not running");
+                string clientsState = Path.Combine(temp, "clients-state"); Directory.CreateDirectory(clientsState);
+                File.WriteAllText(Path.Combine(clientsState, "cloudpc-targets.json"), "[{\"name\":\"A\",\"url\":\"https://a.example.com/\"},{\"name\":\"B\",\"url\":\"https://b.example.com/\"}]");
+                File.WriteAllText(Path.Combine(clientsState, "link-status.json"), "{\"pid\":0,\"targets\":{\"A\":{\"state\":\"connected\",\"clients\":{\"desktop\":true,\"cli\":false}},\"B\":{\"state\":\"connected\"}}}");
+                var loaded = LocalState.Load(clientsState).Targets; check(loaded[0].DesktopClient == true && loaded[0].CliClient == false && loaded[1].DesktopClient == null && loaded[1].CliClient == null, "client state is read when reported and stays unknown otherwise");
                 check(Actions.Command("C:\\kit", "uninstall", "") == "& 'C:\\kit\\uninstall.ps1'", "uninstall runs its fixed script without a selected target");
                 string fixtureKit = Path.Combine(temp, "中文 folder's"); Directory.CreateDirectory(fixtureKit);
                 string fixtureOutput = Path.Combine(fixtureKit, "argument.txt");

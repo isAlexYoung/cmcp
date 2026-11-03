@@ -29,8 +29,56 @@ class SharedConnector(unittest.TestCase):
     def test_relay_echoes_only_the_matching_application_probe(self):
         m=self.relay();relay=m.Relay();replies=[];relay.emit=replies.append
         relay.packet({'t':'ping','nonce':'tested-nonce'})
-        self.assertEqual(replies,[{'t':'pong','nonce':'tested-nonce'}])
+        self.assertEqual(replies[0]['nonce'],'tested-nonce');self.assertEqual(replies[0]['t'],'pong')
         with self.assertRaises(ValueError):relay.packet({'t':'ping','nonce':'x'*65})
+
+    def test_relay_reports_only_recent_clients_and_removes_silent_ones(self):
+        import tempfile,time
+        m=self.relay()
+        with tempfile.TemporaryDirectory() as folder:
+            relay=m.Relay(folder);clients=Path(folder)/'clients';self.assertEqual(relay.clients(),{'desktop':False,'cli':False})
+            clients.mkdir()
+            for name,age in (('desktop-new',0),('cli-old',60),('cli-gone',200),('other-new',0),('.mcp-tmp-x',0)):
+                (clients/name).write_text('{}');then=time.time()-age;os.utime(clients/name,(then,then))
+            self.assertEqual(relay.clients(),{'desktop':True,'cli':False})
+            self.assertFalse((clients/'cli-gone').exists());self.assertTrue((clients/'cli-old').exists())
+            os.utime(clients/'cli-old');self.assertEqual(relay.clients(),{'desktop':True,'cli':True})
+
+    def test_client_kind_comes_from_the_mcp_client_name(self):
+        for m in modules():
+            for name,kind in (('claude-code','cli'),('Claude Code','cli'),('claude-ai','desktop'),('',  'desktop')):
+                started=[]
+                class Thread:
+                    def __init__(self,target,daemon):started.append(daemon)
+                    def start(self):pass
+                written=[]
+                with self.subTest(module=m.__name__,name=name),patch.object(m.threading,'Thread',Thread),patch.object(m.uuid,'uuid4',lambda:types.SimpleNamespace(hex='id')):
+                    captured={}
+                    original=m.threading.Thread
+                    def spy(target,daemon):captured['beat']=target;return original(target=target,daemon=daemon)
+                    with patch.object(m.threading,'Thread',spy):m.report_client(name)
+                    class Stop(Exception):pass
+                    def write(file,data,mode=0o600):written.append(file);raise Stop
+                    with patch.object(m,'atomic_write',write),patch.object(m.time,'sleep',side_effect=Stop):
+                        with self.assertRaises(Stop):captured['beat']()
+                    self.assertEqual(written[0].name,kind+'-id');self.assertEqual(written[0].parent.name,'clients')
+
+    def test_cc_install_accepts_desktop_with_or_without_cli_and_nothing_else(self):
+        desktop,code=Path('/home/wdguest/.config/Claude/claude_desktop_config.json'),Path('/home/wdguest/.claude.json')
+        for m in modules():
+            for targets,okay in (([desktop],True),([desktop,code],True),([code],False),([desktop,Path('/home/wdguest/other.json')],False)):
+                with self.subTest(module=m.__name__,targets=targets),patch.object(m,'CC_SHARED',True),patch.object(m,'read_json',return_value={}),patch.object(m,'shared_directory',side_effect=RuntimeError('reached')):
+                    fake=lambda path:types.SimpleNamespace(is_symlink=lambda:False,exists=lambda:False)
+                    with patch.object(m.Path,'is_symlink',return_value=False),patch.object(m.Path,'exists',return_value=False):
+                        with self.assertRaises(RuntimeError if okay else ValueError):m.apply_install(Path('/home/wdguest/.local/share/cloudpc-link/x'),targets,{'tools':[]},'x')
+
+    def test_shared_write_reaches_home_only_for_cli_config(self):
+        for m in modules():
+            for name,allowed in (('.claude.json',True),('.claude.json.mcp-backup-1',True),('.bashrc',False)):
+                seen={}
+                def directory(path,create=False,allow_home=False):seen['allow']=allow_home;raise RuntimeError('stop')
+                with self.subTest(module=m.__name__,name=name),patch.dict(sys.modules,{'pwd':types.SimpleNamespace()}),patch.object(m,'shared_directory',directory),self.assertRaises(RuntimeError):m.shared_write(Path('/home/wdguest')/name,b'x')
+                self.assertEqual(seen['allow'],allowed)
 
     def test_relay_requires_shared_directory_access_for_claude(self):
         m=self.relay();pwd=types.SimpleNamespace(getpwnam=lambda n:types.SimpleNamespace(pw_uid=2 if n=='wdterm' else 1,pw_gid=10))
@@ -77,7 +125,7 @@ class SharedConnector(unittest.TestCase):
             with self.subTest(module=m.__name__),patch.object(m,'CC_SHARED',True),patch.object(m,'os',fake),patch.object(m,'shared_directory',return_value=5) as directory,patch.dict(sys.modules,{'pwd':pwd}):
                 target=Path('/home/wdguest/.config/Claude/claude_desktop_config.json')
                 m.atomic_write(target,data)
-                directory.assert_called_once_with(target.parent,create=True)
+                directory.assert_called_once_with(target.parent,create=True,allow_home=False)
                 self.assertIn(('chmod',0o660),events);self.assertIn(('bytes',data),events)
                 renamed=next(e for e in events if e[0]=='replace')
                 self.assertEqual(renamed[2],{'src_dir_fd':5,'dst_dir_fd':5})

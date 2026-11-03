@@ -112,7 +112,14 @@ export class StatusBoard {
   set(name, state, message = '', revision) {
     const prev = this.data[name];
     if (prev && prev.state === state && prev.message === message && prev.revision === revision) return;
-    this.data[name] = { state, message, at: new Date().toISOString(), revision };
+    this.data[name] = { state, message, at: new Date().toISOString(), revision, clients: prev?.clients };
+    this.write();
+  }
+  // Last reported Claude clients. Kept across a disconnect, so the manager can say which one is affected.
+  clients(name, value) {
+    const entry = this.data[name];
+    if (!entry || (entry.clients?.desktop === value.desktop && entry.clients?.cli === value.cli)) return;
+    entry.clients = value;
     this.write();
   }
   // On Windows, replacing a file fails while another program has it open (the start window
@@ -238,6 +245,7 @@ export function startLink({ name, target, machine, version, forward, askPassword
         }, interval);
       });
       ws.on('pong', data => { if(probe&&Buffer.isBuffer(data)&&data.equals(probe)){lastPong=performance.now();probe=null;if(unstable)log(`[${name}] heartbeat recovered without reconnect`);health(false);} });
+      ws.on('clients', value => status.clients?.(name, { desktop: value.desktop === true, cli: value.cli === true }));
       ws.on('message', async (data, isBinary) => {
         if (stopped) return;
         if (isBinary) return;

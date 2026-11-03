@@ -48,7 +48,7 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/client-status.test.mjs app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
           if ($tap -notmatch '# pass 119' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0') { throw 'Incomplete Node regression' }
@@ -104,7 +104,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 262 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 264 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Theme-aware native tooltips and focus preservation
         shell: pwsh
         run: |
@@ -247,6 +247,7 @@ jobs:
         run: |
           mkdir -p test-results
           python -m unittest discover -s app/tests -p 'test_request_recovery.py' -v 2>&1 | tee test-results/python-recovery.txt
+          python -m unittest discover -s app/tests -p 'test_cc_shared.py' -v 2>&1 | tee test-results/python-cc-shared.txt
           test ${PIPESTATUS[0]} -eq 0
           grep -q 'Ran 16 tests' test-results/python-recovery.txt
           ! grep -q 'skipped' test-results/python-recovery.txt

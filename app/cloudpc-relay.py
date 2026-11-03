@@ -208,11 +208,29 @@ class Relay:
                     entry["response"] = message
                     entry["event"].set()
 
+    def clients(self):
+        """Claude clients whose connector has reported recently. Long-silent reports are removed."""
+        result = {"desktop": False, "cli": False}
+        now = time.time()
+        with contextlib.suppress(OSError):
+            with os.scandir(self.directory / "clients") as entries:
+                for entry in entries:
+                    kind = entry.name.split("-", 1)[0]
+                    if kind not in result:
+                        continue
+                    age = now - entry.stat(follow_symlinks=False).st_mtime
+                    if age <= 30:
+                        result[kind] = True
+                    elif age > 120:
+                        with contextlib.suppress(OSError):
+                            os.unlink(entry.path)
+        return result
+
     def packet(self, packet):
         if packet.get("t") == "ping":
             nonce=packet.get('nonce','')
             if not isinstance(nonce,str) or len(nonce)>64:raise ValueError('Invalid health probe')
-            self.emit({"t": "pong",'nonce':nonce})
+            self.emit({"t": "pong",'nonce':nonce,'clients':self.clients()})
             return
         if packet.get("t") != "data":
             raise ValueError("Invalid terminal packet")

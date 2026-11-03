@@ -134,13 +134,16 @@ namespace CMCP {
         internal readonly ModernButton Open=new ModernButton{Glyph="monitor",Text="打开云电脑"}, Stop=new ModernButton{Glyph="stop",Text="停止连接",Destructive=true}, Logs=new ModernButton{Text="查看日志"};
         internal ConnectionDetails(){DoubleBuffered=true;Controls.AddRange(new Control[]{Open,Stop,Logs});}
         internal void Apply(Palette colors){Colors=colors;BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}Invalidate();}
-        internal int NeededHeight(int width){return 164+TextRenderer.MeasureText(Target==null?"":L.Message(Target.Detail),Font,new Size(Math.Max(100,width-44),1000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;}
+        int ClientRows{get{return Target!=null&&(Target.DesktopClient!=null||Target.CliClient!=null)?60:0;}}
+        void ClientRow(Graphics g,string label,bool? running,int y){string value=LocalState.ClientState(Target.State,running==true);PaintUi.Text(g,label,Font,new Rectangle(18,y,190,24),Colors.Muted);PaintUi.Text(g,L.Text(value),Font,new Rectangle(130,y,Width-148,24),value=="已连接"?Colors.Success:Colors.Text,true);}
+        internal int NeededHeight(int width){return 164+ClientRows+TextRenderer.MeasureText(Target==null?"":L.Message(Target.Detail),Font,new Size(Math.Max(100,width-44),1000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Open.Bounds=new Rectangle(14,Height-54,164,40);Stop.Bounds=new Rectangle(185,Height-54,144,40);Logs.Bounds=new Rectangle(336,Height-54,140,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(Target==null)return;var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),11,Colors.Surface,Colors.Border);
             PaintUi.Text(g,L.Text("连接状态"),Font,new Rectangle(18,10,100,24),Colors.Muted);PaintUi.Text(g,StatusOverride.Length>0?L.Text(StatusOverride):L.Text(LocalState.Caption(Target.State)),Font,new Rectangle(130,10,Width-148,24),Target.State=="connected"?Colors.Success:Colors.Text,true);
             PaintUi.Text(g,L.Text("登录方式"),Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,L.Text(Target.Mode),Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
-            using(var p=new Pen(Colors.Border))g.DrawLine(p,18,76,Width-18,76);
-            TextRenderer.DrawText(g,L.Message(Target.Detail),Font,new Rectangle(18,88,Width-36,Height-153),Colors.Muted,TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix);
+            int rows=ClientRows;if(rows>0){ClientRow(g,"Claude Desktop",Target.DesktopClient,70);ClientRow(g,"CLI",Target.CliClient,100);}
+            using(var p=new Pen(Colors.Border))g.DrawLine(p,18,76+rows,Width-18,76+rows);
+            TextRenderer.DrawText(g,L.Message(Target.Detail),Font,new Rectangle(18,88+rows,Width-36,Height-153-rows),Colors.Muted,TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix);
         }
     }
 }

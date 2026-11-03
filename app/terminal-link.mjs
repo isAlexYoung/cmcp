@@ -201,6 +201,7 @@ export class TerminalLink extends EventEmitter {
             if (ack) { this.acks.delete(key); clearTimeout(ack.timer); ack.resolve(); }
           } else if (message.t === 'pong') {
             this.emit('pong',Buffer.from(typeof message.nonce==='string'?message.nonce:''));
+            if (message.clients && typeof message.clients === 'object') this.emit('clients', message.clients);
           } else if (message.t === 'close') {
             this.close(message.code || 1000, message.reason || 'closed');
           } else if (message.t === 'error') {
