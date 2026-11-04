@@ -126,7 +126,7 @@ namespace CMCP {
             Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
             foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
         }
-        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});}
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.AnimateContent=TurnPart;Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});}
         internal void CloseSettings(){if(Settings==null)return;Turn(-1,delegate{var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;});}
         internal SnapshotOverlay Transition;
         internal Control.ControlCollection ContentControls{get{return content.Controls;}}
@@ -134,15 +134,17 @@ namespace CMCP {
         bool CanAnimate{get{return Motion.Enabled&&Visible&&WindowState!=FormWindowState.Minimized&&IsHandleCreated;}}
         void Track(SnapshotOverlay overlay){Transition=overlay;overlay.Finished+=delegate{if(Transition==overlay)Transition=null;};}
         // The swap always runs and always finishes first, so state is final at once; only the picture lags.
-        void Turn(int direction,Action swap){
+        void Turn(int direction,Action swap){Turn(this,ClientRectangle,()=>SnapshotOverlay.CaptureClient(this),direction,swap);}
+        void TurnPart(Control part,int direction,Action swap){Turn(part.Parent,part.Bounds,()=>SnapshotOverlay.Snapshot(part),direction,swap);}
+        void Turn(Control host,Rectangle bounds,Func<Bitmap> capture,int direction,Action swap){
             FinishTransition();
             if(!CanAnimate){swap();return;}
             SnapshotOverlay overlay=null;
-            try{overlay=new SnapshotOverlay(SnapshotOverlay.CaptureClient(this),ClientRectangle);Controls.Add(overlay);overlay.BringToFront();overlay.Update();}
+            try{overlay=new SnapshotOverlay(capture(),bounds);host.Controls.Add(overlay);overlay.BringToFront();overlay.Update();}
             catch{if(overlay!=null)overlay.Finish();overlay=null;}
             try{swap();}catch{if(overlay!=null)overlay.Finish();throw;}
             if(overlay==null)return;
-            try{overlay.BringToFront();PerformLayout();Track(overlay);overlay.PlayFade(SnapshotOverlay.CaptureClient(this),direction);}
+            try{overlay.BringToFront();host.PerformLayout();Track(overlay);overlay.PlayFade(capture(),direction);}
             catch{overlay.Finish();}
         }
         bool AnimateExpansion(TargetCard card,bool value){

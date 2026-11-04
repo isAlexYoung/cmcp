@@ -73,24 +73,39 @@ namespace CMCP {
     internal sealed class ModernButton : Control, IButtonControl {
         internal Palette Colors=Palette.Create(false);
         internal string Glyph="";
-        internal bool Primary, Neutral, Destructive, CenterText;
+        internal bool Primary, Neutral, Destructive, CenterText, Segment;
         bool hover, pressed;
         // One shared timer: the pointer often leaves one button as it enters the next.
         const double FadeMilliseconds=110;
         static readonly System.Collections.Generic.List<ModernButton> fading=new System.Collections.Generic.List<ModernButton>();
         static readonly System.Windows.Forms.Timer fadeTimer=CreateFadeTimer();
-        readonly System.Diagnostics.Stopwatch fadeClock=new System.Diagnostics.Stopwatch();
-        double hoverLevel,fadeFrom;
+        readonly System.Diagnostics.Stopwatch fadeClock=new System.Diagnostics.Stopwatch(),selectClock=new System.Diagnostics.Stopwatch();
+        double hoverLevel,fadeFrom,selectLevel,selectFrom;
+        bool selected;
+        // A segment of a rounded group: its blue background fades between the options.
+        internal bool Selected{get{return selected;}set{
+            if(selected==value)return;
+            selected=value;
+            if(!Motion.Enabled||!IsHandleCreated||!Visible){selectLevel=value?1:0;selectClock.Stop();Invalidate();return;}
+            selectFrom=selectLevel;selectClock.Restart();StartFade();
+        }}
+        void StartFade(){if(!fading.Contains(this))fading.Add(this);fadeTimer.Start();}
         static System.Windows.Forms.Timer CreateFadeTimer(){var timer=new System.Windows.Forms.Timer{Interval=15};timer.Tick+=delegate{foreach(var button in fading.ToArray())button.AdvanceFade();if(fading.Count==0)timer.Stop();};return timer;}
         void SetHover(bool value){
             hover=value;
-            if(!Motion.Enabled||!IsHandleCreated||!Visible){hoverLevel=value?1:0;fading.Remove(this);Invalidate();return;}
-            fadeFrom=hoverLevel;fadeClock.Restart();if(!fading.Contains(this))fading.Add(this);fadeTimer.Start();
+            if(!Motion.Enabled||!IsHandleCreated||!Visible){hoverLevel=value?1:0;fadeClock.Stop();Invalidate();return;}
+            fadeFrom=hoverLevel;fadeClock.Restart();StartFade();
+        }
+        static double Faded(System.Diagnostics.Stopwatch clock,double from,double goal,ref bool moving){
+            if(!clock.IsRunning)return goal;
+            double t=clock.ElapsedMilliseconds/FadeMilliseconds;
+            if(t>=1){clock.Stop();return goal;}
+            moving=true;return from+(goal-from)*Motion.EaseOut(t);
         }
         void AdvanceFade(){
-            double t=fadeClock.ElapsedMilliseconds/FadeMilliseconds,goal=hover?1:0;
-            hoverLevel=fadeFrom+(goal-fadeFrom)*Motion.EaseOut(t);
-            if(t>=1){hoverLevel=goal;fading.Remove(this);}
+            bool moving=false;
+            hoverLevel=Faded(fadeClock,fadeFrom,hover?1:0,ref moving);selectLevel=Faded(selectClock,selectFrom,selected?1:0,ref moving);
+            if(!moving)fading.Remove(this);
             Invalidate();
         }
         protected override void Dispose(bool disposing){if(disposing)fading.Remove(this);base.Dispose(disposing);}
@@ -121,8 +136,10 @@ namespace CMCP {
             var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
             Color bg=Primary?Colors.Blue:Neutral?Colors.Subtle:BackColor;
             if(Enabled)bg=Motion.Mix(bg,Primary?ControlPaint.Dark(Colors.Blue,0.08f):Colors.Subtle,hoverLevel);
+            if(Segment)bg=Motion.Mix(Motion.Mix(BackColor,Colors.Subtle,hoverLevel),Colors.Blue,selectLevel);
             if(pressed && Enabled)bg=ControlPaint.Dark(bg,0.06f);
             Color fg=!Enabled?Colors.Muted:Primary?Color.White:Destructive?Colors.Danger:Colors.Text;
+            if(Segment&&Enabled)fg=Motion.Mix(Colors.Text,Color.White,selectLevel);
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
             PaintUi.Box(g,new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),8,bg,bg);
             int glyphSize=Height>=40?22:20, x=Text.Length==0?(Width-glyphSize)/2:12;

@@ -22,6 +22,10 @@ namespace CMCP {
             for(int x=3;x<a.Width;x+=17)if(a.GetPixel(x,rowA).ToArgb()!=b.GetPixel(x,rowB).ToArgb())return false;
             return true;
         }
+        static bool NothingOverlaps(Control sheet){
+            var parts=sheet.Controls.Cast<Control>().ToList();
+            return !parts.Any(a=>parts.Any(b=>a!=b&&a.Bounds.IntersectsWith(b.Bounds)))&&parts.All(c=>c.Bottom<=sheet.Height);
+        }
         static Control Deepest(Control control){var box=control as ContainerControl;return box!=null&&box.ActiveControl!=null?Deepest(box.ActiveControl):control;}
 
         internal static void Run(string directory,Action<bool,string> check){
@@ -31,6 +35,18 @@ namespace CMCP {
             using(var form=new Manager(true)){
                 form.ClientSize=new Size(1100,720);form.Show();Application.DoEvents();
                 form.OpenSettings();check(form.Settings!=null&&form.Transition==null&&!Overlaid(form),"with motion off, pages change directly");
+                {
+                    var page=form.Settings;var sheet=page.Viewport.Controls[0];
+                    check(NothingOverlaps(sheet),"general settings controls do not cover each other");
+                    var groups=sheet.Controls.OfType<RoundedSheet>().ToList();
+                    check(groups.Count==3&&groups.All(g=>g.Controls.OfType<ModernButton>().All(b=>b.Top>=0&&b.Bottom<=g.Height&&b.Left>=0&&b.Right<=g.Width)),"each option group holds its buttons fully inside its frame");
+                    check(groups.All(g=>g.Controls.OfType<ModernButton>().Count(b=>b.Selected)==1),"each option group marks exactly one choice");
+                    var options=groups[0].Controls.OfType<ModernButton>().ToList();
+                    options[1].PerformClick();check(form.Options.language=="en"&&options[1].Selected&&!options[0].Selected,"choosing an option saves it and moves the selection");
+                    options[0].PerformClick();check(form.Options.language=="zh-CN"&&options[0].Selected,"choosing the first option again restores it");
+                    check(sheet.Controls.OfType<ToggleSwitch>().Count()==1,"autostart is a switch");
+                    page.ShowAbout();check(NothingOverlaps(page.Viewport.Controls[0]),"about page controls do not cover each other");
+                }
                 form.CloseSettings();
                 Motion.Forced=true;
                 try{
@@ -50,6 +66,20 @@ namespace CMCP {
                     form.OpenSettings();SendMessage(form.Transition.Handle,0x201,new IntPtr(1),new IntPtr((10<<16)|10));Application.DoEvents();
                     check(form.Transition==null&&!Overlaid(form),"pressing the mouse during a transition finishes it");
                     form.CloseSettings();Settle(form);
+
+                    form.OpenSettings();Settle(form);var tabs=form.Settings;
+                    tabs.AboutTab.PerformClick();
+                    check(form.Transition!=null&&form.Transition.Parent==tabs&&form.Transition.Bounds==tabs.Viewport.Bounds,"switching settings tabs animates only the content below the tabs");
+                    check(tabs.AboutTab.Selected&&!tabs.GeneralTab.Selected,"the chosen tab is marked at once");
+                    using(var end=form.Transition.RenderAt(1))using(var content=SnapshotOverlay.Snapshot(tabs.Viewport))check(Same(end,content),"a tab change ends on the exact new content");
+                    Settle(form);check(form.Transition==null&&!tabs.Controls.OfType<SnapshotOverlay>().Any(),"a tab change removes its overlay");
+                    tabs.AboutTab.PerformClick();check(form.Transition==null,"choosing the current tab does nothing");
+                    tabs.GeneralTab.PerformClick();Settle(form);
+                    var toggle=tabs.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().Single();bool wasOn=toggle.Checked;
+                    toggle.Checked=!wasOn;check(toggle.Level>0&&toggle.Level<1||toggle.Level==(wasOn?1:0),"the switch slides instead of jumping");
+                    for(int i=0;i<200&&toggle.Level!=(wasOn?0:1);i++){Application.DoEvents();Thread.Sleep(5);}
+                    check(toggle.Level==(wasOn?0:1),"the switch settles on its new position");
+                    toggle.Checked=wasOn;form.CloseSettings();Settle(form);
 
                     var a=form.Cards.Values.First();var b=form.Cards.Values.Skip(1).First();
                     form.OpenEditor(a.Target.Name);check(form.Editor!=null&&form.Transition!=null,"opening the editor plays a transition");Settle(form);
