@@ -36,6 +36,8 @@ export function receive(url,{proxy='',limit=2*1024*1024,onProgress=()=>{}}={},re
     req.on('error',reject);req.setTimeout(30000,()=>req.destroy(Object.assign(Error('Update timeout'),{code:'ETIMEDOUT'})));
   }).finally(()=>agent?.destroy());
 }
+// A network failure says nothing about a version already found, and its notice should stay.
+export function checkFailed(updates){return updates.version?{state:'available',version:updates.version}:{state:'error',version:null};}
 export async function checkRelease(current,arch,proxy='',fetch=receive){return selectRelease(JSON.parse((await fetch('https://api.github.com/repos/isAlexYoung/cmcp/releases/latest',{proxy})).toString('utf8')),current,arch);}
 export async function downloadUpdate({current,arch,proxy,directory,fetch=receive,onProgress=()=>{}}){
   let stage='release';const progress=(next,received=0,total=0)=>{stage=next;onProgress({phase:next,received,total});};

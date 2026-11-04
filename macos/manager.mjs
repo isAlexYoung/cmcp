@@ -14,7 +14,7 @@ import {requiresSharedSession} from '../app/desktop-auth.mjs';
 import {createTargetConnections} from '../app/target-connections.mjs';
 import {managedTargetFactory} from '../app/managed-target.mjs';
 import {staticAssets} from '../app/static-assets.mjs';
-import {checkRelease,downloadUpdate} from './updates.mjs';
+import {checkFailed,checkRelease,downloadUpdate} from './updates.mjs';
 import {currentInstallation} from './uninstall.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
@@ -62,14 +62,14 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/targets/order':input=>store.serial(()=>{store.reorder(input.ids);return {saved:true};}),
     '/api/targets/open':async input=>({url:await entry(input.id)}),
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
-    '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates={state:'error',version:null};}return updates;},
-    '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',...value};}})};}catch(error){updates={state:'failed',code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},
+    '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates=checkFailed(updates);}return updates;},
+    '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}})};}catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},
   };
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.headers.host!==new URL(origin).host)return json(res,421,{error:'Host not allowed'});
       const url=new URL(req.url,origin);
-      if(req.method==='GET'&&['/','/ui/app.js','/ui/motion.js','/ui/tooltips.js','/ui/style.css'].includes(url.pathname)){
+      if(req.method==='GET'&&['/','/ui/app.js','/ui/motion.js','/ui/update-state.js','/ui/tooltips.js','/ui/style.css'].includes(url.pathname)){
         const file=url.pathname==='/'?'index.html':url.pathname.split('/').at(-1);
         res.writeHead(200,{'content-type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'application/javascript; charset=utf-8':'text/css; charset=utf-8','cache-control':'no-store',
           'content-security-policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",'x-content-type-options':'nosniff'});

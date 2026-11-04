@@ -82,7 +82,7 @@ Fully quit and reopen Claude on the cloud PC. A newly added configuration is onl
 
 **What happens when I close the window?**
 
-It depends on **Settings → When closing the window**. Exiting disconnects every cloud PC; hiding to the system tray keeps connected cloud PCs running.
+It depends on **Settings → General → Minimize to tray on close**. When on, connected cloud PCs stay connected. When off, closing the window exits and disconnects every cloud PC.
 
 **How do I update?**
 
@@ -100,7 +100,7 @@ rm -rf ~/Library/Application\ Support/CMCP
 
 **Where are the logs?**
 
-Open **Settings → Log folder**. On Windows, errors are written to `user\error.log` in the program folder. On macOS, logs and settings are in `~/Library/Application Support/CMCP`.
+Open **Settings → About → Log folder**. On Windows, errors are written to `user\error.log` in the program folder. On macOS, logs and settings are in `~/Library/Application Support/CMCP`.
 
 **Is CMCP an Anthropic product?**
 

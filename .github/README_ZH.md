@@ -82,7 +82,7 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 
 **关闭窗口后会怎样？**
 
-取决于 **设置 → 关闭窗口时**。直接退出会断开全部云电脑；隐藏到系统托盘会保留已连接的云电脑。
+取决于 **设置 → 通用 → 关闭时最小化到托盘**。开启时保留已连接的云电脑；关闭后，关闭窗口会退出并断开全部云电脑。
 
 **怎么更新？**
 
@@ -100,7 +100,7 @@ rm -rf ~/Library/Application\ Support/CMCP
 
 **日志在哪里？**
 
-打开 **设置 → 日志文件夹**。在 Windows 上，错误会写入程序文件夹里的 `user\error.log`。在 macOS 上，日志和设置都保存在 `~/Library/Application Support/CMCP`。
+打开 **设置 → 关于 → 日志文件夹**。在 Windows 上，错误会写入程序文件夹里的 `user\error.log`。在 macOS 上，日志和设置都保存在 `~/Library/Application Support/CMCP`。
 
 **CMCP 是 Anthropic 的产品吗？**
 
