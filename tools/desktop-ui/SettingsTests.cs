@@ -9,6 +9,8 @@ using Microsoft.Win32;
 namespace CMCP {
     internal static class SettingsTests {
         [DllImport("user32.dll")]static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wParam,IntPtr lParam);
+        // Options live inside their rounded groups.
+        static ModernButton Option(Control sheet,string text){return sheet.Controls.OfType<RoundedSheet>().SelectMany(group=>group.Controls.OfType<ModernButton>()).Single(b=>b.Text==text);}
         static void NativeWheel(Control target,int delta){var point=target.PointToScreen(new Point(10,10));SendMessage(target.Handle,0x20a,new IntPtr(delta<<16),new IntPtr((point.Y<<16)|(point.X&0xffff)));Application.DoEvents();}
         internal static void Run(string directory,Action<bool,string> check){
             ToggleScrollTests(check);
@@ -105,13 +107,13 @@ namespace CMCP {
                 check(scrolls,"repeated startup toggles retain wheel scrolling in both directions without native bars in theme "+dark);
                 int nativeBefore=-viewport.AutoScrollPosition.Y;NativeWheel(startup,-120);int nativeDown=-viewport.AutoScrollPosition.Y;NativeWheel(startup,120);
                 check(nativeDown>nativeBefore&&-viewport.AutoScrollPosition.Y<nativeDown,"native mouse wheel messages on the focused startup checkbox still reach the viewport in theme "+dark);
-                var language=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="English");language.AccessibilityObject.DoDefaultAction();Application.DoEvents();
-                check(L.Language=="en"&&!startup.IsDisposed&&startup.Text=="Start with Windows"&&sheet.Controls.OfType<Label>().Any(label=>label.Text=="Interface language")&&sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="English").Primary,"language changes translate existing settings controls without replacing the focused page in theme "+dark);
-                var theme=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text==(dark?"浅色":"深色"));theme.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                var language=Option(sheet,"English");language.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(L.Language=="en"&&!startup.IsDisposed&&startup.Text=="Start with Windows"&&sheet.Controls.OfType<Label>().Any(label=>label.Text=="Interface language")&&Option(sheet,"English").Selected,"language changes translate existing settings controls without replacing the focused page in theme "+dark);
+                var theme=Option(sheet,dark?"浅色":"深色");theme.AccessibilityObject.DoDefaultAction();Application.DoEvents();
                 check(form.Preferences.dark!=dark&&!startup.IsDisposed&&form.Settings==page,"theme changes update the same settings controls in theme "+dark);
-                var exit=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="直接退出程序");var tray=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="隐藏到系统托盘");exit.AccessibilityObject.DoDefaultAction();Application.DoEvents();
-                bool exitSelected=!form.Options.closeToTray&&exit.Primary&&!tray.Primary;tray.AccessibilityObject.DoDefaultAction();Application.DoEvents();
-                check(exitSelected&&form.Options.closeToTray&&tray.Primary&&!exit.Primary&&!startup.IsDisposed,"close behavior choices update selection without rebuilding settings in theme "+dark);
+                var exit=Option(sheet,"直接退出程序");var tray=Option(sheet,"隐藏到系统托盘");exit.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                bool exitSelected=!form.Options.closeToTray&&exit.Selected&&!tray.Selected;tray.AccessibilityObject.DoDefaultAction();Application.DoEvents();
+                check(exitSelected&&form.Options.closeToTray&&tray.Selected&&!exit.Selected&&!startup.IsDisposed,"close behavior choices update selection without rebuilding settings in theme "+dark);
                 form.CloseSettings();form.OpenSettings();Application.DoEvents();viewport=form.Settings.Viewport;viewport.Wheel(-120);Application.DoEvents();
                 check(viewport.AutoScrollPosition.Y<0&&!viewport.NativeBarsVisible,"reopening settings retains wheel scrolling after startup changes in theme "+dark);
                 L.Set("zh-CN");
