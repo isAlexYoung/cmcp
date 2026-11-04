@@ -68,7 +68,7 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 - **Connection recovery**: reconnection, request waiting, result lookup and de-duplication after a dropped connection.
 - **Easy sign-in**: share a browser sign-in, or save the password encrypted and sign in automatically.
 - **Personalization**: light and dark themes, English and Simplified Chinese.
-- **Desktop integration**: system tray, start with Windows, desktop shortcut and in-app updates.
+- **Desktop integration**: system tray (menu bar on macOS), start at login, desktop shortcut and in-app updates.
 
 ## FAQ
 
@@ -82,7 +82,7 @@ Fully quit and reopen Claude on the cloud PC. A newly added configuration is onl
 
 **What happens when I close the window?**
 
-It depends on **Settings → General → Minimize to tray on close**. When on, connected cloud PCs stay connected. When off, closing the window exits and disconnects every cloud PC.
+It depends on **Settings → General → Minimize to tray on close** (**Minimize to menu bar on close** on macOS). When on, connected cloud PCs stay connected. When off, closing the window exits and disconnects every cloud PC.
 
 **How do I update?**
 

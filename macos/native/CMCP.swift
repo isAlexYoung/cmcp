@@ -37,7 +37,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         if let index = arguments.firstIndex(of: "--updated"), index + 1 < arguments.count { updateRequest = URL(fileURLWithPath: arguments[index + 1]) }
     }
     func tr(_ zh: String, _ en: String) -> String { language == "en" ? en : zh }
+    // SMAppService passes no arguments; a login item is told apart by the open event's 'lgit' value.
+    static func launchedAtLogin(_ event: NSAppleEventDescriptor?) -> Bool {
+        event?.eventID == 0x6F617070 /* oapp */ && event?.paramDescriptor(forKeyword: 0x70726F70 /* prop */)?.enumCodeValue == 0x6C676974 /* lgit */
+    }
+    func hideWindow() { window.orderOut(nil); NSApp.setActivationPolicy(.accessory) }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if App.launchedAtLogin(NSAppleEventManager.shared().currentAppleEvent) { startup = true }
         if !testing, let identifier = bundle.bundleIdentifier,
            let existing = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first(where: {
                guard $0.processIdentifier != ProcessInfo.processInfo.processIdentifier, $0.bundleURL?.standardizedFileURL == bundle.bundleURL.standardizedFileURL else { return false }
@@ -50,7 +56,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             }
             exitApproved = true; NSApp.terminate(nil); return
         }
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(startup ? .accessory : .regular)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.add(self, name: "cmcp")
@@ -232,7 +238,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             trayTimer?.invalidate(); trayTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshTray() }
             if let timer = trayTimer { RunLoop.main.add(timer, forMode: .common) }; refreshTray()
             web.load(URLRequest(url: URL(string: address + "/#" + secret)!))
-            if startup { window.orderOut(nil); NSApp.setActivationPolicy(.accessory) }
+            if startup { hideWindow() }
         }
     }
     @objc func show() { NSApp.setActivationPolicy(.regular); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
@@ -240,7 +246,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     @objc func quit() { NSApp.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return false }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if closeAction == "tray" { window.orderOut(nil); NSApp.setActivationPolicy(.accessory) } else { quit() }
+        if closeAction == "tray" { hideWindow() } else { quit() }
         return false
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -457,6 +463,19 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             if error == nil { done() } else { self.finishTests(error: "Snapshot failed") }
         }
     }
+    // A real login cannot happen in CI, so this covers recognising the event and hiding the window.
+    func loginStartProblem() -> String? {
+        func event(_ id: AEEventID) -> NSAppleEventDescriptor { NSAppleEventDescriptor(eventClass: 0x61657674 /* aevt */, eventID: id, targetDescriptor: nil, returnID: -1, transactionID: 0) }
+        let login = event(0x6F617070 /* oapp */), plain = event(0x6F617070 /* oapp */), other = event(0x72617070 /* rapp */)
+        for marked in [login, other] { marked.setParam(NSAppleEventDescriptor(enumCode: 0x6C676974 /* lgit */), forKeyword: 0x70726F70 /* prop */) }
+        guard App.launchedAtLogin(login), !App.launchedAtLogin(plain), !App.launchedAtLogin(other), !App.launchedAtLogin(nil) else { return "Login event recognition is wrong" }
+        guard !startup else { return "An ordinary launch was treated as a login start" }
+        hideWindow()
+        guard !window.isVisible, NSApp.activationPolicy() == .accessory else { return "Login start must leave only the menu bar icon" }
+        show()
+        guard window.isVisible, NSApp.activationPolicy() == .regular else { return "The main window must open from the menu bar" }
+        return nil
+    }
     // Reported apart from `passed`, which the workflow pins; a failure here still fails the run.
     // Each check inspects animations in the same turn as the click, so timing cannot flake it.
     // CI Macs have Reduce Motion on, so a second pass drops the style sheet's reduced-motion
@@ -469,10 +488,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             ("opening settings turns forward and the page is already there", "document.querySelector('header .gear').click();return !!document.querySelector('header h2')&&!!document.querySelector('.settings-side')&&turning(app,'turn-forward');", nil),
             ("switching to About moves only the content and keeps keyboard focus", "const side=document.querySelector('.settings-side'),header=document.querySelector('header'),nav=side.querySelector('.settings-nav'),old=document.querySelector('.settings-column'),title=header.querySelector('h2').textContent,about=nav.children[1];about.focus();about.click();const column=document.querySelector('.settings-column');return header===document.querySelector('header')&&side===document.querySelector('.settings-side')&&column!==old&&header.querySelector('h2').textContent!==title&&document.activeElement===about&&about.classList.contains('chosen')&&about.getAttribute('aria-pressed')==='true'&&column.querySelectorAll('button.uninstall').length===1&&turning(column,'turn-forward')&&header.getAnimations().length===0&&side.getAnimations().length===0;", nil),
             ("a click during that transition still switches back", "const nav=document.querySelector('.settings-nav'),general=nav.children[0];general.click();const column=document.querySelector('.settings-column');return general.classList.contains('chosen')&&!nav.children[1].classList.contains('chosen')&&column.querySelectorAll('select').length===1&&column.querySelectorAll('input.switch').length===2&&turning(column,'turn-back');", nil),
-            ("General rows fit in English with a language menu, icon segments and switches, and hover fades in 110 ms", "await wait(230);window.cmcpTest.showSettings('dark','en');const group=document.querySelector('.settings-column .segments'),options=[...group.children],boxes=[...group.children].map(option=>option.getBoundingClientRect()),box=document.querySelector('input.switch'),look=getComputedStyle(box),thumb=getComputedStyle(box,'::before'),hover=getComputedStyle(options[0]);return rowsFit()&&options.length===3&&options.every(option=>option.querySelector('svg'))&&boxes.every((rect,i)=>i===0||rect.left>=boxes[i-1].right-.5)&&group.querySelectorAll('.chosen').length===1&&options[2].classList.contains('chosen')&&document.querySelector('.settings-column select').value==='en'&&box.type==='checkbox'&&box.getAttribute('role')==='switch'&&look.width==='44px'&&look.height==='24px'&&thumb.width==='18px'&&(reduced?hover.transitionDuration==='0s':hover.transitionProperty.startsWith('background-color')&&hover.transitionDuration.startsWith('0.11s'));", "mac-general-en.png"),
+            ("General rows fit in English with a language menu, icon segments and switches, and hover fades in 110 ms", "await wait(230);window.cmcpTest.showSettings('dark','en');const group=document.querySelector('.settings-column .segments'),options=[...group.children],boxes=[...group.children].map(option=>option.getBoundingClientRect()),box=document.querySelector('input.switch'),look=getComputedStyle(box),thumb=getComputedStyle(box,'::before'),hover=getComputedStyle(options[0]);return rowsFit()&&options.length===3&&options.every(option=>option.querySelector('svg'))&&boxes.every((rect,i)=>i===0||rect.left>=boxes[i-1].right-.5)&&group.querySelectorAll('.chosen').length===1&&options[2].classList.contains('chosen')&&document.querySelector('.settings-column select').value==='en'&&box.type==='checkbox'&&box.getAttribute('role')==='switch'&&look.width==='44px'&&look.height==='24px'&&thumb.width==='18px'&&[...document.querySelectorAll('.row-title')].some(title=>title.textContent==='Minimize to menu bar on close')&&(reduced?hover.transitionDuration==='0s':hover.transitionProperty.startsWith('background-color')&&hover.transitionDuration.startsWith('0.11s'));", "mac-general-en.png"),
             ("About rows fit in English", "window.cmcpTest.showAbout();await wait(60);const ok=rowsFit()&&document.querySelectorAll('.set-row').length===5&&getComputedStyle(document.querySelector('button.uninstall')).boxShadow!=='none';window.cmcpTest.showSettings('dark','en');return ok;", nil),
             ("choosing a theme marks it at once, fades in 110 ms and does not rebuild the group", "window.cmcpTest.showSettings('dark','en');const group=document.querySelector('.settings-column .segments'),light=group.children[1];void light.offsetWidth;light.click();const immediate=light.classList.contains('chosen')&&light.getAttribute('aria-pressed')==='true'&&group.querySelectorAll('.chosen').length===1&&fading(light,'background-color',110);const saved=await until(()=>document.documentElement.dataset.theme==='light');await wait(60);return immediate&&saved&&light.isConnected&&light.classList.contains('chosen');", nil),
-            ("changing the language rebuilds the page but keeps keyboard focus on the menu", "const select=document.querySelector('.settings-column select');select.focus();select.value='zh-CN';select.dispatchEvent(new Event('change',{bubbles:true}));const saved=await until(()=>document.querySelector('header h2').textContent==='通用');const now=document.activeElement;await wait(250);return saved&&now!==select&&now.dataset.focusKey==='language'&&now.value==='zh-CN'&&rowsFit();", "mac-general.png"),
+            ("changing the language rebuilds the page but keeps keyboard focus on the menu", "const select=document.querySelector('.settings-column select');select.focus();select.value='zh-CN';select.dispatchEvent(new Event('change',{bubbles:true}));const saved=await until(()=>document.querySelector('header h2').textContent==='通用');const now=document.activeElement;await wait(250);return saved&&now!==select&&now.dataset.focusKey==='language'&&now.value==='zh-CN'&&[...document.querySelectorAll('.row-title')].some(title=>title.textContent==='关闭时最小化到菜单栏')&&rowsFit();", "mac-general.png"),
             ("both switches change at once and stay in place while saving", "for(const box of document.querySelectorAll('input.switch')){const before=box.checked;box.click();const immediate=box.checked!==before;await wait(150);const kept=box.isConnected&&box.checked!==before;box.click();await wait(150);if(!immediate||!kept||box.checked!==before)return false;}return true;", nil),
             ("About offers a found version, shows progress, and keeps the offer after a failed update", "const nav=document.querySelector('.settings-nav');nav.children[1].click();const run=document.querySelector('.settings-column .set-row button'),title=document.querySelector('.row-title'),detail=document.querySelector('.row-detail'),aboutDot=nav.querySelector('.dot');show({state:'latest',version:null});const latest=run.textContent==='检查更新'&&!run.disabled&&title.textContent.startsWith('CMCP ')&&detail.textContent.includes('已是最新版')&&aboutDot.hidden;show({state:'available',version:'9.9.9'});const found=run.textContent==='立即更新'&&!run.disabled&&title.textContent==='发现新版本 9.9.9'&&detail.textContent.includes('当前版本')&&!aboutDot.hidden;show({state:'updating',version:'9.9.9',phase:'download',received:37,total:100});const running=run.disabled&&document.querySelector('.update-slot progress')?.value===37&&!aboutDot.hidden;show({state:'failed',version:'9.9.9',code:'network'});const failed=!run.disabled&&run.textContent==='立即更新'&&!!document.querySelector('.update-slot .update-banner.failed')&&!document.querySelector('.update-banner progress');show({state:'available',version:'9.9.9'});await wait(250);return latest&&found&&running&&failed&&!!document.querySelector('.update-slot .update-banner[hidden]')&&rowsFit();", "mac-about-update.png"),
             ("General shows no update progress but keeps the dot on About", "const nav=document.querySelector('.settings-nav');show({state:'updating',version:'9.9.9',phase:'download',received:37,total:100});nav.children[0].click();return !document.querySelector('.update-banner')&&!nav.querySelector('.dot').hidden;", nil),
@@ -493,6 +512,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 if let snapshot = step.snapshot { self.saveSnapshot((pass == "animated" && self.reducedMotion ? "narrow-" : "") + snapshot) { next(index + 1, pass, then: done) } } else { next(index + 1, pass, then: done) }
             }
         }
+        if let problem = loginStartProblem() { finishTests(error: problem); return }
+        motionResults.append("login start: the event is recognised, the window hides and it opens again")
         web.evaluateJavaScript("matchMedia('(prefers-reduced-motion: reduce)').matches") { value, _ in
             self.reducedMotion = value as? Bool ?? false
             next(0, self.reducedMotion ? "reduced motion" : "animated") {
@@ -507,7 +528,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func finishTests(error: String?) {
         if let folder = reportDirectory {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let result: [String: Any] = ["passed": testResults.count, "failed": error == nil ? 0 : 1, "error": error ?? "", "checks": testResults, "motion_checks": motionResults, "reduced_motion": reducedMotion, "not_executed": ["real cloud connection", "user TCC permissions", "real login item approval", "how the animations look on a real Mac display"]]
+            let result: [String: Any] = ["passed": testResults.count, "failed": error == nil ? 0 : 1, "error": error ?? "", "checks": testResults, "motion_checks": motionResults, "reduced_motion": reducedMotion, "not_executed": ["real cloud connection", "user TCC permissions", "real login item approval", "how the animations look on a real Mac display", "a real start from the login item"]]
             if let data = try? JSONSerialization.data(withJSONObject: result, options: .prettyPrinted) { try? data.write(to: folder.appendingPathComponent("native-ui.json")) }
             try? testStderr.write(to: folder.appendingPathComponent("backend.stderr.txt"))
         }
