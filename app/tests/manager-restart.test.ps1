@@ -56,7 +56,13 @@ function Worker([string]$name,[switch]$ForceRestart){
     $workers.Add($p);return $p
 }
 function Finish($p){if(!$p.WaitForExit(60000)){throw 'Restart worker timed out'};return $p.ExitCode}
-function Status {return ([IO.File]::ReadAllText((Join-Path $state 'link-status.json'))|ConvertFrom-Json)}
+# The backend rewrites this file while it runs, so a read can meet it mid-write.
+function Status {
+    for($try=1;;$try++){
+        try{return ([IO.File]::ReadAllText((Join-Path $state 'link-status.json'))|ConvertFrom-Json)}
+        catch{if($try -ge 30){throw};Start-Sleep -Milliseconds 100}
+    }
+}
 try {
     Put-File (Join-Path $state 'config.json') '{"port":18765,"token":"fixture-only-unchanged","roots":[]}'
     Put-File (Join-Path $state 'cloudpc-targets.json') ('[{"name":"A","url":"https://a.invalid","autoLogin":true,"password":"'+(Protect-Text 'fixture secret')+'"},{"name":"B","url":"https://b.invalid"}]')
