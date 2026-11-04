@@ -68,9 +68,11 @@ test('rollback marks the error so the helper does not reopen the application twi
 });
 test('a folder the user cannot change fails before anything moves',{skip:process.platform==='win32'||process.getuid?.()===0},async t=>{
   const d=directory(t),old=bundle(path.join(d,'install'),'4.1.1'),staged=bundle(path.join(d,'staging'),'4.2.0'),parent=path.dirname(old);let launched=0;
-  fs.chmodSync(parent,0o555);t.after(()=>fs.chmodSync(parent,0o755));
-  await assert.rejects(replaceBundle({installRoot:old,staged,version:'4.2.0',arch:'arm64',launch:async()=>{launched++;},healthy:async()=>true}),error=>error.restored===undefined);
-  assert.equal(validateBundle(old).version,'4.1.1');assert.equal(validateBundle(staged).version,'4.2.0');assert.equal(launched,0);assert.deepEqual(fs.readdirSync(parent),['CMCP.app']);
+  fs.chmodSync(parent,0o555);
+  try{
+    await assert.rejects(replaceBundle({installRoot:old,staged,version:'4.2.0',arch:'arm64',launch:async()=>{launched++;},healthy:async()=>true}),error=>error.restored===undefined);
+    assert.equal(validateBundle(old).version,'4.1.1');assert.equal(validateBundle(staged).version,'4.2.0');assert.equal(launched,0);assert.deepEqual(fs.readdirSync(parent),['CMCP.app']);
+  }finally{fs.chmodSync(parent,0o755);}
 });
 function cleanupFixture(d){
   const state=path.join(d,'CMCP'),installRoot=path.join(d,'install/CMCP.app');fs.mkdirSync(state,{recursive:true});fs.mkdirSync(path.dirname(installRoot),{recursive:true});
