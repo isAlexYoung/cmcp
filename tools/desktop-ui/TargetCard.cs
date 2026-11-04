@@ -19,7 +19,7 @@ namespace CMCP {
         internal event Action<TargetCard> SelectedCard, EditRequested, CopyRequested, DeleteRequested, ConnectRequested, OpenRequested, StopRequested, LogsRequested;
         internal event Action<TargetCard,int> MoveRequested;
         readonly LocalToolTip tips=new LocalToolTip();
-        readonly Timer animation=new Timer{Interval=15};
+        internal Func<TargetCard,bool,bool> AnimateExpansion;
         Bitmap icon;
         bool hovered, keyboardFocus, changingHover, dragArmed;
         Point dragStart;
@@ -37,7 +37,8 @@ namespace CMCP {
             Edit.Click+=delegate{if(EditRequested!=null)EditRequested(this);};
             Copy.Click+=delegate{if(CopyRequested!=null)CopyRequested(this);};
             Delete.Click+=delegate{if(DeleteRequested!=null)DeleteRequested(this);};
-            Toggle.Click+=delegate{SetExpanded(!Expanded,true);SelectCard();};
+            // Select first, so the pictures of the transition already show the selection.
+            Toggle.Click+=delegate{SelectCard();SetExpanded(!Expanded,true);};
             Details.Open.Click+=delegate{if(OpenRequested!=null)OpenRequested(this);};
             Details.Stop.Click+=delegate{if(StopRequested!=null)StopRequested(this);};
             Details.Logs.Click+=delegate{if(LogsRequested!=null)LogsRequested(this);};
@@ -47,11 +48,6 @@ namespace CMCP {
             tips.SetToolTip(Toggle,"展开 / 收起详情");
             tips.SetToolTip(this,"点击卡片展开详情；拖动左侧手柄排序；Alt + ↑ / ↓ 调整顺序");
             foreach(Control child in Controls)WirePointer(child);
-            animation.Tick+=delegate{
-                int diff=FinalHeight-Height;
-                if(Math.Abs(diff)<3){Height=FinalHeight;animation.Stop();}
-                else Height+=Math.Sign(diff)*Math.Max(3,Math.Abs(diff)/2);
-            };
             Details.Visible=false;
             AccessibleRole=AccessibleRole.Grouping;
             SetHover(false);RefreshTarget(target);Apply(Colors);
@@ -131,10 +127,10 @@ namespace CMCP {
         }
 
         internal void SetExpanded(bool value,bool animate) {
+            if(animate&&value!=Expanded&&AnimateExpansion!=null&&AnimateExpansion(this,value))return;
             Expanded=value;Details.Visible=value;Toggle.Glyph=value?"up":"chevron";
             Toggle.AccessibleName=value?"收起连接详情":"展开连接详情";
-            if(animate)animation.Start();else{animation.Stop();Height=FinalHeight;}
-            PerformLayout();Invalidate();
+            Height=FinalHeight;PerformLayout();Invalidate();
         }
 
         void SetHover(bool value) {
@@ -204,7 +200,7 @@ namespace CMCP {
             Toggle.Bounds=new Rectangle(Width-54,Compact?32:38,36,40);
             StatusText.Bounds=new Rectangle(Width-250,Compact?103:38,176,40);
             Details.Bounds=new Rectangle(20,HeaderHeight,Math.Max(1,Width-40),Details.NeededHeight(Width-40));
-            if(!animation.Enabled&&Height!=FinalHeight)Height=FinalHeight;
+            if(Height!=FinalHeight)Height=FinalHeight;
         }
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
@@ -220,7 +216,7 @@ namespace CMCP {
             if(Expanded)using(var p=new Pen(Colors.Border))g.DrawLine(p,21,HeaderHeight-10,Width-21,HeaderHeight-10);
         }
         protected override void Dispose(bool disposing) {
-            if(disposing){animation.Stop();animation.Dispose();tips.Dispose();if(icon!=null)icon.Dispose();}
+            if(disposing){tips.Dispose();if(icon!=null)icon.Dispose();}
             base.Dispose(disposing);
         }
     }

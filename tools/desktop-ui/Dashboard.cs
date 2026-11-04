@@ -126,8 +126,40 @@ namespace CMCP {
             Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
             foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
         }
-        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();}
-        internal void CloseSettings(){if(Settings==null)return;var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;}
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});}
+        internal void CloseSettings(){if(Settings==null)return;Turn(-1,delegate{var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;});}
+        internal SnapshotOverlay Transition;
+        internal Control.ControlCollection ContentControls{get{return content.Controls;}}
+        internal void FinishTransition(){if(Transition!=null)Transition.Finish();}
+        bool CanAnimate{get{return Motion.Enabled&&Visible&&WindowState!=FormWindowState.Minimized&&IsHandleCreated;}}
+        void Track(SnapshotOverlay overlay){Transition=overlay;overlay.Finished+=delegate{if(Transition==overlay)Transition=null;};}
+        // The swap always runs and always finishes first, so state is final at once; only the picture lags.
+        void Turn(int direction,Action swap){
+            FinishTransition();
+            if(!CanAnimate){swap();return;}
+            SnapshotOverlay overlay=null;
+            try{overlay=new SnapshotOverlay(SnapshotOverlay.CaptureClient(this),ClientRectangle);Controls.Add(overlay);overlay.BringToFront();overlay.Update();}
+            catch{if(overlay!=null)overlay.Finish();overlay=null;}
+            try{swap();}catch{if(overlay!=null)overlay.Finish();throw;}
+            if(overlay==null)return;
+            try{overlay.BringToFront();PerformLayout();Track(overlay);overlay.PlayFade(SnapshotOverlay.CaptureClient(this),direction);}
+            catch{overlay.Finish();}
+        }
+        bool AnimateExpansion(TargetCard card,bool value){
+            FinishTransition();
+            if(!CanAnimate||Editor!=null||Settings!=null||!list.Visible||list.Sorting||list.Moving||!card.IsHandleCreated)return false;
+            SnapshotOverlay overlay=null;
+            try{
+                int top=card.Top,before=card.Bottom;
+                overlay=new SnapshotOverlay(SnapshotOverlay.Snapshot(list),list.Bounds);content.Controls.Add(overlay);overlay.BringToFront();overlay.Update();
+                card.SetExpanded(value,false);Arrange();
+                var after=SnapshotOverlay.Snapshot(list);Track(overlay);
+                // A shorter list can move the scroll position; then the two pictures no longer line up.
+                if(card.Top==top)overlay.PlayReveal(after,value,value?before:card.Bottom,value?card.Bottom:before);
+                else overlay.PlayFade(after,0);
+                return true;
+            }catch{if(overlay!=null)overlay.Finish();return card.Expanded==value;}
+        }
         void SettingsAction(string name){try{
             if(name=="update"){RunUpdate();return;}if(name=="uninstall"&&RunUninstall!=null){Uninstall();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
             if(name=="shortcut"){DesktopShortcut.Create(Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
@@ -145,7 +177,7 @@ namespace CMCP {
             if(Settings!=null)Settings.SetUpdateProgress(value);
         }
         void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction,position:trayPosition);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.ActivationMenu,Visible=!isolated};tray.DoubleClick+=delegate{RestoreManager();};TrayVisible=true;SyncTray();}
-        internal void HideToTray(){EnsureTray();SyncTray();Hide();}
+        internal void HideToTray(){FinishTransition();EnsureTray();SyncTray();Hide();}
         internal string[] TrayItems {get{return TrayCommands==null?new string[0]:TrayCommands.Menu.Items.OfType<ToolStripMenuItem>().Select(item=>item.Text).ToArray();}}
         TrayTarget TrayValue(TargetCard card){bool blocked=BackendStarting||updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login","recovering","unstable"}.Contains(card.Target.State);return new TrayTarget{Name=card.Target.Name,Label=card.Preference.label.Length>0?card.Preference.label:new Uri(card.Target.Url).Host,State=card.BusyStop?"正在停止":card.BusyConnect&&card.Target.State=="stopped"?"连接中":LocalState.Caption(card.Target.State),CanConnect=!blocked&&!card.BusyStop&&!active,CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Target.State!="stopped"),CanRename=!BackendStarting&&!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name)};}
         void SyncTray(){if(TrayCommands!=null)TrayCommands.Sync(Preferences.Sort(targets).Where(t=>Cards.ContainsKey(t.Name)).Select(t=>TrayValue(Cards[t.Name])).ToList());}
@@ -217,9 +249,11 @@ namespace CMCP {
             ShowEditor(new Target{Name="",Url=""},new CardPreference());
         }
         void ShowEditor(Target target,CardPreference preference){
-            Editor=new TargetEditorPage(target,preference,colors);
-            Editor.BackRequested+=CloseEditor;Editor.SaveRequested+=SaveEditor;
-            content.Visible=false;toolbar.Visible=false;Controls.Add(Editor);Editor.BringToFront();Editor.NameInput.Box.Focus();
+            Turn(1,delegate{
+                Editor=new TargetEditorPage(target,preference,colors);
+                Editor.BackRequested+=CloseEditor;Editor.SaveRequested+=SaveEditor;
+                content.Visible=false;toolbar.Visible=false;Controls.Add(Editor);Editor.BringToFront();Editor.NameInput.Box.Focus();
+            });
         }
         void EditCard(TargetCard card){OpenEditor(card.Target.Name);}
         internal void OpenEditor(string name){
@@ -231,9 +265,11 @@ namespace CMCP {
         internal void CloseEditor(){
             if(Editor==null)return;
             if(!Editor.Save.Enabled){Editor.ShowError("正在保存，请等待本页校验完成。");return;}
-            var previous=Editor;Editor=null;Controls.Remove(previous);previous.Dispose();
-            content.Visible=true;toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;
-            foreach(var card in Cards.Values)card.ClearPointer();
+            Turn(-1,delegate{
+                var previous=Editor;Editor=null;Controls.Remove(previous);previous.Dispose();
+                content.Visible=true;toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;
+                foreach(var card in Cards.Values)card.ClearPointer();
+            });
         }
         void SaveEditor(){
             Mark("editor-save begin");
@@ -297,7 +333,7 @@ namespace CMCP {
         }
         void DeleteCard(TargetCard card){Select(card);if(preview){targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,(L.Language=="en"?"Remove this cloud PC and stop its connection?\r\n":"删除这台云电脑的本地配置并停止它的连接？\r\n")+card.Target.Url+(L.Language=="en"?"\r\nVPS and local files are preserved. Other connections remain unchanged.":"\r\n不会删除 VPS 或本机文件，其他连接保持不变。"),L.Text("删除云电脑"),MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK)Launch("remove",card,"");}
         void CopyCard(TargetCard card){try{Clipboard.SetText(card.Target.Url);notice="地址已复制（不包含登录凭据）";status.Text=L.Text(notice);}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
-        TargetCard CreateCard(Target target){var card=new TargetCard(target,Preferences.Get(target.Name)){Margin=new Padding(0,0,0,Palette.Gap),Font=Font};card.SelectedCard+=Select;card.ConnectRequested+=ConnectCard;card.StopRequested+=StopCard;card.EditRequested+=EditCard;card.DeleteRequested+=DeleteCard;card.CopyRequested+=CopyCard;card.OpenRequested+=delegate(TargetCard c){Select(c);Launch("open",c,"");};card.LogsRequested+=delegate{if(!preview)OpenLocal(stateDirectory);};card.MoveRequested+=MoveByKeyboard;card.SizeChanged+=delegate{Arrange();};
+        TargetCard CreateCard(Target target){var card=new TargetCard(target,Preferences.Get(target.Name)){Margin=new Padding(0,0,0,Palette.Gap),Font=Font};card.SelectedCard+=Select;card.ConnectRequested+=ConnectCard;card.StopRequested+=StopCard;card.EditRequested+=EditCard;card.DeleteRequested+=DeleteCard;card.CopyRequested+=CopyCard;card.OpenRequested+=delegate(TargetCard c){Select(c);Launch("open",c,"");};card.LogsRequested+=delegate{if(!preview)OpenLocal(stateDirectory);};card.MoveRequested+=MoveByKeyboard;card.AnimateExpansion=AnimateExpansion;card.SizeChanged+=delegate{Arrange();};
             card.DragEnter+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragOver+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragDrop+=delegate(object sender,DragEventArgs e){if(CanDrop(e))DropMove((string)e.Data.GetData(typeof(string)),card.Target.Name,card.PointToClient(new Point(e.X,e.Y)).Y>card.Height/2);};return card;}
         bool CanDrop(DragEventArgs e){return e.Data.GetDataPresent(typeof(string))&&Cards.ContainsKey((string)e.Data.GetData(typeof(string)));}
         internal void MoveCard(string from,string before){try{Preferences.Move(from,before,targets);SavePreferences();Arrange(true);}catch{Error("排序未能保存，请检查界面偏好文件。");}}

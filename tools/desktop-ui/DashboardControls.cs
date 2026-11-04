@@ -75,6 +75,25 @@ namespace CMCP {
         internal string Glyph="";
         internal bool Primary, Neutral, Destructive, CenterText;
         bool hover, pressed;
+        // One shared timer: the pointer often leaves one button as it enters the next.
+        const double FadeMilliseconds=110;
+        static readonly System.Collections.Generic.List<ModernButton> fading=new System.Collections.Generic.List<ModernButton>();
+        static readonly System.Windows.Forms.Timer fadeTimer=CreateFadeTimer();
+        readonly System.Diagnostics.Stopwatch fadeClock=new System.Diagnostics.Stopwatch();
+        double hoverLevel,fadeFrom;
+        static System.Windows.Forms.Timer CreateFadeTimer(){var timer=new System.Windows.Forms.Timer{Interval=15};timer.Tick+=delegate{foreach(var button in fading.ToArray())button.AdvanceFade();if(fading.Count==0)timer.Stop();};return timer;}
+        void SetHover(bool value){
+            hover=value;
+            if(!Motion.Enabled||!IsHandleCreated||!Visible){hoverLevel=value?1:0;fading.Remove(this);Invalidate();return;}
+            fadeFrom=hoverLevel;fadeClock.Restart();if(!fading.Contains(this))fading.Add(this);fadeTimer.Start();
+        }
+        void AdvanceFade(){
+            double t=fadeClock.ElapsedMilliseconds/FadeMilliseconds,goal=hover?1:0;
+            hoverLevel=fadeFrom+(goal-fadeFrom)*Motion.EaseOut(t);
+            if(t>=1){hoverLevel=goal;fading.Remove(this);}
+            Invalidate();
+        }
+        protected override void Dispose(bool disposing){if(disposing)fading.Remove(this);base.Dispose(disposing);}
         internal ModernButton() {
             Size=new Size(32,32); Cursor=Cursors.Hand;TabStop=true;AccessibleRole=AccessibleRole.PushButton;
             SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable|ControlStyles.StandardClick,true);
@@ -94,14 +113,14 @@ namespace CMCP {
         protected override void OnKeyUp(KeyEventArgs e){if((e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter)&&pressed){pressed=false;e.Handled=true;PerformClick();Invalidate();}base.OnKeyUp(e);}
         protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
         protected override void OnLostFocus(EventArgs e){pressed=false;base.OnLostFocus(e);Invalidate();}
-        protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
-        protected override void OnMouseLeave(EventArgs e){hover=false;pressed=false;Invalidate();base.OnMouseLeave(e);}
+        protected override void OnMouseEnter(EventArgs e){SetHover(true);base.OnMouseEnter(e);}
+        protected override void OnMouseLeave(EventArgs e){pressed=false;SetHover(false);Invalidate();base.OnMouseLeave(e);}
         protected override void OnMouseDown(MouseEventArgs e){pressed=true;Invalidate();base.OnMouseDown(e);}
         protected override void OnMouseUp(MouseEventArgs e){pressed=false;Invalidate();base.OnMouseUp(e);}
         protected override void OnPaint(PaintEventArgs e) {
             var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
             Color bg=Primary?Colors.Blue:Neutral?Colors.Subtle:BackColor;
-            if(Enabled && hover)bg=Primary?ControlPaint.Dark(Colors.Blue,0.08f):Colors.Subtle;
+            if(Enabled)bg=Motion.Mix(bg,Primary?ControlPaint.Dark(Colors.Blue,0.08f):Colors.Subtle,hoverLevel);
             if(pressed && Enabled)bg=ControlPaint.Dark(bg,0.06f);
             Color fg=!Enabled?Colors.Muted:Primary?Color.White:Destructive?Colors.Danger:Colors.Text;
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);

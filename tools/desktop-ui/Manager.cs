@@ -193,6 +193,7 @@ namespace CMCP {
     internal static class Program {
         internal static string ExecutablePath {get{string canonical=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMCP.exe");return File.Exists(canonical)?canonical:Application.ExecutablePath;}}
         [STAThread] static int Main(string[] args) {
+            Motion.Suppressed=args.Length>0&&args[0]!="--startup"&&args[0]!="--updated"&&args[0]!="--demo";
             if(args.Length==2&&(args[0]=="--self-test"||args[0]=="--test-tooltips"))Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             if(args.Length==2&&args[0]=="--self-test")AppDomain.CurrentDomain.UnhandledException+=delegate(object sender,UnhandledExceptionEventArgs e){try{File.WriteAllText(args[1]+".unhandled.txt",Convert.ToString(e.ExceptionObject),Encoding.UTF8);}catch{}};
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -330,6 +331,7 @@ namespace CMCP {
                 SettingsTests.Run(temp,check);
                 TrayTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
+                MotionTests.Run(temp,check);
                 ControlOrderTests.Run(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }
