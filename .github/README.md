@@ -86,7 +86,7 @@ It depends on **Settings → When closing the window**. Exiting disconnects ever
 
 **How do I update?**
 
-Open **Settings → Check for updates**. CMCP downloads and verifies the update for you. On macOS, if the new version fails to start, CMCP returns to the previous version automatically. Updating needs permission to change the folder CMCP is in, so update from an administrator account when it is in Applications. Because the app is ad-hoc signed, macOS may ask you to grant permissions such as Accessibility again after an update.
+Open **Settings → About → Check for updates**. CMCP downloads and verifies the update for you. On macOS, if the new version fails to start, CMCP returns to the previous version automatically. Updating needs permission to change the folder CMCP is in, so update from an administrator account when it is in Applications. Because the app is ad-hoc signed, macOS may ask you to grant permissions such as Accessibility again after an update.
 
 **How do I uninstall?**
 

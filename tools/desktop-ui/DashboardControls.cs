@@ -28,6 +28,9 @@ namespace CMCP {
         internal bool Dark;
         internal Color Page, Surface, Subtle, Border, Text, Muted, Blue, Selected, SelectionBorder, Danger, Success;
         internal const int Gap = 16, Radius = 15, Header = 116;
+        internal Color Side { get { return Dark ? Color.FromArgb(16,18,21) : Subtle; } }
+        internal Color Active { get { return Dark ? Color.FromArgb(38,41,47) : Color.FromArgb(233,237,243); } }
+        internal Color Track { get { return Dark ? Color.FromArgb(74,78,87) : Color.FromArgb(201,206,216); } }
         internal static Palette Create(bool dark) {
             return dark ? new Palette { Dark=true, Page=Color.FromArgb(20,22,26), Surface=Color.FromArgb(28,30,35), Subtle=Color.FromArgb(38,41,47), Border=Color.FromArgb(56,59,66), Text=Color.FromArgb(234,236,240), Muted=Color.FromArgb(154,162,175), Blue=Color.FromArgb(86,157,255), Selected=Color.FromArgb(29,43,61), SelectionBorder=Color.FromArgb(76,132,206), Danger=Color.FromArgb(238,115,120), Success=Color.FromArgb(100,196,153) }
             : new Palette { Page=Color.White, Surface=Color.White, Subtle=Color.FromArgb(246,247,249), Border=Color.FromArgb(226,229,235), Text=Color.FromArgb(28,35,46), Muted=Color.FromArgb(121,131,147), Blue=Color.FromArgb(33,126,246), Selected=Color.FromArgb(242,248,255), SelectionBorder=Color.FromArgb(125,180,255), Danger=Color.FromArgb(200,76,86), Success=Color.FromArgb(38,143,103) };
@@ -63,7 +66,14 @@ namespace CMCP {
                     case "monitor":g.DrawRectangle(p,3,4,18,13);g.DrawLine(p,12,17,12,21);g.DrawLine(p,7,21,17,21);break;
                     case "theme":g.DrawEllipse(p,5,5,14,14);using(var b=new SolidBrush(color))g.FillPie(b,5,5,14,14,90,180);break;
                     case "refresh":g.DrawArc(p,4,4,16,16,40,285);g.DrawLines(p,new Point[]{new Point(20,4),new Point(20,10),new Point(14,10)});break;
-                    case "settings":g.DrawEllipse(p,5,5,14,14);g.DrawEllipse(p,9,9,6,6);for(int i=0;i<8;i++){double a=i*Math.PI/4;g.DrawLine(p,12+(float)Math.Cos(a)*8,12+(float)Math.Sin(a)*8,12+(float)Math.Cos(a)*11,12+(float)Math.Sin(a)*11);}break;
+                    case "settings":{
+                        var outline=new System.Collections.Generic.List<PointF>();
+                        for(int i=0;i<8;i++){double a=i*Math.PI/4;foreach(var step in new[]{new[]{-0.28,7.7},new[]{-0.15,10.6},new[]{0.15,10.6},new[]{0.28,7.7}})outline.Add(new PointF(12+(float)(Math.Cos(a+step[0])*step[1]),12+(float)(Math.Sin(a+step[0])*step[1])));}
+                        g.DrawPolygon(p,outline.ToArray());g.DrawEllipse(p,8.6f,8.6f,6.8f,6.8f);break;}
+                    case "sliders":g.DrawLine(p,4,7,14,7);g.DrawLine(p,18,7,20,7);g.DrawLine(p,4,17,6,17);g.DrawLine(p,10,17,20,17);g.DrawEllipse(p,14,5,4,4);g.DrawEllipse(p,6,15,4,4);break;
+                    case "info":g.DrawEllipse(p,3,3,18,18);g.DrawLine(p,12,11,12,16);using(var b=new SolidBrush(color))g.FillEllipse(b,11,7,2,2);break;
+                    case "sun":g.DrawEllipse(p,8,8,8,8);for(int i=0;i<8;i++){double a=i*Math.PI/4;g.DrawLine(p,12+(float)Math.Cos(a)*7.5f,12+(float)Math.Sin(a)*7.5f,12+(float)Math.Cos(a)*10,12+(float)Math.Sin(a)*10);}break;
+                    case "moon":using(var path=new GraphicsPath()){path.AddArc(3.62f,3.62f,16.76f,16.76f,17.35f,235.3f);path.AddArc(7.32f,1.82f,14.86f,14.86f,225f,-180f);path.CloseFigure();g.DrawPath(p,path);}break;
                     case "grip":using(var b=new SolidBrush(color))for(int y=5;y<=19;y+=7)for(int x=8;x<=15;x+=7)g.FillEllipse(b,x-1,y-1,2,2);break;
                     default:g.DrawEllipse(p,4,4,16,16);g.DrawLine(p,12,8,12,13);g.DrawEllipse(p,11,16,1,1);break;
                 }
@@ -73,7 +83,7 @@ namespace CMCP {
     internal sealed class ModernButton : Control, IButtonControl {
         internal Palette Colors=Palette.Create(false);
         internal string Glyph="";
-        internal bool Primary, Neutral, Destructive, CenterText, Segment;
+        internal bool Primary, Neutral, Destructive, CenterText, Segment, Nav, Dot;
         bool hover, pressed;
         // One shared timer: the pointer often leaves one button as it enters the next.
         const double FadeMilliseconds=110;
@@ -137,30 +147,32 @@ namespace CMCP {
             Color bg=Primary?Colors.Blue:Neutral?Colors.Subtle:BackColor;
             if(Enabled)bg=Motion.Mix(bg,Primary?ControlPaint.Dark(Colors.Blue,0.08f):Colors.Subtle,hoverLevel);
             if(Segment)bg=Motion.Mix(Motion.Mix(BackColor,Colors.Subtle,hoverLevel),Colors.Blue,selectLevel);
+            if(Nav)bg=Motion.Mix(Motion.Mix(BackColor,Colors.Active,hoverLevel*0.6),Colors.Active,selectLevel);
             if(pressed && Enabled)bg=ControlPaint.Dark(bg,0.06f);
             Color fg=!Enabled?Colors.Muted:Primary?Color.White:Destructive?Colors.Danger:Colors.Text;
             if(Segment&&Enabled)fg=Motion.Mix(Colors.Text,Color.White,selectLevel);
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
-            PaintUi.Box(g,new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),8,bg,bg);
+            PaintUi.Box(g,new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),8,bg,Destructive&&Text.Length>0?fg:bg);
             int glyphSize=Height>=40?22:20, x=Text.Length==0?(Width-glyphSize)/2:12;
             if(Glyph.Length>0)PaintUi.Icon(g,Glyph,new Rectangle(x,(Height-glyphSize)/2,glyphSize,glyphSize),fg);
             if(Text.Length>0){if(CenterText)TextRenderer.DrawText(g,L.Text(Text),Font,ClientRectangle,fg,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);else PaintUi.Text(g,L.Text(Text),Font,new Rectangle(Glyph.Length>0?39:10,0,Width-(Glyph.Length>0?44:20),Height),fg);}
+            if(Dot)using(var b=new SolidBrush(Colors.Danger))g.FillEllipse(b,Width-(Nav?22:13),Nav?(Height-8)/2:5,8,8);
             if(Focused&&ShowFocusCues)using(var path=PaintUi.Round(new Rectangle(2,2,Width-5,Height-5),8))using(var p=new Pen(Colors.SelectionBorder))g.DrawPath(p,path);
         }
     }
     internal sealed class DashboardToolbar : Panel {
-        internal readonly ModernButton Settings=new ModernButton { Glyph="settings",AccessibleName="设置" }, UpdateButton=new ModernButton { Glyph="refresh",AccessibleName="检查更新" }, Theme=new ModernButton { Glyph="theme",AccessibleName="切换浅色或深色" }, Add=new ModernButton { Glyph="plus",Text="添加云电脑",Primary=true,AccessibleName="添加云电脑" };
+        internal readonly ModernButton Settings=new ModernButton { Glyph="settings",Neutral=true,AccessibleName="设置" }, Add=new ModernButton { Glyph="plus",Text="添加云电脑",Primary=true,AccessibleName="添加云电脑" };
         readonly LocalToolTip tips=new LocalToolTip();
         internal Palette Colors=Palette.Create(false);
         internal DashboardToolbar() {
             Height=72;Dock=DockStyle.Top;DoubleBuffered=true;Font=new Font("Microsoft YaHei UI",9F);
-            Controls.AddRange(new Control[]{Settings,UpdateButton,Theme,Add});
-            tips.SetToolTip(Settings,"设置");tips.SetToolTip(UpdateButton,"检查更新");tips.SetToolTip(Theme,"切换浅色 / 深色主题");tips.SetToolTip(Add,"添加新的云电脑，不会自动连接");
+            Controls.AddRange(new Control[]{Settings,Add});
+            tips.SetToolTip(Settings,"设置");tips.SetToolTip(Add,"添加新的云电脑，不会自动连接");
         }
-        internal void UpdateTip(string value){tips.SetToolTip(UpdateButton,value);UpdateButton.AccessibleDescription=L.Text(value);}
-        internal void Apply(Palette colors){Colors=colors;tips.Apply(colors);BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=b==Settings||b==UpdateButton?colors.Subtle:colors.Surface;b.Invalidate();}Invalidate();}
-        protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(166,20,32,32);UpdateButton.Bounds=new Rectangle(204,20,32,32);Theme.Bounds=new Rectangle(Width-231,17,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
-        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(e.Graphics,new Rectangle(160,16,82,40),10,Colors.Subtle,Colors.Subtle);using(var f=new Font(Font.FontFamily,14*UiFont.Scale,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
+        internal void SetUpdateDot(bool available){if(Settings.Dot==available)return;Settings.Dot=available;tips.SetToolTip(Settings,available?"设置 · 有可用更新":"设置");Settings.AccessibleDescription=available?L.Text("有可用更新"):null;Settings.Invalidate();}
+        internal void Apply(Palette colors){Colors=colors;tips.Apply(colors);BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}Invalidate();}
+        protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(160,16,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
+        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;using(var f=new Font(Font.FontFamily,14*UiFont.Scale,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
         protected override void Dispose(bool disposing){if(disposing)tips.Dispose();base.Dispose(disposing);}
     }
     internal sealed class ConnectionDetails : Panel {

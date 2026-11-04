@@ -45,7 +45,9 @@ namespace CMCP {
         DateTime checkedAt=DateTime.MinValue;
         Process child;
         bool busy,disposed;
-        internal string Status="检查更新";
+        internal string Status="检查更新",AvailableVersion;
+        internal bool Available;
+        internal void SimulateAvailable(string version){Available=true;AvailableVersion=version;Notify("有可用更新");}
         internal UpdateProgress Progress;
         internal bool Installing {get{return busy&&installing;}}
         bool installing;
@@ -80,7 +82,7 @@ namespace CMCP {
                 var data=(Dictionary<string,object>)e.Result;string result=Convert.ToString(LocalState.Get(data,"status"));
                 if(result=="failed"){if(action=="check")Notify("检查失败，请重试");else ShowProgress(new UpdateProgress{Stage="failed",Code=Convert.ToString(LocalState.Get(data,"code"))});return;}
                 checkedAt=DateTime.UtcNow;
-                if(result=="current"){ShowProgress(null);Notify("已是最新版");return;}if(result=="available"){Notify("有可用更新");return;}
+                if(result=="current"){Available=false;AvailableVersion=null;ShowProgress(null);Notify("已是最新版");return;}if(result=="available"){string offered=Convert.ToString(LocalState.Get(data,"version"));Available=true;AvailableVersion=System.Text.RegularExpressions.Regex.IsMatch(offered??"",@"^\d+\.\d+\.\d+$")?offered:"";Notify("有可用更新");return;}
                 if(result!="prepared"){ShowProgress(new UpdateProgress{Stage="failed"});return;}
                 try{
                     string transaction=Convert.ToString(LocalState.Get(data,"transaction"));Guid id;if(!Guid.TryParseExact(transaction,"N",out id))throw new IOException();

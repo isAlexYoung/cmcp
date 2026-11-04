@@ -39,6 +39,8 @@ namespace CMCP {
         void Mark(string message){if(Trace!=null)Trace(message);}
         int editorScroll;
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+        // The update button moved to About, so a new version is announced by a dot instead.
+        readonly System.Windows.Forms.Timer updateCheck = new System.Windows.Forms.Timer{Interval=15000};
         sealed class PendingAction { internal Process Process; internal InlineWorker Worker; internal string Name, Action, Label="", Icon="", Message=""; internal bool Superseded, Failed, Saved; }
         readonly Dictionary<string,string> progress=new Dictionary<string,string>();
         readonly List<PendingAction> children = new List<PendingAction>();
@@ -72,15 +74,15 @@ namespace CMCP {
             list.Dock=DockStyle.Fill;list.AutoScroll=true;list.Sorted+=MoveCard;
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有云电脑\r\n点击右上角「添加云电脑」，保存地址后即可连接。";empty.Margin=new Padding(0,30,0,0);
             content.Controls.Add(list);content.Controls.Add(UpdateView);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
-            toolbar.Add.Click+=delegate{OpenAdd();};toolbar.Theme.Click+=delegate{SetTheme(!Preferences.dark);};
+            toolbar.Add.Click+=delegate{OpenAdd();};
             toolbar.Settings.Click+=delegate{OpenSettings();};
             updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();},SetUpdateProgress);
-            toolbar.UpdateButton.MouseEnter+=delegate{updates.Check(false);};toolbar.UpdateButton.Click+=delegate{RunUpdate();};
+            updateCheck.Tick+=delegate{updateCheck.Interval=6*60*60*1000;updates.Check(false);};if(!isolated)updateCheck.Start();
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;if(Options.closeToTray&&!ExitPending)HideToTray();else ExitApplication();}};
-            FormClosed+=delegate{timer.Stop();timer.Dispose();updates.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();EnsureTray();
+            FormClosed+=delegate{timer.Stop();timer.Dispose();updateCheck.Stop();updateCheck.Dispose();updates.Dispose();foreach(var p in children)p.Process.Dispose();};RefreshState();ApplyTheme();EnsureTray();
         }
         internal async void InitializeBackend(Func<bool> initialize,Action<bool> initialized){
             if(backendInitialization!=null||IsDisposed||ExitPending)return;
@@ -126,7 +128,7 @@ namespace CMCP {
             Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
             foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
         }
-        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.AnimateContent=TurnPart;Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});}
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.AnimateContent=TurnPart;Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});updates.Check(false);}
         internal void CloseSettings(){if(Settings==null)return;Turn(-1,delegate{var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;});}
         internal SnapshotOverlay Transition;
         internal Control.ControlCollection ContentControls{get{return content.Controls;}}
@@ -162,13 +164,14 @@ namespace CMCP {
                 return true;
             }catch{if(overlay!=null)overlay.Finish();return card.Expanded==value;}
         }
+        internal void SimulateUpdate(string version){updates.SimulateAvailable(version);}
         void SettingsAction(string name){try{
-            if(name=="update"){RunUpdate();return;}if(name=="uninstall"&&RunUninstall!=null){Uninstall();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
+            if(name=="check"){updates.Check(true);return;}if(name=="update"){RunUpdate();return;}if(name=="uninstall"&&RunUninstall!=null){Uninstall();return;}if(isolated){Settings.SetFeedback("Preview: system actions are disabled.",false);return;}
             if(name=="shortcut"){DesktopShortcut.Create(Program.ExecutablePath,Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));Settings.SetFeedback("快捷方式已创建。",false);}
             else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
         void RunUpdate(){if(BackendStarting||ExitPending)return;updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
-        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.UpdateTip(message);if(Settings!=null)Settings.SetUpdateStatus(message);else if(updateNotice){notice=message;status.Text=L.Text(message);}}
+        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.SetUpdateDot(updates.Available);if(Settings!=null){Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion);Settings.SetUpdateStatus(message);}else if(updateNotice){notice=message;status.Text=L.Text(message);}}
         internal void SetUpdateProgress(UpdateProgress value){
             if(IsDisposed)return;
             bool reflow=(value!=null&&value.Visible)!=(UpdateView.Value!=null&&UpdateView.Value.Visible);
@@ -367,7 +370,7 @@ namespace CMCP {
         }finally{arranging=false;}}
 
         internal bool TestIndependentButtons(){if(Cards.Count!=2)return false;var cards=Cards.Values.ToArray();var process=Process.GetCurrentProcess();var pending=new PendingAction{Process=process,Name=cards[0].Target.Name,Action="connect"};try{children.Add(pending);RefreshState();return cards[0].BusyConnect&&cards[0].Details.Stop.Enabled&&!cards[0].Edit.Enabled&&!cards[1].BusyConnect&&cards[1].Edit.Enabled&&cards[1].Details.Open.Enabled;}finally{children.Remove(pending);process.Dispose();RefreshState();}}
-        internal bool LayoutFits(){return (Editor==null||Editor.LayoutFits)&&Cards.Values.All(c=>c.Right<=list.ClientSize.Width&&c.Connect.Left>=40&&c.Delete.Right<c.Width&&c.Details.Open.Right<c.Details.Width&&c.Details.Logs.Right<c.Details.Width)&&toolbar.Add.Right<=toolbar.ClientSize.Width&&toolbar.Theme.Left>toolbar.UpdateButton.Right;}
+        internal bool LayoutFits(){return (Editor==null||Editor.LayoutFits)&&Cards.Values.All(c=>c.Right<=list.ClientSize.Width&&c.Connect.Left>=40&&c.Delete.Right<c.Width&&c.Details.Open.Right<c.Details.Width&&c.Details.Logs.Right<c.Details.Width)&&toolbar.Add.Right<=toolbar.ClientSize.Width&&toolbar.Add.Left>toolbar.Settings.Right;}
         internal int ScrollOffset { get { return -list.AutoScrollPosition.Y; } set { list.AutoScrollPosition=new Point(0,value); } }
         internal static Snapshot Demo(){var s=new Snapshot{Running=true};s.Targets.Add(new Target{Name="preview-a",Url="https://desktop1.example.com",Mode="共享网页登录",State="connected",DesktopClient=true,CliClient=false,Detail=LocalState.Detail("connected")});s.Targets.Add(new Target{Name="preview-b",Url="https://desktop2.example.com",Mode="共享网页登录",State="stopped",Detail=LocalState.Detail("stopped")});return s;}
     }

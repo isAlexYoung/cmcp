@@ -5,24 +5,30 @@ using System.Linq;
 using System.Windows.Forms;
 
 namespace CMCP {
+    // Categories on the left, grouped rows in a centered column on the right. All row
+    // controls stay direct children of one sheet, so wheel and keyboard handling are shared.
     internal sealed class SettingsPage : UserControl {
-        internal readonly EditorViewport Viewport=new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(28,12,28,24)};
-        internal readonly ModernButton Back=new ModernButton{Glyph="back",AccessibleName="返回"};
-        internal readonly ModernButton GeneralTab=new ModernButton{Text="通用",CenterText=true,Segment=true},AboutTab=new ModernButton{Text="关于",CenterText=true,Segment=true};
-        readonly RoundedSheet tabs=new RoundedSheet();
-        readonly ResizePanel header=new ResizePanel{Dock=DockStyle.Top,Height=138};
-        readonly Label title=new Label{Text="设置"};
+        sealed class Row { internal Label Title,Description; internal Control Control; }
+        sealed class Section { internal Label Heading; internal Control Leading; internal readonly List<Row> Rows=new List<Row>(); }
+        const int ColumnWidth=680,RowHeight=56,RowPadding=16,OptionWidth=122;
+        internal readonly EditorViewport Viewport=new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
+        internal readonly ModernButton Back=new ModernButton{Glyph="back",Text="返回",Nav=true,AccessibleName="返回"};
+        internal readonly ModernButton GeneralTab=new ModernButton{Glyph="sliders",Text="通用",Nav=true},AboutTab=new ModernButton{Glyph="info",Text="关于",Nav=true};
+        readonly ResizePanel side=new ResizePanel{Dock=DockStyle.Left,Width=176},top=new ResizePanel{Dock=DockStyle.Top,Height=56};
+        readonly Label group=new Label(),version=new Label(),title=new Label{TextAlign=ContentAlignment.MiddleLeft};
         readonly Label feedback=new Label{AutoSize=false};
-        readonly RoundedSheet sheet=new RoundedSheet{Dock=DockStyle.Top};
+        readonly SettingsSheet sheet=new SettingsSheet();
         readonly AppSettings settings;
         readonly Action<AppSettings> change;
         readonly Action<string> action;
         readonly List<Action> refresh=new List<Action>();
+        readonly List<Section> sections=new List<Section>();
+        readonly string currentVersion=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
         Palette colors;
-        bool isAbout;
+        bool isAbout,laying,updateAvailable;
+        string availableVersion;
         internal string UpdateStatus="检查更新";
         readonly UpdateProgressView updateView=new UpdateProgressView();
-        Label updateLabel;
         UpdateProgress updateProgress;
         internal Action<Control,int,Action> AnimateContent;
         internal void ShowAbout(){isAbout=true;Build();}
@@ -34,74 +40,247 @@ namespace CMCP {
         internal event Action BackRequested;
         internal SettingsPage(AppSettings values,Palette palette,Action<AppSettings> changed,Action<string> invoked){
             Dock=DockStyle.Fill;Font=UiFont.Points(11F);settings=values;colors=palette;change=changed;action=invoked;
-            header.Controls.AddRange(new Control[]{Back,title,tabs});tabs.Controls.AddRange(new Control[]{GeneralTab,AboutTab});Viewport.Controls.Add(sheet);Controls.Add(Viewport);Controls.Add(header);
-            Back.Bounds=new Rectangle(28,20,40,40);title.Bounds=new Rectangle(84,20,300,40);title.Font=new Font(Font,FontStyle.Bold);
+            side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);version.Font=UiFont.Points(9F);
+            title.Font=new Font(UiFont.Points(13F),FontStyle.Bold);
+            version.Text="CMCP v"+currentVersion;
+            side.Controls.AddRange(new Control[]{Back,group,GeneralTab,AboutTab,version});top.Controls.Add(title);Viewport.Controls.Add(sheet);
+            Controls.Add(Viewport);Controls.Add(top);Controls.Add(side);
+            title.Bounds=new Rectangle(58,0,420,55);
+            top.Paint+=delegate(object sender,PaintEventArgs e){
+                e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                PaintUi.Icon(e.Graphics,isAbout?"info":"sliders",new Rectangle(28,17,22,22),colors.Text);
+                using(var p=new Pen(colors.Border))e.Graphics.DrawLine(p,0,top.Height-1,top.Width,top.Height-1);
+            };
+            side.Paint+=delegate(object sender,PaintEventArgs e){using(var p=new Pen(colors.Border))e.Graphics.DrawLine(p,side.Width-1,0,side.Width-1,side.Height);};
             Back.Click+=delegate{if(BackRequested!=null)BackRequested();};GeneralTab.Click+=delegate{ShowTab(false);};AboutTab.Click+=delegate{ShowTab(true);};
-            header.SizeChanged+=delegate{tabs.Bounds=new Rectangle(28,80,header.Width-56,48);GeneralTab.Bounds=new Rectangle(5,5,(tabs.Width-10)/2,38);AboutTab.Bounds=new Rectangle(GeneralTab.Right,5,GeneralTab.Width,38);};
-            sheet.SizeChanged+=delegate{LayoutRows();};Build();
+            side.SizeChanged+=delegate{LayoutSide();};
+            Viewport.SizeChanged+=delegate{PlaceSheet();};
+            SizeChanged+=delegate{side.Width=Width<800?150:176;};
+            sheet.SizeChanged+=delegate{LayoutRows();};
+            LayoutSide();Build();
         }
-        ModernButton Button(string text,int y,int x,int width,Action click,bool selected){return Button(text,y,x,width,click,()=>selected);}
-        ModernButton Button(string text,int y,int x,int width,Action click,Func<bool> selected){var b=new ModernButton{Text=text,Bounds=new Rectangle(x,y,width,40),Anchor=AnchorStyles.Left|AnchorStyles.Top};b.Click+=delegate{click();};sheet.Controls.Add(b);refresh.Add(delegate{b.Primary=selected();b.Neutral=!b.Primary;b.Invalidate();});return b;}
-        RoundedSheet Track(int y,int width){var track=new RoundedSheet{Bounds=new Rectangle(24,y,width,48)};sheet.Controls.Add(track);return track;}
-        void Option(RoundedSheet track,int index,int count,string text,Action<AppSettings> edit,Func<bool> chosen){
-            int width=(track.Width-10)/count;
-            var b=new ModernButton{Text=text,CenterText=true,Segment=true,Bounds=new Rectangle(5+index*width,5,width,38)};
+        void LayoutSide(){
+            int width=side.Width-20;
+            Back.Bounds=new Rectangle(10,14,width,36);group.Bounds=new Rectangle(20,60,width-20,20);
+            GeneralTab.Bounds=new Rectangle(10,84,width,38);AboutTab.Bounds=new Rectangle(10,124,width,38);
+            version.Bounds=new Rectangle(20,Math.Max(170,side.Height-38),width-20,22);
+            side.Invalidate();
+        }
+        void PlaceSheet(){
+            int client=Viewport.ClientSize.Width,pad=client<560?18:28,width=Math.Max(200,Math.Min(ColumnWidth,client-2*pad));
+            sheet.SetBounds((client-width)/2,20+Viewport.AutoScrollPosition.Y,width,sheet.Height);
+        }
+        Section AddSection(string text){
+            var section=new Section{Heading=new Label{Font=new Font(sheet.Font,FontStyle.Bold),TextAlign=ContentAlignment.MiddleLeft}};
+            sheet.Controls.Add(section.Heading);refresh.Add(delegate{section.Heading.Text=L.Text(text);});sections.Add(section);return section;
+        }
+        void AddRow(Section section,Func<string> name,Func<string> detail,Control control){
+            var row=new Row{Title=new Label{Font=sheet.Font},Control=control};
+            sheet.Controls.Add(row.Title);refresh.Add(delegate{row.Title.Text=name();});
+            if(detail!=null){row.Description=new Label{Font=UiFont.Points(9F)};sheet.Controls.Add(row.Description);refresh.Add(delegate{row.Description.Text=detail();});}
+            if(control!=null)sheet.Controls.Add(control);
+            section.Rows.Add(row);
+        }
+        void AddRow(Section section,string name,string detail,Control control){
+            AddRow(section,()=>L.Text(name),detail==null?(Func<string>)null:(()=>L.Text(detail)),control);
+        }
+        ModernButton Command(string text,Action click,bool primary=false){
+            var b=new ModernButton{Text=text,CenterText=true,Primary=primary,Neutral=!primary,Font=sheet.Font};b.Click+=delegate{click();};return b;
+        }
+        ModernButton Danger(string text,Action click){
+            var b=new ModernButton{Text=text,CenterText=true,Destructive=true,Font=sheet.Font};b.Click+=delegate{click();};return b;
+        }
+        ToggleSwitch Switch(string text,Func<bool> value,Action<AppSettings,bool> edit){
+            var toggle=new ToggleSwitch{Text=L.Text(text),Checked=value(),Colors=colors,Size=new Size(48,30)};
+            toggle.Click+=delegate{Commit(s=>edit(s,toggle.Checked));};
+            refresh.Add(delegate{toggle.Checked=value();toggle.Text=L.Text(text);});return toggle;
+        }
+        RoundedSheet Group(int count){return new RoundedSheet{Size=new Size(count*OptionWidth+10,40)};}
+        void Option(RoundedSheet track,int index,string glyph,string text,Action<AppSettings> edit,Func<bool> chosen){
+            var b=new ModernButton{Glyph=glyph,Text=text,Segment=true,Font=sheet.Font,Bounds=new Rectangle(5+index*OptionWidth,4,OptionWidth,32)};
             b.Click+=delegate{if(!chosen())Commit(edit);};
             track.Controls.Add(b);refresh.Add(delegate{b.Selected=chosen();b.Invalidate();});
         }
-        void Label(string text,int y,bool muted){var label=new Label{Text=L.Text(text),Bounds=new Rectangle(24,y,100,muted?56:30),Tag="wide",ForeColor=muted?colors.Muted:colors.Text,BackColor=colors.Surface,AutoEllipsis=false};sheet.Controls.Add(label);refresh.Add(delegate{label.Text=L.Text(text);});}
-        void RefreshControls(){title.Text=L.Text("设置");foreach(var update in refresh)update();Apply(colors);}
+        void RefreshControls(){
+            title.Text=L.Text(isAbout?"关于":"通用");group.Text=L.Text("设置");
+            foreach(var update in refresh)update();
+            Apply(colors);LayoutRows();top.Invalidate();
+        }
         void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
         void Build(){
-            refresh.Clear();
-            sheet.Controls.Remove(feedback);sheet.Controls.Remove(updateView);foreach(Control c in sheet.Controls.Cast<Control>().ToArray())c.Dispose();sheet.Controls.Clear();updateLabel=null;
-            title.Text=L.Text("设置");GeneralTab.Selected=!isAbout;AboutTab.Selected=isAbout;
-            if(!isAbout){
-                Label("界面语言",24,false);Label("切换后立即生效，保存到当前 Windows 账户。",59,true);
-                var language=Track(118,340);
-                Option(language,0,2,"简体中文",s=>s.language="zh-CN",()=>settings.language=="zh-CN");Option(language,1,2,"English",s=>s.language="en",()=>settings.language=="en");
-                Label("外观主题",186,false);
-                var theme=Track(224,480);
-                Option(theme,0,3,"浅色",s=>s.theme="light",()=>settings.theme=="light");Option(theme,1,3,"深色",s=>s.theme="dark",()=>settings.theme=="dark");Option(theme,2,3,"跟随系统",s=>s.theme="system",()=>settings.theme=="system");
-                Label("窗口行为",292,false);
-                var startup=new ToggleSwitch{Text=L.Text("开机自启"),Checked=settings.autoStart,Colors=colors,Bounds=new Rectangle(24,328,480,36),ForeColor=colors.Text,BackColor=colors.Surface};startup.Click+=delegate{Commit(s=>s.autoStart=startup.Checked);};sheet.Controls.Add(startup);
-                refresh.Add(delegate{startup.Checked=settings.autoStart;startup.Text=L.Text("开机自启");});
-                Label("登录 Windows 后启动到系统托盘；只恢复原来已启用的连接。",368,true);
-                Label("关闭窗口时",432,false);
-                var closing=Track(468,500);
-                Option(closing,0,2,"直接退出程序",s=>s.closeToTray=false,()=>!settings.closeToTray);Option(closing,1,2,"隐藏到系统托盘",s=>s.closeToTray=true,()=>settings.closeToTray);
-                Label("直接退出会断开全部云电脑；隐藏到系统托盘会保留已连接的云电脑。",524,true);
-                Label("桌面快捷方式",592,false);Label("为当前程序创建 CMCP 桌面快捷方式。",627,true);Button("创建快捷方式",686,24,240,delegate{action("shortcut");},false);
-                sheet.Height=810;
-            }else{
-                Label("CMCP",24,false);Label(L.Text("版本")+"  "+System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3)+"  ·  Windows x64",66,true);
-                updateLabel=new Label{Text=L.Text(UpdateStatus),Bounds=new Rectangle(24,128,100,30),Tag="wide"};sheet.Controls.Add(updateLabel);
-                updateView.Bounds=new Rectangle(24,168,100,128);updateView.Tag="wide";sheet.Controls.Add(updateView);updateView.Set(updateProgress);
-                Button("检查更新",310,24,220,delegate{action("update");},true);Button("前往发布页",366,24,220,delegate{action("releases");},false);
-                Button("程序文件夹",456,24,220,delegate{action("program");},false);Button("日志文件夹",512,24,220,delegate{action("logs");},false);
-                Label("卸载 CMCP",586,false);Label(Installation.Uninstaller(AppDomain.CurrentDomain.BaseDirectory)!=null?"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码、设置和程序文件。":"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。程序文件夹和桌面快捷方式需要之后手动删除。",624,true);Button("卸载 CMCP",690,24,220,delegate{action("uninstall");},false);sheet.Height=850;
-            }
-            feedback.Bounds=new Rectangle(24,sheet.Height-72,100,60);feedback.Tag="wide";sheet.Controls.Add(feedback);RefreshControls();LayoutRows();
+            refresh.Clear();sections.Clear();
+            sheet.Controls.Remove(feedback);sheet.Controls.Remove(updateView);foreach(Control c in sheet.Controls.Cast<Control>().ToArray())c.Dispose();sheet.Controls.Clear();
+            GeneralTab.Selected=!isAbout;AboutTab.Selected=isAbout;feedback.Text="";
+            if(isAbout)BuildAbout();else BuildGeneral();
+            sheet.Controls.Add(feedback);
+            Viewport.AutoScrollPosition=Point.Empty;PlaceSheet();RefreshControls();
         }
-        void LayoutRows(){foreach(Control c in sheet.Controls)if((string)c.Tag=="wide")c.Width=Math.Max(100,sheet.ClientSize.Width-48);}
+        void BuildGeneral(){
+            var appearance=AddSection("外观");
+            var language=new DropdownField(new[]{new KeyValuePair<string,string>("zh-CN","简体中文"),new KeyValuePair<string,string>("en","English")}){Font=sheet.Font,Size=new Size(150,36),Colors=colors};
+            language.Chosen+=key=>Commit(s=>s.language=key);refresh.Add(delegate{language.Value=settings.language;language.AccessibleName=L.Text("界面语言");language.Invalidate();});
+            AddRow(appearance,"界面语言",null,language);
+            var theme=Group(3);
+            Option(theme,0,"monitor","跟随系统",s=>s.theme="system",()=>settings.theme=="system");
+            Option(theme,1,"sun","浅色",s=>s.theme="light",()=>settings.theme=="light");
+            Option(theme,2,"moon","深色",s=>s.theme="dark",()=>settings.theme=="dark");
+            AddRow(appearance,"主题",null,theme);
+            var window=AddSection("窗口");
+            AddRow(window,"开机自启","登录 Windows 后启动到系统托盘；只恢复原来已启用的连接。",Switch("开机自启",()=>settings.autoStart,(s,on)=>s.autoStart=on));
+            AddRow(window,"关闭时最小化到托盘","开启时保留已连接的云电脑；关闭后，点叉号会退出并断开全部连接。",Switch("关闭时最小化到托盘",()=>settings.closeToTray,(s,on)=>s.closeToTray=on));
+            var shortcuts=AddSection("快捷方式");
+            AddRow(shortcuts,"桌面快捷方式","为当前程序创建 CMCP 桌面快捷方式。",Command("创建",delegate{action("shortcut");}));
+        }
+        void BuildAbout(){
+            var updates=AddSection("更新");
+            sheet.Controls.Add(updateView);updateView.Set(updateProgress);updates.Leading=updateView;
+            var run=Command("检查更新",delegate{action(updateAvailable?"update":"check");},true);
+            refresh.Add(delegate{run.Text=updateAvailable?"立即更新":"检查更新";run.Enabled=updateProgress==null||!updateProgress.Visible||updateProgress.Stage=="failed";run.Invalidate();});
+            AddRow(updates,()=>updateAvailable?L.Text("发现新版本")+" "+availableVersion:"CMCP "+currentVersion,
+                ()=>updateAvailable?L.Text("当前版本")+" "+currentVersion+"  ·  "+L.Text("更新时会短暂断开连接。"):"Windows x64"+(UpdateStatus=="检查更新"?"":"  ·  "+L.Text(UpdateStatus)),run);
+            AddRow(updates,"发布页","查看每个版本的更新内容。",Command("打开",delegate{action("releases");}));
+            var folders=AddSection("本机文件夹");
+            AddRow(folders,"程序文件夹",null,Command("打开",delegate{action("program");}));
+            AddRow(folders,"日志文件夹",null,Command("打开",delegate{action("logs");}));
+            var removal=AddSection("卸载");
+            AddRow(removal,"卸载 CMCP",Installation.Uninstaller(AppDomain.CurrentDomain.BaseDirectory)!=null?"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码、设置和程序文件。":"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。程序文件夹和桌面快捷方式需要之后手动删除。",Danger("卸载",delegate{action("uninstall");}));
+        }
+        void LayoutRows(){
+            if(laying)return;
+            laying=true;
+            try{
+                int width=sheet.ClientSize.Width,y=0;
+                sheet.Cards.Clear();sheet.Dividers.Clear();
+                foreach(var section in sections){
+                    section.Heading.Bounds=new Rectangle(0,y,width,24);y+=32;
+                    if(section.Leading!=null){
+                        bool shown=section.Leading.Visible;
+                        section.Leading.Bounds=new Rectangle(0,y,width,shown?128:0);if(shown)y+=132;
+                    }
+                    int cardTop=y;bool first=true;
+                    foreach(var row in section.Rows){
+                        var button=row.Control as ModernButton;
+                        if(button!=null)button.Size=new Size(Math.Max(64,TextRenderer.MeasureText(L.Text(button.Text),button.Font).Width+28),34);
+                        int controlWidth=row.Control==null?0:row.Control.Width+20,textWidth=Math.Max(60,width-2*RowPadding-controlWidth);
+                        const TextFormatFlags wrap=TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix;
+                        int titleHeight=TextRenderer.MeasureText(row.Title.Text,row.Title.Font,new Size(textWidth,0),wrap).Height;
+                        int detailHeight=row.Description==null?0:TextRenderer.MeasureText(row.Description.Text,row.Description.Font,new Size(textWidth,0),wrap).Height+2;
+                        int height=Math.Max(RowHeight,titleHeight+detailHeight+20),textTop=y+(height-titleHeight-detailHeight)/2;
+                        if(!first)sheet.Dividers.Add(y);
+                        row.Title.Bounds=new Rectangle(RowPadding,textTop,textWidth,titleHeight);
+                        if(row.Description!=null)row.Description.Bounds=new Rectangle(RowPadding,textTop+titleHeight+2,textWidth,detailHeight-2);
+                        if(row.Control!=null)row.Control.Location=new Point(width-RowPadding-row.Control.Width,y+(height-row.Control.Height)/2);
+                        y+=height;first=false;
+                    }
+                    sheet.Cards.Add(new Rectangle(0,cardTop,Math.Max(1,width-1),y-cardTop));
+                    y+=22;
+                }
+                feedback.Bounds=new Rectangle(0,y,width,44);y+=44;
+                if(sheet.Height!=y)sheet.Height=y;
+                Viewport.AutoScrollMinSize=new Size(0,y+44);
+                sheet.Invalidate();
+            }finally{laying=false;}
+        }
         internal void SetFeedback(string message,bool error){feedback.Text=L.Message(message);feedback.ForeColor=error?colors.Danger:colors.Success;if(error)Viewport.ScrollControlIntoView(feedback);}
-        internal void SetUpdateStatus(string value){UpdateStatus=value;if(updateLabel!=null)updateLabel.Text=L.Text(value);}
-        internal void SetUpdateProgress(UpdateProgress value){updateProgress=value;updateView.Set(value);updateView.Apply(colors);if(value!=null&&updateLabel!=null)updateLabel.Text=value.Title;}
-        internal void Apply(Palette palette){colors=palette;BackColor=header.BackColor=Viewport.BackColor=colors.Page;sheet.BackColor=tabs.BackColor=colors.Page;sheet.Colors=tabs.Colors=colors;title.ForeColor=colors.Text;
-            foreach(Control c in sheet.Controls){
-                var b=c as ModernButton;var track=c as RoundedSheet;var toggle=c as ToggleSwitch;
-                if(b!=null){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}
-                else if(track!=null){track.Colors=colors;track.BackColor=colors.Surface;foreach(var option in track.Controls.OfType<ModernButton>()){option.Colors=colors;option.BackColor=colors.Surface;option.Invalidate();}}
-                else{c.BackColor=colors.Surface;if(c!=feedback)c.ForeColor=c is Label&&c.Height>30?colors.Muted:colors.Text;if(toggle!=null)toggle.Colors=colors;}
+        internal void SetUpdateAvailable(bool available,string newVersion){if(updateAvailable==available&&availableVersion==newVersion)return;updateAvailable=available;availableVersion=newVersion;AboutTab.Dot=available;AboutTab.Invalidate();RefreshControls();}
+        internal void SetUpdateStatus(string value){UpdateStatus=value;RefreshControls();}
+        internal void SetUpdateProgress(UpdateProgress value){updateProgress=value;updateView.Set(value);updateView.Apply(colors);RefreshControls();}
+        internal void Apply(Palette palette){
+            colors=palette;BackColor=top.BackColor=Viewport.BackColor=sheet.BackColor=colors.Page;sheet.Colors=colors;title.ForeColor=colors.Text;title.BackColor=colors.Page;
+            side.BackColor=group.BackColor=version.BackColor=colors.Side;group.ForeColor=version.ForeColor=colors.Muted;
+            foreach(var b in new[]{Back,GeneralTab,AboutTab}){b.Colors=colors;b.BackColor=colors.Side;b.Invalidate();}
+            feedback.BackColor=colors.Page;
+            foreach(var section in sections){
+                section.Heading.BackColor=colors.Page;section.Heading.ForeColor=colors.Text;
+                foreach(var row in section.Rows){
+                    row.Title.BackColor=colors.Surface;row.Title.ForeColor=colors.Text;
+                    if(row.Description!=null){row.Description.BackColor=colors.Surface;row.Description.ForeColor=colors.Muted;}
+                    ApplyControl(row.Control);
+                }
             }
-            Back.Colors=colors;Back.BackColor=colors.Page;Back.Invalidate();
-            foreach(var tab in new[]{GeneralTab,AboutTab}){tab.Colors=colors;tab.BackColor=colors.Surface;tab.Invalidate();}Invalidate(true);
-            updateView.Apply(colors);
+            Invalidate(true);updateView.Apply(colors);
+        }
+        void ApplyControl(Control control){
+            var b=control as ModernButton;var track=control as RoundedSheet;var toggle=control as ToggleSwitch;var field=control as DropdownField;
+            if(b!=null){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}
+            if(track!=null){track.Colors=colors;track.BackColor=colors.Surface;foreach(var option in track.Controls.OfType<ModernButton>()){option.Colors=colors;option.BackColor=colors.Surface;option.Invalidate();}}
+            if(toggle!=null){toggle.Colors=colors;toggle.BackColor=colors.Surface;toggle.Invalidate();}
+            if(field!=null){field.Colors=colors;field.BackColor=colors.Surface;field.Invalidate();}
         }
         protected override bool ProcessCmdKey(ref Message m,Keys keys){if(keys==Keys.Escape){if(BackRequested!=null)BackRequested();return true;}return base.ProcessCmdKey(ref m,keys);}
         protected override void Dispose(bool disposing){if(disposing)updateView.Dispose();base.Dispose(disposing);}
     }
+    // Paints the rounded row groups behind the controls.
+    internal sealed class SettingsSheet : ResizePanel {
+        internal Palette Colors=Palette.Create(false);
+        internal readonly List<Rectangle> Cards=new List<Rectangle>();
+        internal readonly List<int> Dividers=new List<int>();
+        protected override void OnPaint(PaintEventArgs e){
+            base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            foreach(var card in Cards)PaintUi.Box(e.Graphics,card,12,Colors.Surface,Colors.Border);
+            e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.None;
+            using(var p=new Pen(Colors.Border))foreach(int y in Dividers)e.Graphics.DrawLine(p,1,y,Width-2,y);
+        }
+    }
+    // A field that opens a themed menu of choices.
+    internal sealed class DropdownField : Control {
+        sealed class MenuColors : ProfessionalColorTable {
+            readonly Palette colors;
+            internal MenuColors(Palette palette){colors=palette;UseSystemColors=false;}
+            public override Color MenuBorder{get{return colors.Border;}}
+            public override Color ToolStripDropDownBackground{get{return colors.Surface;}}
+            public override Color MenuItemSelected{get{return colors.Active;}}
+            public override Color MenuItemBorder{get{return colors.Active;}}
+            public override Color ImageMarginGradientBegin{get{return colors.Surface;}}
+            public override Color ImageMarginGradientMiddle{get{return colors.Surface;}}
+            public override Color ImageMarginGradientEnd{get{return colors.Surface;}}
+            public override Color CheckBackground{get{return colors.Surface;}}
+            public override Color CheckSelectedBackground{get{return colors.Active;}}
+            public override Color CheckPressedBackground{get{return colors.Active;}}
+        }
+        readonly KeyValuePair<string,string>[] items;
+        readonly ContextMenuStrip menu=new ContextMenuStrip{ShowImageMargin=false,ShowCheckMargin=true};
+        bool hover;
+        internal Palette Colors=Palette.Create(false);
+        internal string Value;
+        internal event Action<string> Chosen;
+        internal DropdownField(KeyValuePair<string,string>[] choices){
+            items=choices;TabStop=true;Cursor=Cursors.Hand;AccessibleRole=AccessibleRole.ComboBox;
+            SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable|ControlStyles.StandardClick,true);
+        }
+        internal bool Choose(string key){
+            if(key==Value||!items.Any(i=>i.Key==key))return false;
+            if(Chosen!=null)Chosen(key);
+            return true;
+        }
+        void Open(){
+            foreach(ToolStripItem old in menu.Items.Cast<ToolStripItem>().ToArray())old.Dispose();
+            menu.Items.Clear();menu.Font=Font;menu.BackColor=Colors.Surface;menu.ForeColor=Colors.Text;menu.Renderer=new ToolStripProfessionalRenderer(new MenuColors(Colors));
+            foreach(var pair in items){
+                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){Checked=key==Value,ForeColor=Colors.Text};
+                item.Click+=delegate{Choose(key);};menu.Items.Add(item);
+            }
+            menu.Show(this,new Point(0,Height+2));
+        }
+        protected override void OnClick(EventArgs e){base.OnClick(e);Focus();Open();}
+        protected override bool IsInputKey(Keys key){return key==Keys.Down||base.IsInputKey(key);}
+        protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter||e.KeyCode==Keys.Down){e.Handled=true;Open();}base.OnKeyDown(e);}
+        protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+        protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+        protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
+        protected override void OnMouseLeave(EventArgs e){hover=false;Invalidate();base.OnMouseLeave(e);}
+        protected override void OnPaint(PaintEventArgs e){
+            var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
+            PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),8,hover?Colors.Subtle:Colors.Surface,Focused&&ShowFocusCues?Colors.SelectionBorder:Colors.Border);
+            string text=items.Where(i=>i.Key==Value).Select(i=>L.Text(i.Value)).FirstOrDefault()??"";
+            PaintUi.Text(g,text,Font,new Rectangle(12,0,Width-40,Height),Colors.Text);
+            PaintUi.Icon(g,"chevron",new Rectangle(Width-28,(Height-16)/2,16,16),Colors.Muted);
+        }
+        protected override void Dispose(bool disposing){if(disposing)menu.Dispose();base.Dispose(disposing);}
+    }
     // Still a CheckBox, so keyboard use, accessibility and wheel handling stay as they were.
+    // Its row shows the label, so only the switch itself is painted.
     internal sealed class ToggleSwitch : CheckBox {
         const double SlideMilliseconds=130;
         const int TrackWidth=44,TrackHeight=24,Thumb=18;
@@ -125,12 +304,11 @@ namespace CMCP {
         protected override void OnPaint(PaintEventArgs e){
             var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
-            int top=(Height-TrackHeight)/2;var fill=Motion.Mix(Colors.Border,Colors.Blue,Level);
-            PaintUi.Box(g,new Rectangle(1,top,TrackWidth,TrackHeight),TrackHeight/2,fill,fill);
-            int inset=(TrackHeight-Thumb)/2,x=1+inset+(int)Math.Round((TrackWidth-Thumb-2*inset)*Level);
+            int left=Width-TrackWidth-2,top=(Height-TrackHeight)/2;var fill=Motion.Mix(Colors.Track,Colors.Blue,Level);
+            PaintUi.Box(g,new Rectangle(left,top,TrackWidth,TrackHeight),TrackHeight/2,fill,fill);
+            int inset=(TrackHeight-Thumb)/2,x=left+inset+(int)Math.Round((TrackWidth-Thumb-2*inset)*Level);
             using(var b=new SolidBrush(Color.White))g.FillEllipse(b,x,top+inset,Thumb,Thumb);
-            TextRenderer.DrawText(g,Text,Font,new Rectangle(TrackWidth+12,0,Math.Max(1,Width-TrackWidth-12),Height),ForeColor,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
-            if(Focused&&ShowFocusCues)using(var path=PaintUi.Round(new Rectangle(0,top-2,TrackWidth+2,TrackHeight+3),TrackHeight/2+1))using(var p=new Pen(Colors.SelectionBorder))g.DrawPath(p,path);
+            if(Focused&&ShowFocusCues)using(var path=PaintUi.Round(new Rectangle(left-1,top-2,TrackWidth+1,TrackHeight+3),TrackHeight/2+1))using(var p=new Pen(Colors.SelectionBorder))g.DrawPath(p,path);
         }
         protected override void Dispose(bool disposing){if(disposing){motion.Stop();motion.Dispose();}base.Dispose(disposing);}
     }

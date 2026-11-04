@@ -23,7 +23,7 @@ namespace CMCP {
             return true;
         }
         static bool NothingOverlaps(Control sheet){
-            var parts=sheet.Controls.Cast<Control>().ToList();
+            var parts=sheet.Controls.Cast<Control>().Where(c=>c.Visible).ToList();
             return !parts.Any(a=>parts.Any(b=>a!=b&&a.Bounds.IntersectsWith(b.Bounds)))&&parts.All(c=>c.Bottom<=sheet.Height);
         }
         static Control Deepest(Control control){var box=control as ContainerControl;return box!=null&&box.ActiveControl!=null?Deepest(box.ActiveControl):control;}
@@ -39,12 +39,15 @@ namespace CMCP {
                     var page=form.Settings;var sheet=page.Viewport.Controls[0];
                     check(NothingOverlaps(sheet),"general settings controls do not cover each other");
                     var groups=sheet.Controls.OfType<RoundedSheet>().ToList();
-                    check(groups.Count==3&&groups.All(g=>g.Controls.OfType<ModernButton>().All(b=>b.Top>=0&&b.Bottom<=g.Height&&b.Left>=0&&b.Right<=g.Width)),"each option group holds its buttons fully inside its frame");
+                    check(groups.Count==1&&groups.All(g=>g.Controls.OfType<ModernButton>().All(b=>b.Top>=0&&b.Bottom<=g.Height&&b.Left>=0&&b.Right<=g.Width)),"each option group holds its buttons fully inside its frame");
                     check(groups.All(g=>g.Controls.OfType<ModernButton>().Count(b=>b.Selected)==1),"each option group marks exactly one choice");
                     var options=groups[0].Controls.OfType<ModernButton>().ToList();
-                    options[1].PerformClick();check(form.Options.language=="en"&&options[1].Selected&&!options[0].Selected,"choosing an option saves it and moves the selection");
-                    options[0].PerformClick();check(form.Options.language=="zh-CN"&&options[0].Selected,"choosing the first option again restores it");
-                    check(sheet.Controls.OfType<ToggleSwitch>().Count()==1,"autostart is a switch");
+                    options[1].PerformClick();check(form.Options.theme=="light"&&options[1].Selected&&!options[0].Selected,"choosing an option saves it and moves the selection");
+                    options[0].PerformClick();check(form.Options.theme=="system"&&options[0].Selected,"choosing the first option again restores it");
+                    check(sheet.Controls.OfType<ToggleSwitch>().Count()==2,"startup and closing behaviour are switches");
+                    var language=sheet.Controls.OfType<DropdownField>().Single();
+                    check(language.Choose("en")&&form.Options.language=="en"&&language.Value=="en","choosing a language saves it");
+                    check(language.Choose("zh-CN")&&form.Options.language=="zh-CN"&&!language.Choose("zh-CN"),"choosing the current language does nothing");
                     page.ShowAbout();check(NothingOverlaps(page.Viewport.Controls[0]),"about page controls do not cover each other");
                 }
                 form.CloseSettings();
@@ -75,7 +78,7 @@ namespace CMCP {
                     Settle(form);check(form.Transition==null&&!tabs.Controls.OfType<SnapshotOverlay>().Any(),"a tab change removes its overlay");
                     tabs.AboutTab.PerformClick();check(form.Transition==null,"choosing the current tab does nothing");
                     tabs.GeneralTab.PerformClick();Settle(form);
-                    var toggle=tabs.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().Single();bool wasOn=toggle.Checked;
+                    var toggle=tabs.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().First();bool wasOn=toggle.Checked;
                     toggle.Checked=!wasOn;check(toggle.Level>0&&toggle.Level<1||toggle.Level==(wasOn?1:0),"the switch slides instead of jumping");
                     for(int i=0;i<200&&toggle.Level!=(wasOn?0:1);i++){Application.DoEvents();Thread.Sleep(5);}
                     check(toggle.Level==(wasOn?0:1),"the switch settles on its new position");
@@ -107,6 +110,15 @@ namespace CMCP {
                     a.SetExpanded(false,false);
                     a.Toggle.PerformClick();form.HideToTray();check(form.Transition==null&&!Overlaid(form),"hiding the window ends a transition at once");
                 }finally{Motion.Forced=false;}
+            }
+            using(var form=new Manager(true)){
+                form.Show();Application.DoEvents();
+                check(!form.toolbar.Settings.Dot,"no dot shows before a new version is found");
+                form.SimulateUpdate("4.12.0");check(form.toolbar.Settings.Dot,"a new version puts a dot on the settings button");
+                form.OpenSettings();Application.DoEvents();check(form.Settings.AboutTab.Dot&&!form.Settings.GeneralTab.Dot,"the dot leads to the About category");
+                form.Settings.ShowAbout();Application.DoEvents();var about=form.Settings.Viewport.Controls[0];
+                check(about.Controls.OfType<ModernButton>().Any(b=>b.Text=="立即更新")&&about.Controls.OfType<Label>().Any(l=>l.Text.Contains("4.12.0")),"About offers the update and names the version");
+                check(NothingOverlaps(about),"the update offer does not cover other rows");
             }
         }
     }

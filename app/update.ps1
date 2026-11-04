@@ -14,7 +14,7 @@ try{
     $metadata=Join-Path $transaction 'release.json';Receive-CmcpFile 'https://api.github.com/repos/isAlexYoung/cmcp/releases/latest' $metadata 2097152
     $release=Select-CmcpRelease (Get-Content -LiteralPath $metadata -Raw -Encoding UTF8|ConvertFrom-Json) $current
     if(!$release){Remove-Item -LiteralPath $metadata;[IO.Directory]::Delete($transaction);[Console]::WriteLine('{"status":"current"}');exit 0}
-    if($Action -eq 'check'){Remove-Item -LiteralPath $metadata;[IO.Directory]::Delete($transaction);[Console]::WriteLine('{"status":"available"}');exit 0}
+    if($Action -eq 'check'){Remove-Item -LiteralPath $metadata;[IO.Directory]::Delete($transaction);[Console]::WriteLine((@{status='available';version=$release.version}|ConvertTo-Json -Compress));exit 0}
     $zip=Join-Path $transaction $release.name;$checksum=$zip+'.sha256'
     $phase='download';Send-UpdateProgress $phase 0 $release.zip.size
     Receive-CmcpFile $release.zip.browser_download_url $zip 268435456 {param($done,$total)if($total -le 0){$total=$release.zip.size};Send-UpdateProgress 'download' $done $total}
