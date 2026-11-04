@@ -156,13 +156,17 @@ namespace CMCP {
             string uninstaller=FindUninstaller==null?null:FindUninstaller();
             if(uninstaller!=null){try{Process.Start(new ProcessStartInfo(uninstaller){UseShellExecute=true});}catch{Settings.SetFeedback("无法启动卸载程序。",true);}return;}
             if(!ConfirmUninstall())return;
-            ExitPending=true;Enabled=false;timer.Stop();
+            ExitPending=true;Enabled=false;timer.Stop();Settings.SetFeedback("正在卸载，请稍候...",false);
             int code=-1;try{code=await Task.Run(RunUninstall);}catch{}
             if(IsDisposed)return;
             ExitPending=false;
             // The script already stopped the backend and deleted the state folder, so nothing may run or save again.
-            if(code==0){if(!isolated)try{StartupRegistration.Set(Program.ExecutablePath,false);}catch{}exiting=true;Close();return;}
-            Enabled=true;timer.Start();if(Settings!=null)Settings.SetFeedback("卸载未完成，请查看卸载窗口中的提示；未删除的内容仍然保留。",true);
+            if(code==0||code==2){
+                if(!isolated)try{StartupRegistration.Set(Program.ExecutablePath,false);}catch{}
+                if(code==2)MessageBox.Show(this,L.Text("本机设置已删除，但有云电脑当时无法连接，上面的 Claude 配置未能移除。"),Text,MessageBoxButtons.OK,MessageBoxIcon.Information);
+                exiting=true;Close();return;
+            }
+            Enabled=true;timer.Start();if(Settings!=null)Settings.SetFeedback("卸载未完成，未删除的内容仍然保留。",true);
         }
         internal async void ExitApplication(){
             if(exiting||ExitPending)return;

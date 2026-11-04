@@ -68,6 +68,8 @@ chinesesimplified.CloseFailed=无法自动关闭正在运行的 CMCP。请从系
 english.CloseFailed=CMCP could not be closed automatically. Exit CMCP from the system tray and try again.
 chinesesimplified.ChoicesFailed=CMCP 已安装，但开机启动设置未能保存。可以稍后在 CMCP 的设置页修改。
 english.ChoicesFailed=CMCP is installed, but the startup choice could not be saved. You can change it later in CMCP settings.
+chinesesimplified.UninstallCleaning=正在断开连接，并移除云电脑上的配置...
+english.UninstallCleaning=Disconnecting and removing the configuration from cloud PCs...
 chinesesimplified.UninstallPartial=部分内容未能清理，例如某台云电脑上的配置或本机设置。程序文件仍会继续删除。
 english.UninstallPartial=Some items could not be cleaned up, such as configuration on a cloud PC or local settings. Program files will still be removed.
 
@@ -244,8 +246,8 @@ begin
   if CurUninstallStep <> usUninstall then Exit;
   App := ExpandConstant('{app}');
   Exec(App + '\CMCP.exe', '--exit', ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
-  Arguments := '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "' + App + '\app\uninstall.ps1" -Installed';
-  if UninstallSilent() then Arguments := Arguments + ' -Headless';
+  UninstallProgressForm.StatusLabel.Caption := CustomMessage('UninstallCleaning');
+  Arguments := '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "' + App + '\app\uninstall.ps1"';
   if (not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0))
     and not UninstallSilent() then
     MsgBox(CustomMessage('UninstallPartial'), mbInformation, MB_OK);

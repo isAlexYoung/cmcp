@@ -25,7 +25,7 @@ namespace CMCP {
             {"卸载 CMCP","Uninstall CMCP"},{"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。程序文件夹和桌面快捷方式需要之后手动删除。","Disconnects everything, removes the Claude configuration from cloud PCs, and deletes saved addresses, passwords and settings. Delete the program folder and desktop shortcut yourself afterwards."},
             {"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码、设置和程序文件。","Disconnects everything, removes the Claude configuration from cloud PCs, and deletes saved addresses, passwords, settings and program files."},{"无法启动卸载程序。","Could not start the uninstaller."},
         {"确定要卸载 CMCP 吗？\r\n\r\n将断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。","Uninstall CMCP?\r\n\r\nThis disconnects everything, removes the Claude configuration from cloud PCs, and deletes saved addresses, passwords and settings."},
-            {"卸载未完成，请查看卸载窗口中的提示；未删除的内容仍然保留。","Uninstall did not finish. See the uninstall window; anything not deleted is kept."},
+            {"卸载未完成，未删除的内容仍然保留。","Uninstall did not finish. Anything not deleted is kept."},{"正在卸载，请稍候...","Uninstalling. Please wait..."},{"本机设置已删除，但有云电脑当时无法连接，上面的 Claude 配置未能移除。","Local settings were deleted, but a cloud PC could not be reached, so its Claude configuration was not removed."},
             {"未运行","Not running"},{"正在重连","Reconnecting"},{"已断开","Disconnected"},
             {"版本","Version"},{"检查更新","Check for updates"},{"前往发布页","Open releases"},{"程序文件夹","Program folder"},{"日志文件夹","Log folder"},{"打开主界面","Open main window"},{"退出程序","Exit application"},
             {"部分后台进程未能结束，请稍后重试退出；详情已记录到 user\\error.log。","Some background processes could not be stopped. Please try exiting again; details are in user\\error.log."},

@@ -80,7 +80,7 @@ Open **Settings → Check for updates**. CMCP downloads and verifies the update 
 
 **How do I uninstall?**
 
-On Windows, open **Settings → About → Uninstall CMCP**. It disconnects everything, removes the Claude configuration from cloud PCs where it can, and deletes saved addresses, passwords and settings. Then delete the program folder and desktop shortcut yourself.
+On Windows, open **Settings → About → Uninstall CMCP**. If you used the guided installer, you can also uninstall from Installed apps in Windows Settings. It disconnects everything, removes the Claude configuration from cloud PCs where it can, and deletes saved addresses, passwords and settings. The installed version also removes its program files and shortcuts. For the portable version, delete the program folder and desktop shortcut yourself afterwards.
 
 **Where are the logs?**
 

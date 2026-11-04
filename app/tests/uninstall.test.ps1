@@ -6,7 +6,7 @@ $app=Split-Path $PSScriptRoot -Parent
 $checks=New-Object Collections.Generic.List[string]
 function Check($ok,$name){if(!$ok){throw $name};$checks.Add($name)}
 function Run-Uninstall{
-    $command='& '''+(Join-Path $app 'uninstall.ps1').Replace("'","''")+''' -Headless'
+    $command='& '''+(Join-Path $app 'uninstall.ps1').Replace("'","''")+''''
     $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $process=Start-Process powershell.exe -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -WindowStyle Hidden -EncodedCommand '+$encoded) -WindowStyle Hidden -PassThru
     $null=$process.Handle
@@ -21,7 +21,8 @@ function New-State{
     return $state
 }
 $state=New-State
-Check ((Run-Uninstall) -eq 0) 'an unreachable cloud PC does not fail the uninstall'
+Check ((Get-Content -LiteralPath (Join-Path $app 'uninstall.ps1') -Raw) -notmatch 'ProgressWindow|MessageBox|Windows\.Forms') 'uninstall opens no window of its own'
+Check ((Run-Uninstall) -eq 2) 'an unreachable cloud PC is reported without stopping the local cleanup'
 Check (!(Test-Path -LiteralPath $state)) 'the state folder is deleted'
 $state=New-State
 $held=[IO.File]::Open((Join-Path $state 'held.txt'),[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::None)

@@ -133,7 +133,7 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/uninstall.test.ps1 | Set-Content test-results/uninstall.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/uninstall.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 4 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete uninstall regression' }
+          if ($r.passed -ne 5 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete uninstall regression' }
       - name: Manager edit and delete isolation
         shell: pwsh
         run: |
