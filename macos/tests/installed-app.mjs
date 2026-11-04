@@ -14,7 +14,8 @@ if(process.env.GITHUB_ACTIONS!=='true'||process.platform!=='darwin')throw Error(
 const [packages,report]=process.argv.slice(2).map(value=>path.resolve(value));
 const arch=process.arch,app='/Applications/CMCP.app',state=path.join(os.homedir(),'Library/Application Support/CMCP');
 const packageTool=fileURLToPath(new URL('../../tools/package-macos.py',import.meta.url));
-const work=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-installed-'))),mount=path.join(work,'mount');
+// Not under os.tmpdir(): Foundation shortens /private/var to /var, so process paths would not match.
+const work=fs.realpathSync(fs.mkdtempSync(path.join(process.env.RUNNER_TEMP,'cmcp-installed-'))),mount=path.join(work,'mount');
 const checks=[],check=(name,value,detail)=>{assert.ok(value,name+(detail===undefined?'':': '+JSON.stringify(detail)));checks.push(name);console.log('ok - '+name);};
 const run=(file,args)=>execFileSync(file,args,{encoding:'utf8',stdio:['ignore','pipe','inherit']});
 const sha256=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
