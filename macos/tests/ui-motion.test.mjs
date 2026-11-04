@@ -88,6 +88,11 @@ test('system reduced motion still turns off every transition and animation',()=>
   assert.match(css,/@media\(prefers-reduced-motion:reduce\)\{\*,\*::before,\*::after\{transition:none!important;animation:none!important\}\}/);
 });
 
+test('collapsed card details leave the tab order only after the slide ends',()=>{
+  assert.match(css,/\.accordion>div\{[^}]*visibility:hidden;transition:visibility 0s linear \.17s\}/);
+  assert.match(css,/\.expanded \.accordion>div\{visibility:visible;transition-delay:0s\}/);
+});
+
 test('a chosen segment stays blue while hovered',()=>{
   assert.match(css,/\.segments button\.chosen,\.segments button\.chosen:hover\{background:var\(--blue\);color:#fff\}/);
 });
