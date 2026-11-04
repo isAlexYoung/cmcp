@@ -72,6 +72,14 @@ def prepare(packages, output, version, commit):
             raise ValueError('Package checksum mismatch')
         inspect_package(file, version, commit, platform)
         selected.append(file)
+    # Built from the Windows package above and exercised by the Windows job.
+    name = 'CMCP-' + version + '-windows-x64-setup.exe'
+    files = list(packages.rglob(name))
+    if len(files) != 1:
+        raise ValueError('Exactly one package required: ' + name)
+    if Path(str(files[0]) + '.sha256').read_text(encoding='ascii').strip() != sha256(files[0].read_bytes()) + '  ' + name:
+        raise ValueError('Package checksum mismatch')
+    selected.append(files[0])
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError('Release staging directory must be empty')
@@ -79,7 +87,7 @@ def prepare(packages, output, version, commit):
         shutil.copyfile(file, output / file.name)
     source = output / ('CMCP-' + version + '-source.zip')
     subprocess.run(['git', 'archive', '--format=zip', '--prefix=CMCP-' + version + '-source/', '--output=' + str(source.resolve()), commit], check=True)
-    for file in output.glob('*.zip'):
+    for file in list(output.glob('*.zip')) + list(output.glob('*.exe')):
         Path(str(file) + '.sha256').write_bytes((sha256(file.read_bytes()) + '  ' + file.name + '\n').encode('ascii'))
     print(json.dumps({'version': version, 'commit': commit, 'assets': sorted(p.name for p in output.iterdir())}))
 

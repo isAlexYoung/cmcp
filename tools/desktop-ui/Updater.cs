@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
 using System.Runtime.InteropServices;
@@ -14,6 +15,25 @@ namespace CMCP {
         [DllImport("user32.dll")]static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);
         internal static readonly int Message=(int)RegisterWindowMessage("CMCP.RestoreManager."+Environment.UserName+(Environment.GetEnvironmentVariable("CMCP_STATE_DIR")==null?"":"."+PortableState.InstanceKey));
         internal static void Restore(){PostMessage(new IntPtr(0xffff),(uint)Message,IntPtr.Zero,IntPtr.Zero);}
+        internal static readonly int ExitMessage=(int)RegisterWindowMessage("CMCP.ExitManager."+Environment.UserName+(Environment.GetEnvironmentVariable("CMCP_STATE_DIR")==null?"":"."+PortableState.InstanceKey));
+        // Used by the installer: the running manager takes its normal exit path, which also stops the backend.
+        internal static int ExitRunning(){
+            Mutex running=null;
+            try{running=Mutex.OpenExisting("Local\\ClaudeMcpManager-"+PortableState.InstanceKey);}catch(WaitHandleCannotBeOpenedException){}
+            if(running==null){
+                string kit=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"app");
+                return !File.Exists(Path.Combine(kit,"manager-exit.ps1"))||BackendRestart.Run(kit,"manager-exit.ps1")?0:1;
+            }
+            using(running){
+                // A manager still starting has no window yet, so keep asking until it answers.
+                for(int attempt=0;attempt<30;attempt++){
+                    PostMessage(new IntPtr(0xffff),(uint)ExitMessage,IntPtr.Zero,IntPtr.Zero);
+                    bool owned;try{owned=running.WaitOne(2000);}catch(AbandonedMutexException){owned=true;}
+                    if(owned){running.ReleaseMutex();return 0;}
+                }
+            }
+            return 1;
+        }
     }
     internal sealed class UpdateController : IDisposable {
         internal const string ReleaseUrl="https://github.com/isAlexYoung/cmcp/releases/latest";

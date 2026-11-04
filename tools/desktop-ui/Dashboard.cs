@@ -30,6 +30,7 @@ namespace CMCP {
         internal bool ExitPending;
         internal Func<bool> ExitBackend;
         internal Func<int> RunUninstall;
+        internal Func<string> FindUninstaller;
         internal Func<bool> ConfirmUninstall;
         Task<bool> backendInitialization;
         internal bool BackendStarting {get;private set;}
@@ -55,6 +56,7 @@ namespace CMCP {
             ExitBackend=isolated?(Func<bool>)(()=>true):(()=>BackendRestart.Run(kit,"manager-exit.ps1"));
             if(!isolated){
                 RunUninstall=()=>{using(var process=Actions.Start(kit,"uninstall","")){process.WaitForExit();return process.ExitCode;}};
+            FindUninstaller=isolated?(Func<string>)(()=>null):(()=>Installation.Uninstaller(AppDomain.CurrentDomain.BaseDirectory));
                 ConfirmUninstall=()=>MessageBox.Show(this,L.Text("确定要卸载 CMCP 吗？\r\n\r\n将断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。"),Text,MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)==DialogResult.Yes;
             }
             Options=demo?new AppSettings():AppSettings.Load(isolated?stateDirectory:PortableState.PreferencesPath,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
@@ -150,6 +152,9 @@ namespace CMCP {
         internal void TrayAction(string name,string action){TargetCard card;if(!Cards.TryGetValue(name,out card))return;var value=TrayValue(card);if(action=="connect"&&value.CanConnect)Launch("connect",card,"");else if(action=="stop"&&value.CanDisconnect)Launch("stop",card,"");else if(action=="rename"&&value.CanRename){RestoreManager();if(Settings!=null)CloseSettings();if(Editor!=null&&Editor.TargetName!=name){Editor.ShowError("请先保存或返回当前编辑页，再重命名其他云电脑。");return;}OpenEditor(name);if(Editor!=null){Editor.NameInput.Box.Focus();Editor.NameInput.Box.SelectAll();}}SyncTray();}
         async void Uninstall(){
             if(BackendStarting||ExitPending||updates.Installing||children.Count>0){Settings.SetFeedback("请先完成或取消正在处理的卡片操作。",true);return;}
+            // An installed copy has its own uninstaller, which asks first and closes this window.
+            string uninstaller=FindUninstaller==null?null:FindUninstaller();
+            if(uninstaller!=null){try{Process.Start(new ProcessStartInfo(uninstaller){UseShellExecute=true});}catch{Settings.SetFeedback("无法启动卸载程序。",true);}return;}
             if(!ConfirmUninstall())return;
             ExitPending=true;Enabled=false;timer.Stop();
             int code=-1;try{code=await Task.Run(RunUninstall);}catch{}
@@ -176,7 +181,7 @@ namespace CMCP {
             Enabled=true;timer.Start();RestoreManager();Error("部分后台进程未能结束，请稍后重试退出；详情已记录到 user\\error.log。");
         }
         internal void RestoreManager(){EnsureTray();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
-        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
+        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(ManagerSignal.ExitMessage!=0&&message.Msg==ManagerSignal.ExitMessage){ExitApplication();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
         protected override void Dispose(bool disposing){if(disposing){TrayVisible=false;if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(TrayCommands!=null){TrayCommands.Dispose();TrayCommands=null;}}base.Dispose(disposing);}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
         void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}

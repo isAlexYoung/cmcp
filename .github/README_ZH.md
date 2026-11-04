@@ -25,7 +25,8 @@
 
 | 平台 | 安装包 |
 |---|---|
-| Windows x64 | `CMCP-<版本号>-windows-x64.zip` |
+| Windows x64，安装向导（推荐） | `CMCP-<版本号>-windows-x64-setup.exe` |
+| Windows x64，便携版 | `CMCP-<版本号>-windows-x64.zip` |
 | macOS，Apple 芯片 | `CMCP-<版本号>-macos-arm64.zip` |
 | macOS，Intel 芯片 | `CMCP-<版本号>-macos-x64.zip` |
 
@@ -35,8 +36,8 @@
 
 **Windows**
 
-1. 把压缩包完整解压到一个文件夹，不要在压缩包里直接运行。
-2. 运行 `CMCP.exe`。
+1. 运行安装程序，选择安装目录、快捷方式和是否开机启动，不需要管理员权限。安装程序暂未签名，如果 Windows 提示“已保护你的电脑”，点击 **更多信息 → 仍要运行**。使用便携版时，把压缩包完整解压到一个文件夹，再运行 `CMCP.exe`。
+2. 打开 CMCP。
 3. 点击 **添加云电脑**，输入它的地址。
 4. 启动连接，按提示登录云电脑。
 5. 添加新的云电脑后，完全退出并重新打开云电脑上的 Claude。

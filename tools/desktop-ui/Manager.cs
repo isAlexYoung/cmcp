@@ -225,6 +225,8 @@ namespace CMCP {
                 using (var form = new ShortcutPrompt()) { form.Show(); Application.DoEvents(); using (var bmp = new Bitmap(form.Width,form.Height)) { form.DrawToBitmap(bmp,new Rectangle(Point.Empty,bmp.Size)); bmp.Save(Path.GetFullPath(args[1]),System.Drawing.Imaging.ImageFormat.Png); } }
                 return 0;
             }
+            if(args.Length==1&&args[0]=="--exit")return ManagerSignal.ExitRunning();
+            if(args.Length==3&&args[0]=="--apply-installer-choices"&&(args[1]=="on"||args[1]=="off")&&(args[2]=="zh-CN"||args[2]=="en"))return InstallerChoices.Apply(PortableState.DirectoryPath,ExecutablePath,args[1]=="on",args[2]);
             bool startup=args.Length==1&&args[0]=="--startup";
             bool updated=args.Length==2&&args[0]=="--updated";
             Guid transactionId;if(updated&&!Guid.TryParseExact(args[1],"N",out transactionId))return 64;
@@ -291,6 +293,18 @@ namespace CMCP {
                 File.WriteAllText(Path.Combine(clientsState, "link-status.json"), "{\"pid\":0,\"targets\":{\"A\":{\"state\":\"connected\",\"clients\":{\"desktop\":true,\"cli\":false}},\"B\":{\"state\":\"connected\"}}}");
                 var loaded = LocalState.Load(clientsState).Targets; check(loaded[0].DesktopClient == true && loaded[0].CliClient == false && loaded[1].DesktopClient == null && loaded[1].CliClient == null, "client state is read when reported and stays unknown otherwise");
                 check(Actions.Command("C:\\kit", "uninstall", "") == "& 'C:\\kit\\uninstall.ps1'", "uninstall runs its fixed script without a selected target");
+                string setupKey=@"Software\CMCP-SelfTest-"+Guid.NewGuid().ToString("N"),setupRoot=Path.Combine(temp,"installed"),setupState=Path.Combine(setupRoot,"user"),setupExe=Path.Combine(setupRoot,"CMCP.exe"),removal=Path.Combine(temp,"unins000.exe");
+                Directory.CreateDirectory(setupRoot);File.WriteAllText(setupExe,"fixture");File.WriteAllText(removal,"fixture");
+                try{
+                    check(InstallerChoices.Apply(setupState,setupExe,true,"en",setupKey)==0&&StartupRegistration.Enabled(setupKey)&&AppSettings.Load(setupState).autoStart&&AppSettings.Load(setupState).language=="en","installer choices enable startup and set the first language");
+                    check(!StartupPreferences.ShouldPrompt(setupState),"installer choices stop the manager asking about the desktop shortcut again");
+                    check(InstallerChoices.Apply(setupState,setupExe,false,"zh-CN",setupKey)==0&&!StartupRegistration.Enabled(setupKey)&&!AppSettings.Load(setupState).autoStart&&AppSettings.Load(setupState).language=="en","a later install clears startup without replacing the chosen language");
+                    using(var key=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(setupKey)){key.SetValue("InstallLocation",setupRoot+"\\");key.SetValue("UninstallString","\""+removal+"\"");}
+                    check(String.Equals(Installation.Uninstaller(setupRoot,setupKey),removal,StringComparison.OrdinalIgnoreCase),"settings find the uninstaller of this installed copy");
+                    check(Installation.Uninstaller(temp,setupKey)==null,"a portable copy elsewhere does not use another copy's uninstaller");
+                    using(var key=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(setupKey))key.SetValue("UninstallString","\""+setupExe+"\"");
+                    check(Installation.Uninstaller(setupRoot,setupKey)==null,"a registered command that is not the uninstaller is ignored");
+                }finally{Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(setupKey,false);}
                 string fixtureKit = Path.Combine(temp, "中文 folder's"); Directory.CreateDirectory(fixtureKit);
                 string fixtureOutput = Path.Combine(fixtureKit, "argument.txt");
                 File.WriteAllText(Path.Combine(fixtureKit, "manager-open.ps1"), "param([string]$TargetName)\r\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'argument.txt'), $TargetName)\r\n", Encoding.UTF8);

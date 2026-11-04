@@ -27,6 +27,7 @@ try{
     $healthy={param($process) $deadline=[DateTime]::UtcNow.AddSeconds(180);while([DateTime]::UtcNow -lt $deadline){if($process.HasExited){return $false};$ready=Join-Path $directory 'ready.json';if(Test-Path -LiteralPath $ready){try{$ack=Get-Content -LiteralPath $ready -Raw -Encoding UTF8|ConvertFrom-Json;if($ack.token -ceq $request.token -and $ack.pid -eq $process.Id){return $true}}catch{}};Start-Sleep -Milliseconds 250};return $false}
     $stopFailed={param($process)try{if(!$process.HasExited){$process.Kill()}}catch{if(!$process.HasExited){throw}};$process.WaitForExit(10000)|Out-Null;Stop-LinkService}
     $null=Invoke-CmcpSwap $install $stage $backup $launch $healthy $stopFailed
+    $null=Set-CmcpInstalledVersion $install $request.version
     [IO.File]::WriteAllText((Join-Path $directory 'complete.txt'),'Update completed. Previous package retained at '+$backup)
     if($external){
         [Environment]::CurrentDirectory=$install;Set-Location -LiteralPath $install

@@ -13,7 +13,7 @@ permissions:
 jobs:
   windows-regression:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,7 +65,7 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/update.test.ps1 | Set-Content test-results/updater.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/updater.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 40 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete update regression' }
+          if ($r.passed -ne 43 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete update regression' }
       - name: Portable data migration and update cleanup
         shell: pwsh
         run: |
@@ -104,7 +104,7 @@ jobs:
           if (!$p.WaitForExit(60000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 264 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 270 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Theme-aware native tooltips and focus preservation
         shell: pwsh
         run: |
@@ -212,6 +212,22 @@ jobs:
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/package-manager.ps1 -OutputDirectory "$env:RUNNER_TEMP/cmcp-packages"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the Windows installer
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.7.1 --allow-downgrade --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/package-installer.ps1 -PackageDirectory "$env:RUNNER_TEMP/cmcp-packages"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real install, upgrade, refusal and uninstall
+        shell: pwsh
+        run: |
+          $version = (Get-Content app/package.json -Raw | ConvertFrom-Json).version
+          $setup = Join-Path ([IO.Path]::GetFullPath("$env:RUNNER_TEMP/cmcp-packages")) "CMCP-$version-windows-x64-setup.exe"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/installer.test.ps1 -Setup $setup -Version $version -EvidenceDirectory test-results/installer | Set-Content test-results/installer.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/installer.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 34 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete installer regression' }
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -226,6 +242,7 @@ jobs:
           name: cmcp-windows-x64-${{ github.sha }}
           path: |
             ${{ runner.temp }}/cmcp-packages/*.zip
+            ${{ runner.temp }}/cmcp-packages/*.exe
             ${{ runner.temp }}/cmcp-packages/*.sha256
           if-no-files-found: error
 

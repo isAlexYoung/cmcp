@@ -100,6 +100,15 @@ function Assert-CmcpInstallRoot([string]$Root,[scriptblock]$Progress=$null) {
     $null=Test-CmcpTree $full '' $Progress
     return $full
 }
+function Set-CmcpInstalledVersion([string]$Install,[string]$Version,[string]$Key='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CMCP_is1') {
+    # Keep the version in Windows' app list current. A failure here must never affect a finished update.
+    try {
+        $entry=Get-ItemProperty -LiteralPath $Key -ErrorAction Stop
+        if([IO.Path]::GetFullPath([string]$entry.InstallLocation).TrimEnd('\') -ine [IO.Path]::GetFullPath($Install).TrimEnd('\')){return $false}
+        Set-ItemProperty -LiteralPath $Key -Name 'DisplayVersion' -Value $Version -ErrorAction Stop
+        return $true
+    } catch {return $false}
+}
 function Invoke-CmcpSwap([string]$Install,[string]$Staged,[string]$Backup,[scriptblock]$Start,[scriptblock]$Healthy,[scriptblock]$StopFailed) {
     # Paths are validated by caller; the backup never overwrites an existing folder.
     if(Test-Path -LiteralPath $Backup){throw 'Backup path already exists'}

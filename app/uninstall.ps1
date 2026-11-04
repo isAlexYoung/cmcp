@@ -1,6 +1,6 @@
 ﻿# 由 CMCP 设置页的“卸载 CMCP”调用：断开连接、移除云电脑上的 Claude 配置、删除本机保存的设置。
-# 确认由设置页完成。退出码：0 已卸载，1 未完成。-Headless 不显示窗口，只用于自动化测试。
-param([switch]$Headless)
+# 确认由设置页或卸载程序完成。退出码：0 已卸载，1 未完成。-Headless 不显示窗口，用于静默卸载和自动化测试。-Installed 表示由卸载程序调用，程序文件由它删除。
+param([switch]$Headless,[switch]$Installed)
 # 窗口出来之前的任何错误也用中文提示框显示（控制台是隐藏的）
 trap {
     if (!$Headless) {
@@ -34,7 +34,7 @@ try {
         }
     }
     Remove-Item -LiteralPath $StateDir -Recurse -Force -ErrorAction Stop
-    Write-Ok '本机保存的设置已删除。现在可以删除本文件夹。'
+    Write-Ok $(if ($Installed) { '本机保存的设置已删除。' } else { '本机保存的设置已删除。现在可以删除本文件夹。' })
 } catch {
     $ok = $false
     Write-ErrorLog '卸载' $_

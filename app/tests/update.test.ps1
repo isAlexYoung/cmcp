@@ -53,6 +53,13 @@ try{
     $cleanupError={param($process)throw 'simulated cleanup error'}
     Reject {Invoke-CmcpSwap $install $stage2 $backup2 $start $unhealthy $cleanupError} 'failed startup still attempts rollback after cleanup exception'
     Check ((Test-CmcpTree $install).version -eq '4.2.0') 'cleanup exception does not prevent restoring previous package'
+    $listed='HKCU:\Software\CMCP-UpdateTest-'+[guid]::NewGuid().ToString('N');$listedRoot=Join-Path $temporary 'listed'
+    try{
+        $null=New-Item -Path $listed -Force;$null=New-ItemProperty -LiteralPath $listed -Name 'InstallLocation' -Value ($listedRoot+'\') -PropertyType String;$null=New-ItemProperty -LiteralPath $listed -Name 'DisplayVersion' -Value '1.0.0' -PropertyType String
+        Check ((Set-CmcpInstalledVersion $listedRoot '2.0.0' $listed) -and (Get-ItemProperty -LiteralPath $listed).DisplayVersion -ceq '2.0.0') 'an update refreshes the version Windows lists for this copy'
+        Check (!(Set-CmcpInstalledVersion (Join-Path $temporary 'portable') '3.0.0' $listed) -and (Get-ItemProperty -LiteralPath $listed).DisplayVersion -ceq '2.0.0') 'a portable copy elsewhere leaves the listed version alone'
+    }finally{Remove-Item -LiteralPath $listed -Force -ErrorAction SilentlyContinue}
+    Check (!(Set-CmcpInstalledVersion $temporary '3.0.0' ($listed+'-missing'))) 'a copy Windows does not list updates normally'
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks;not_executed=@('public release download','production replacement')}|ConvertTo-Json -Depth 4
 }finally{
     # This exact generated fixture root is checked before recursive cleanup.

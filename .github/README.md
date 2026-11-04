@@ -25,7 +25,8 @@ Get the latest version from [Releases](https://github.com/isAlexYoung/cmcp/relea
 
 | Platform | Package |
 |---|---|
-| Windows x64 | `CMCP-<version>-windows-x64.zip` |
+| Windows x64, guided installer (recommended) | `CMCP-<version>-windows-x64-setup.exe` |
+| Windows x64, portable | `CMCP-<version>-windows-x64.zip` |
 | macOS, Apple silicon | `CMCP-<version>-macos-arm64.zip` |
 | macOS, Intel | `CMCP-<version>-macos-x64.zip` |
 
@@ -35,8 +36,8 @@ You need a cloud PC that is reachable at an HTTPS address and has Claude install
 
 **Windows**
 
-1. Extract the whole zip to a folder. Do not run it from inside the archive.
-2. Run `CMCP.exe`.
+1. Run the installer and choose the install folder, shortcuts and whether to start at sign-in. It does not need administrator rights. The installer is not code-signed yet, so if Windows says it protected your PC, click **More info → Run anyway**. For the portable version, extract the whole zip to a folder and run `CMCP.exe`.
+2. Open CMCP.
 3. Click **Add cloud PC** and enter its address.
 4. Start the connection and sign in to the cloud PC when asked.
 5. After adding a new cloud PC, fully quit and reopen Claude on it.

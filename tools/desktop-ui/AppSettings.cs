@@ -47,6 +47,32 @@ namespace CMCP {
         internal bool IsDark(bool previous){if(theme=="dark")return true;if(theme=="light")return false;return SystemDark(false,previous);}
         internal static bool SystemDark(bool tray,bool fallback){try{using(var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))return Convert.ToInt32(key==null?1:key.GetValue(tray?"SystemUsesLightTheme":"AppsUseLightTheme",1))==0;}catch{return fallback;}}
     }
+    internal static class Installation {
+        const string KeyPath=@"Software\Microsoft\Windows\CurrentVersion\Uninstall\CMCP_is1";
+        // Only for the copy Windows lists as installed; a portable copy elsewhere keeps its own uninstall.
+        internal static string Uninstaller(string root,string keyPath=KeyPath){
+            try{using(var key=Registry.CurrentUser.OpenSubKey(keyPath)){
+                string location=key==null?null:key.GetValue("InstallLocation") as string,command=key==null?null:key.GetValue("UninstallString") as string;
+                if(String.IsNullOrEmpty(location)||String.IsNullOrEmpty(command))return null;
+                if(!String.Equals(Path.GetFullPath(location).TrimEnd('\\'),Path.GetFullPath(root).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))return null;
+                string file=command.Trim().Trim('"');
+                return File.Exists(file)&&Path.GetFileName(file).StartsWith("unins",StringComparison.OrdinalIgnoreCase)?file:null;
+            }}catch{return null;}
+        }
+    }
+    internal static class InstallerChoices {
+        // The same two records the settings page keeps, so both always agree.
+        internal static int Apply(string state,string executable,bool autoStart,string language,string keyPath=StartupRegistration.RunPath){
+            try{
+                bool first=!File.Exists(AppSettings.PathFor(state));
+                var settings=AppSettings.Load(state);if(settings.ReadError)return 1;
+                StartupRegistration.Set(executable,autoStart,keyPath);
+                settings.autoStart=autoStart;if(first)settings.language=language;settings.Save(state);
+                StartupPreferences.Save(state,true);
+                return 0;
+            }catch{return 1;}
+        }
+    }
     internal static class StartupRegistration {
         internal const string RunPath=@"Software\Microsoft\Windows\CurrentVersion\Run",Name="CMCPManager",LegacyName="ClaudeCloudPcLink";
         internal static bool Enabled(string keyPath=RunPath){using(var key=Registry.CurrentUser.OpenSubKey(keyPath))return key!=null&&(key.GetValue(Name)!=null||key.GetValue(LegacyName)!=null);}

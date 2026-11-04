@@ -10,6 +10,15 @@ The CMCP icon is not covered by the MIT license in `LICENSE`. This applies to th
 
 You may use the icon only to refer to CMCP and as part of unmodified CMCP packages. Without written permission you may not use it commercially, modify it, or use it for another product or service. Forks and derivative products must replace it. The MIT license still covers the rest of the code, including commercial use of that code.
 
+## Inno Setup
+
+The Windows installer is built with Inno Setup (https://jrsoftware.org/isinfo.php).
+
+Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+
+`tools/installer/ChineseSimplified.isl` is the Simplified Chinese translation from the Inno Setup source repository.
+
 ## Node.js
 
 Portable releases bundle the official Node.js Windows x64 runtime. Its license and third-party notices are included at `app/runtime/LICENSE`. The source repository omits `node.exe`; development and CI install or provide the runtime separately.
