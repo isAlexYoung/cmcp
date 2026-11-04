@@ -6,7 +6,8 @@ $app=Split-Path $PSScriptRoot -Parent
 $checks=New-Object Collections.Generic.List[string]
 function Check($ok,$name){if(!$ok){throw $name};$checks.Add($name)}
 function Run-Uninstall{
-    $command='& '''+(Join-Path $app 'uninstall.ps1').Replace("'","''")+''''
+    # The same command the manager builds, so its exit code is tested as the manager sees it.
+    $command='& '''+(Join-Path $app 'uninstall.ps1').Replace("'","''")+'''; exit $LASTEXITCODE'
     $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $process=Start-Process powershell.exe -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -WindowStyle Hidden -EncodedCommand '+$encoded) -WindowStyle Hidden -PassThru
     $null=$process.Handle

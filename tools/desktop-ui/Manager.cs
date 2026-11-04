@@ -174,6 +174,8 @@ namespace CMCP {
                 if (action == "connect" || action == "stop") command += " -RequestTime " + requestTime.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             if (action == "edit" && initialUrl.Length > 0) command += " -InitialUrl " + Quote(initialUrl);
+            // Without this, -EncodedCommand turns any exit code above 1 into 1.
+            if (action == "uninstall") command += "; exit $LASTEXITCODE";
             return command;
         }
         internal static Process Start(string kit, string action, string name, string initialUrl = "",string stateDirectory=null) {
@@ -292,7 +294,7 @@ namespace CMCP {
                 File.WriteAllText(Path.Combine(clientsState, "cloudpc-targets.json"), "[{\"name\":\"A\",\"url\":\"https://a.example.com/\"},{\"name\":\"B\",\"url\":\"https://b.example.com/\"}]");
                 File.WriteAllText(Path.Combine(clientsState, "link-status.json"), "{\"pid\":0,\"targets\":{\"A\":{\"state\":\"connected\",\"clients\":{\"desktop\":true,\"cli\":false}},\"B\":{\"state\":\"connected\"}}}");
                 var loaded = LocalState.Load(clientsState).Targets; check(loaded[0].DesktopClient == true && loaded[0].CliClient == false && loaded[1].DesktopClient == null && loaded[1].CliClient == null, "client state is read when reported and stays unknown otherwise");
-                check(Actions.Command("C:\\kit", "uninstall", "") == "& 'C:\\kit\\uninstall.ps1'", "uninstall runs its fixed script without a selected target");
+                check(Actions.Command("C:\\kit", "uninstall", "") == "& 'C:\\kit\\uninstall.ps1'; exit $LASTEXITCODE", "uninstall runs its fixed script without a selected target and keeps its exit code");
                 string setupKey=@"Software\CMCP-SelfTest-"+Guid.NewGuid().ToString("N"),setupRoot=Path.Combine(temp,"installed"),setupState=Path.Combine(setupRoot,"user"),setupExe=Path.Combine(setupRoot,"CMCP.exe"),removal=Path.Combine(temp,"unins000.exe");
                 Directory.CreateDirectory(setupRoot);File.WriteAllText(setupExe,"fixture");File.WriteAllText(removal,"fixture");
                 try{
