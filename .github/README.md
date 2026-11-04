@@ -27,8 +27,10 @@ Get the latest version from [Releases](https://github.com/isAlexYoung/cmcp/relea
 |---|---|
 | Windows x64, guided installer (recommended) | `CMCP-<version>-windows-x64-setup.exe` |
 | Windows x64, portable | `CMCP-<version>-windows-x64.zip` |
-| macOS, Apple silicon | `CMCP-<version>-macos-arm64.zip` |
-| macOS, Intel | `CMCP-<version>-macos-x64.zip` |
+| macOS, Apple silicon | `CMCP-<version>-macos-arm64.dmg` |
+| macOS, Intel | `CMCP-<version>-macos-x64.dmg` |
+
+The macOS `.zip` files with the same names are for in-app updates. To install, download the `.dmg`.
 
 ## Quick Start
 
@@ -46,10 +48,18 @@ Claude on the cloud PC can now use the tools on this computer.
 
 **macOS**
 
-1. Unzip the package and open `CMCP.app`. The manager opens in your browser.
-2. Follow steps 3 to 5 above.
+1. Open the `.dmg` and drag `CMCP.app` to the Applications folder.
+2. Open CMCP from Applications, then follow steps 3 to 5 above.
 
-The app is ad-hoc signed rather than notarized, so macOS may ask you to confirm before it opens the first time.
+The app is ad-hoc signed rather than notarized, so macOS blocks it the first time you open it. Allow it once, depending on your macOS version:
+
+- **macOS 15 and later**: click **Done** in the message, open **System Settings → Privacy & Security**, find CMCP near the bottom of the page, click **Open Anyway** and confirm.
+- **macOS 13 and 14**: in Applications, Control-click CMCP, choose **Open**, then click **Open** in the message.
+- **If macOS says the app is damaged**: this comes from the download quarantine flag. After checking the package against its `.sha256` file, run this in Terminal and open CMCP again:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CMCP.app
+```
 
 ## Features
 
@@ -76,15 +86,21 @@ It depends on **Settings → When closing the window**. Exiting disconnects ever
 
 **How do I update?**
 
-Open **Settings → Check for updates**. CMCP downloads and verifies the update for you.
+Open **Settings → Check for updates**. CMCP downloads and verifies the update for you. On macOS, if the new version fails to start, CMCP returns to the previous version automatically. Updating needs permission to change the folder CMCP is in, so update from an administrator account when it is in Applications. Because the app is ad-hoc signed, macOS may ask you to grant permissions such as Accessibility again after an update.
 
 **How do I uninstall?**
 
 On Windows, open **Settings → About → Uninstall CMCP**. If you used the guided installer, you can also uninstall from Installed apps in Windows Settings. It disconnects everything, removes the Claude configuration from cloud PCs where it can, and deletes saved addresses, passwords and settings. The installed version also removes its program files and shortcuts. For the portable version, delete the program folder and desktop shortcut yourself afterwards.
 
+On macOS, open **Settings → About → Uninstall CMCP**. It also disconnects everything and removes the Claude configuration from cloud PCs where it can, then deletes the app, the data in `~/Library/Application Support/CMCP`, passwords saved in Keychain and the login item. It cannot remove the configuration from a cloud PC that is not connected and has no saved password, and it tells you how many were missed. If you already dragged the app to the Trash, run this command to delete the data, then delete the items named `CMCP Mac cloud password` in Keychain Access:
+
+```bash
+rm -rf ~/Library/Application\ Support/CMCP
+```
+
 **Where are the logs?**
 
-Open **Settings → Log folder**. On Windows, errors are written to `user\error.log` in the program folder.
+Open **Settings → Log folder**. On Windows, errors are written to `user\error.log` in the program folder. On macOS, logs and settings are in `~/Library/Application Support/CMCP`.
 
 **Is CMCP an Anthropic product?**
 

@@ -57,7 +57,21 @@ export async function replaceBundle({installRoot,staged,version,arch,launch,heal
   if(path.dirname(backup)!==parent||!installRoot.endsWith('.app'))throw Error('Invalid backup path');
   fs.renameSync(installRoot,backup);
   try{fs.renameSync(staged,installRoot);await launch(installRoot);if(!await healthy())throw Error('New application did not become ready');}
-  catch(error){if(stopFailed)await stopFailed();const failed=path.join(parent,'.cmcp-failed-'+randomUUID()+'.app');if(fs.existsSync(installRoot))fs.renameSync(installRoot,failed);fs.renameSync(backup,installRoot);await launch(installRoot,true);throw error;}
+  catch(error){if(stopFailed)await stopFailed();const failed=path.join(parent,'.cmcp-failed-'+randomUUID()+'.app');if(fs.existsSync(installRoot))fs.renameSync(installRoot,failed);fs.renameSync(backup,installRoot);error.restored=true;try{fs.rmSync(failed,{recursive:true,force:true});}catch{};await launch(installRoot,true);throw error;}
   return backup;
+}
+const plainTree=directory=>{const st=fs.lstatSync(directory);if(!st.isDirectory()||st.isSymbolicLink())throw Error('Unsafe cleanup directory');for(const item of fs.readdirSync(directory,{withFileTypes:true})){const file=path.join(directory,item.name);if(item.isSymbolicLink()||!item.isDirectory()&&!item.isFile())throw Error('Unsafe cleanup file');if(item.isDirectory())plainTree(file);}};
+// Called once the new version has reported healthy: nothing rolls back after that, so the
+// install folder goes back to holding one application.
+export function completeUpdate({state,installRoot,backup,folder,requestFile}){
+  privateDir(state);
+  if(path.dirname(backup)!==path.dirname(installRoot)||!/^\.cmcp-backup-[a-f0-9-]{36}\.app$/.test(path.basename(backup))||path.dirname(folder)!==state||!/^update-[a-f0-9-]{36}$/.test(path.basename(folder))||path.dirname(requestFile)!==state||!/^update-request-[a-f0-9-]{36}\.json$/.test(path.basename(requestFile)))throw Error('Invalid cleanup paths');
+  if(fs.existsSync(backup)){validateBundle(backup);plainTree(backup);fs.rmSync(backup,{recursive:true});}
+  if(fs.existsSync(folder)){plainTree(folder);fs.rmSync(folder,{recursive:true});}
+  for(const file of [requestFile,requestFile+'.ack']){safeFile(file);if(fs.existsSync(file))fs.unlinkSync(file);}
+}
+export function retryUpdateCleanup(state,installRoot){
+  const file=path.join(state,'update-cleanup.json');safeFile(file);if(!fs.existsSync(file))return;
+  try{const request=JSON.parse(fs.readFileSync(file,'utf8'));if(request.state!==state||request.installRoot!==installRoot)throw Error('Cleanup installation mismatch');completeUpdate(request);fs.unlinkSync(file);}catch{}
 }
 function privateDirCheck(directory){const stat=fs.lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink()||process.getuid&&stat.uid!==process.getuid()&&directory!=='/Applications')throw Error('Unsafe installation parent');}

@@ -21,7 +21,7 @@ jobs:
           - runner: macos-15-intel
             arch: x64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,9 +45,11 @@ jobs:
       - name: Real AppKit and WebKit interface checks
         run: |
           "$RUNNER_TEMP/cmcp-built/CMCP.app/Contents/MacOS/CMCP" --self-test "$PWD/test-results/native"
-          python3 -c "import json; r=json.load(open('test-results/native/native-ui.json')); assert r['failed']==0 and r['passed']==24, r"
-      - name: Archive platform package
+          python3 -c "import json; r=json.load(open('test-results/native/native-ui.json')); assert r['failed']==0 and r['passed']==25, r"
+      - name: Archive platform packages
         run: python3 tools/package-macos.py "$RUNNER_TEMP/cmcp-built/CMCP.app" "$RUNNER_TEMP/cmcp-packages"
+      - name: Install from the disk image, then update, roll back and uninstall
+        run: node macos/tests/installed-app.mjs "$RUNNER_TEMP/cmcp-packages" "$PWD/test-results/installed-app.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -58,4 +60,5 @@ jobs:
           name: cmcp-macos-${{ matrix.arch }}-${{ github.sha }}
           path: |
             ${{ runner.temp }}/cmcp-packages/*.zip
+            ${{ runner.temp }}/cmcp-packages/*.dmg
             ${{ runner.temp }}/cmcp-packages/*.sha256

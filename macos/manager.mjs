@@ -15,10 +15,11 @@ import {createTargetConnections} from '../app/target-connections.mjs';
 import {managedTargetFactory} from '../app/managed-target.mjs';
 import {staticAssets} from '../app/static-assets.mjs';
 import {checkRelease,downloadUpdate} from './updates.mjs';
+import {currentInstallation} from './uninstall.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,version=VERSION,platform=process.platform,arch=process.arch}={}){
+export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
   const dispatcher=injected||await createDispatcher({roots:store.config.roots});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
@@ -29,12 +30,27 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
-  let origin='',closing=false,updates={state:'unchecked',version:null},updating=false;
+  let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false;
   const snapshot=()=>({...store.view(states),version,platform:'macos-'+arch,updates});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
   async function entry(id){for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===id);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(id)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
+  // A running connection already holds a session; otherwise only a saved password can open one.
+  const removeCloudConfig=removeCloud||(async target=>{
+    const record=connections.values().find(t=>t.name===target.id);
+    if(record?.auth)return new Cloud(record.url,record.auth,record.agent).uninstall();
+    const cloud=await Cloud.connect(target.url,await store.password(target.id),await proxy(target.url));
+    try{await cloud.uninstall();}finally{cloud.close();}
+  });
+  async function uninstallApplication(appPid){
+    installation.check();
+    const cloudFailed=(await Promise.all(store.targets.map(target=>Promise.race([removeCloudConfig(target),delay(45000,undefined,{ref:false}).then(()=>{throw Error('Cloud removal timed out');})]).then(()=>0,()=>1)))).reduce((sum,failed)=>sum+failed,0);
+    await store.serial(()=>store.setEnabled(null,false));
+    await Promise.allSettled(store.targets.map(t=>{const ref=t.credentialId||(!t.authMode?t.id:null);return ref?secrets('delete',ref):null;}));
+    installation.launch([process.pid,process.ppid,appPid]);
+    return {uninstalled:true,cloudFailed};
+  }
   async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
@@ -67,6 +83,12 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
         if(req.method!=='POST')return json(res,405,{error:'POST required'});
         if(url.pathname==='/api/exit')await store.serial(()=>store.setEnabled(null,false));
         json(res,200,{stopped:true});setImmediate(()=>close().catch(()=>{}));return;
+      }
+      if(url.pathname==='/api/uninstall'){
+        if(closing||uninstalling)return json(res,503,{error:'程序正在退出'});
+        uninstalling=true;
+        try{json(res,200,await uninstallApplication((await readBody(req)).appPid));}finally{uninstalling=false;}
+        setImmediate(()=>close().catch(()=>{}));return;
       }
       const route=routes[url.pathname];if(!route)return json(res,404,{error:'Not found'});
       const body=req.method==='POST'?await readBody(req):{};

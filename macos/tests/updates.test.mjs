@@ -3,15 +3,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {selectRelease,downloadUpdate} from '../updates.mjs';
-import {inspectZip,validateBundle,replaceBundle} from '../update-transaction.mjs';
+import {inspectZip,validateBundle,replaceBundle,completeUpdate,retryUpdateCleanup} from '../update-transaction.mjs';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 function directory(t){const d=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'mac-update-')));t.after(()=>fs.rmSync(d,{recursive:true,force:true}));return d;}
 function release(arch='arm64'){const name='CMCP-4.2.0-macos-'+arch+'.zip';return {draft:false,prerelease:false,tag_name:'v4.2.0',assets:[name,name+'.sha256'].map((name,i)=>({name,size:i?100:3,browser_download_url:'https://github.com/isAlexYoung/cmcp/releases/download/v4.2.0/'+name}))};}
 test('release selection strictly separates Mac architectures and Windows',()=>{
   const r=release();r.assets.push({name:'CMCP-4.2.0-windows-x64.zip'});assert.equal(selectRelease(r,'4.1.1','arm64').name,'CMCP-4.2.0-macos-arm64.zip');assert.throws(()=>selectRelease(r,'4.1.1','x64'));
   assert.equal(selectRelease(r,'4.2.0','arm64'),null);assert.throws(()=>selectRelease({...r,prerelease:true},'4.1.1','arm64'));
+});
+test('updates keep using the zip when the release also carries a disk image',()=>{
+  const r=release();r.assets.push(...['CMCP-4.2.0-macos-arm64.dmg','CMCP-4.2.0-macos-arm64.dmg.sha256'].map(name=>({name,size:9,browser_download_url:'https://github.com/isAlexYoung/cmcp/releases/download/v4.2.0/'+name})));
+  const selected=selectRelease(r,'4.1.1','arm64');assert.equal(selected.name,'CMCP-4.2.0-macos-arm64.zip');assert.equal(selected.checksum.name,'CMCP-4.2.0-macos-arm64.zip.sha256');
 });
 test('untrusted, incomplete and ambiguous update assets are rejected',()=>{
   const r=release();r.assets[0].browser_download_url='https://other.invalid/update.zip';assert.throws(()=>selectRelease(r,'4.1.1','arm64'));
@@ -56,6 +60,42 @@ test('transaction retains a verified backup after successful launch',async t=>{
 test('failed launch rolls back files and starts the previous application',async t=>{
   const d=directory(t),old=bundle(path.join(d,'install'),'4.1.1'),staged=bundle(path.join(d,'staging'),'4.2.0');const calls=[];
   await assert.rejects(replaceBundle({installRoot:old,staged,version:'4.2.0',arch:'arm64',launch:async(app,rollback)=>calls.push(rollback===true),healthy:async()=>false,stopFailed:async()=>calls.push('stop')}));assert.equal(validateBundle(old).version,'4.1.1');assert.deepEqual(calls,[false,'stop',true]);
+  assert.deepEqual(fs.readdirSync(path.join(d,'install')),['CMCP.app']);
+});
+test('rollback marks the error so the helper does not reopen the application twice',async t=>{
+  const d=directory(t),old=bundle(path.join(d,'install'),'4.1.1'),staged=bundle(path.join(d,'staging'),'4.2.0');
+  await assert.rejects(replaceBundle({installRoot:old,staged,version:'4.2.0',arch:'arm64',launch:async()=>{},healthy:async()=>false}),error=>error.restored===true);
+});
+test('a folder the user cannot change fails before anything moves',{skip:process.platform==='win32'||process.getuid?.()===0},async t=>{
+  const d=directory(t),old=bundle(path.join(d,'install'),'4.1.1'),staged=bundle(path.join(d,'staging'),'4.2.0'),parent=path.dirname(old);let launched=0;
+  fs.chmodSync(parent,0o555);t.after(()=>fs.chmodSync(parent,0o755));
+  await assert.rejects(replaceBundle({installRoot:old,staged,version:'4.2.0',arch:'arm64',launch:async()=>{launched++;},healthy:async()=>true}),error=>error.restored===undefined);
+  assert.equal(validateBundle(old).version,'4.1.1');assert.equal(validateBundle(staged).version,'4.2.0');assert.equal(launched,0);assert.deepEqual(fs.readdirSync(parent),['CMCP.app']);
+});
+function cleanupFixture(d){
+  const state=path.join(d,'CMCP'),installRoot=path.join(d,'install/CMCP.app');fs.mkdirSync(state,{recursive:true});fs.mkdirSync(path.dirname(installRoot),{recursive:true});
+  const backup=path.join(path.dirname(installRoot),'.cmcp-backup-'+randomUUID()+'.app');fs.renameSync(bundle(path.join(d,'old-'+randomUUID()),'4.1.1'),backup);
+  const folder=path.join(state,'update-'+randomUUID()),requestFile=path.join(state,'update-request-'+randomUUID()+'.json');
+  fs.mkdirSync(folder);fs.writeFileSync(path.join(folder,'download.zip'),'zip');fs.writeFileSync(requestFile,'{}');fs.writeFileSync(requestFile+'.ack','nonce');fs.writeFileSync(path.join(state,'targets.json'),'KEEP');
+  return {state,installRoot,backup,folder,requestFile};
+}
+test('after a healthy update nothing but the application and the data remains',t=>{
+  const d=directory(t),cleanup=cleanupFixture(d);fs.writeFileSync(path.join(d,'install/unrelated.zip'),'keep');completeUpdate(cleanup);
+  for(const gone of [cleanup.backup,cleanup.folder,cleanup.requestFile,cleanup.requestFile+'.ack'])assert.equal(fs.existsSync(gone),false,gone);
+  assert.equal(fs.readFileSync(path.join(cleanup.state,'targets.json'),'utf8'),'KEEP');assert.equal(fs.existsSync(path.join(d,'install/unrelated.zip')),true);
+  completeUpdate(cleanup);
+});
+test('cleanup keeps a changed backup and retries only for its own installation',t=>{
+  const d=directory(t),cleanup=cleanupFixture(d),extra=path.join(cleanup.backup,'personal.txt');fs.writeFileSync(extra,'keep');
+  assert.throws(()=>completeUpdate(cleanup));assert.equal(fs.existsSync(extra),true);assert.equal(fs.existsSync(cleanup.folder),true);
+  const pending=path.join(cleanup.state,'update-cleanup.json');fs.writeFileSync(pending,JSON.stringify(cleanup));
+  retryUpdateCleanup(cleanup.state,path.join(d,'other.app'));assert.equal(fs.existsSync(cleanup.folder),true);
+  fs.unlinkSync(extra);retryUpdateCleanup(cleanup.state,cleanup.installRoot);assert.equal(fs.existsSync(cleanup.backup),false);assert.equal(fs.existsSync(cleanup.folder),false);assert.equal(fs.existsSync(pending),false);
+});
+test('cleanup refuses paths outside the installation and data folders',t=>{
+  const d=directory(t),cleanup=cleanupFixture(d);
+  for(const change of [{backup:path.join(d,'.cmcp-backup-'+randomUUID()+'.app')},{backup:path.join(d,'install/CMCP.app')},{folder:path.join(d,'update-'+randomUUID())},{requestFile:path.join(d,'update-request-'+randomUUID()+'.json')}])assert.throws(()=>completeUpdate({...cleanup,...change}),/Invalid cleanup paths/);
+  assert.equal(fs.existsSync(cleanup.backup),true);
 });
 function zip(name,localName=name,mode=0o100644){const a=Buffer.from(localName),b=Buffer.from(name),local=Buffer.alloc(30+a.length),central=Buffer.alloc(46+b.length),end=Buffer.alloc(22);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(a.length,26);a.copy(local,30);central.writeUInt32LE(0x02014b50);central.writeUInt16LE(b.length,28);central.writeUInt32LE((mode<<16)>>>0,38);b.copy(central,46);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(1,8);end.writeUInt16LE(1,10);end.writeUInt32LE(central.length,12);end.writeUInt32LE(local.length,16);return Buffer.concat([local,central,end]);}
 test('ZIP inspection rejects traversal, symlinks and local-header mismatches',()=>{

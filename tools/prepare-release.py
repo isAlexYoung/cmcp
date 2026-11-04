@@ -53,6 +53,14 @@ def inspect_package(file, version, commit, platform):
             raise ValueError('Personal state in package')
 
 
+def inspect_disk_image(file):
+    # A Linux runner cannot mount it: the Mac job already installed and ran this image.
+    with file.open('rb') as image:
+        image.seek(-512, 2)
+        if image.read(4) != b'koly':
+            raise ValueError('Not a disk image: ' + file.name)
+
+
 def prepare(packages, output, version, commit):
     if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', version) or not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('Canonical version and full source commit required')
@@ -72,14 +80,17 @@ def prepare(packages, output, version, commit):
             raise ValueError('Package checksum mismatch')
         inspect_package(file, version, commit, platform)
         selected.append(file)
-    # Built from the Windows package above and exercised by the Windows job.
-    name = 'CMCP-' + version + '-windows-x64-setup.exe'
-    files = list(packages.rglob(name))
-    if len(files) != 1:
-        raise ValueError('Exactly one package required: ' + name)
-    if Path(str(files[0]) + '.sha256').read_text(encoding='ascii').strip() != sha256(files[0].read_bytes()) + '  ' + name:
-        raise ValueError('Package checksum mismatch')
-    selected.append(files[0])
+    # Built from the packages above and exercised by the Windows and Mac jobs.
+    for suffix in ('windows-x64-setup.exe', 'macos-arm64.dmg', 'macos-x64.dmg'):
+        name = 'CMCP-' + version + '-' + suffix
+        files = list(packages.rglob(name))
+        if len(files) != 1:
+            raise ValueError('Exactly one package required: ' + name)
+        if Path(str(files[0]) + '.sha256').read_text(encoding='ascii').strip() != sha256(files[0].read_bytes()) + '  ' + name:
+            raise ValueError('Package checksum mismatch')
+        if name.endswith('.dmg'):
+            inspect_disk_image(files[0])
+        selected.append(files[0])
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError('Release staging directory must be empty')
@@ -87,7 +98,7 @@ def prepare(packages, output, version, commit):
         shutil.copyfile(file, output / file.name)
     source = output / ('CMCP-' + version + '-source.zip')
     subprocess.run(['git', 'archive', '--format=zip', '--prefix=CMCP-' + version + '-source/', '--output=' + str(source.resolve()), commit], check=True)
-    for file in list(output.glob('*.zip')) + list(output.glob('*.exe')):
+    for file in list(output.glob('*.zip')) + list(output.glob('*.exe')) + list(output.glob('*.dmg')):
         Path(str(file) + '.sha256').write_bytes((sha256(file.read_bytes()) + '  ' + file.name + '\n').encode('ascii'))
     print(json.dumps({'version': version, 'commit': commit, 'assets': sorted(p.name for p in output.iterdir())}))
 

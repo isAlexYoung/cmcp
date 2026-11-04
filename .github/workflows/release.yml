@@ -105,11 +105,11 @@ jobs:
             const body = process.env.RELEASE_NOTES.replace(/^\uFEFF/,'').trim();
             const {data: release} = await github.rest.repos.createRelease({owner,repo,tag_name:tag,target_commitish:context.sha,name:'CMCP '+version,body,draft:true,prerelease:false,make_latest:'false'});
             const files = fs.readdirSync('release-packages').sort();
-            if (files.length !== 10) throw Error('Expected four archives, the Windows installer and five checksums');
+            if (files.length !== 14) throw Error('Expected four archives, the Windows installer, two Mac disk images and seven checksums');
             for (const name of files) {
               const data = fs.readFileSync('release-packages/'+name);
               const hash = crypto.createHash('sha256').update(data).digest('hex');
-              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id:release.id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':'text/plain','content-length':data.length}});
+              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id:release.id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':name.endsWith('.dmg')?'application/x-apple-diskimage':'text/plain','content-length':data.length}});
               if (asset.state !== 'uploaded' || asset.size !== data.length || asset.digest !== 'sha256:'+hash) throw Error('Asset verification failed: '+name);
             }
             await github.rest.repos.updateRelease({owner,repo,release_id:release.id,draft:false,prerelease:false,make_latest:'true'});

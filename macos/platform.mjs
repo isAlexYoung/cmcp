@@ -7,14 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 export const VERSION = '4.10.0';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
-export const LEGACY_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'ClaudeMcpMac');
-const bundleMarker=KIT.lastIndexOf('.app'+path.sep+'Contents'+path.sep);
-const portableRoot=bundleMarker>=0?path.dirname(KIT.slice(0,bundleMarker+4)):path.dirname(KIT);
-const requestedState = process.env.CMCP_STATE_DIR || path.join(portableRoot,'user');
+export const DEFAULT_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'CMCP');
+const requestedState = process.env.CMCP_STATE_DIR || DEFAULT_STATE;
 // Foundation may abbreviate /private/var back to the system-owned /var alias.
 // Normalize only that known macOS alias; retain rejection of user symlinks.
 export const STATE = process.platform==='darwin' && requestedState.startsWith('/var/') && fs.realpathSync('/var')==='/private/var' ? '/private'+requestedState : requestedState;
-export const LABEL = 'com.claude-mcp.mac';
 export function privateDir(dir) {
   // Check parents, including dangling symlinks, before trusting private state.
   let p = dir;

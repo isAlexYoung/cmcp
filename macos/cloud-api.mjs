@@ -14,4 +14,10 @@ export class Cloud extends BaseCloud {
     if(!/Connected: \d+ Mac tools/.test(output)||!/Config changed: \d+/.test(output))throw Error('云端未确认 Mac 工具连接');
     return /Config changed: [1-9]|Connector updated: yes/.test(output);
   }
+  async uninstall(){
+    const {home}=await this.api('/api/sys/info?lite=1');
+    if(typeof home!=='string'||!home.startsWith('/'))throw Error('Invalid cloud home');
+    const connector=shellQuote(home+'/.local/share/cloudpc-link/mac-pc-files/connector.py');
+    await this.command(`if test -f ${connector}; then python3 ${connector} uninstall; fi`,home,30000);
+  }
 }

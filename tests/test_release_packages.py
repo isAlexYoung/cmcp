@@ -6,7 +6,9 @@ import unittest
 import zipfile
 from pathlib import Path
 
-inspect_package = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'tools/prepare-release.py'))['inspect_package']
+release_tools = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'tools/prepare-release.py'))
+inspect_package = release_tools['inspect_package']
+inspect_disk_image = release_tools['inspect_disk_image']
 COMMIT = 'a' * 40
 
 
@@ -56,6 +58,13 @@ class UnifiedReleaseTests(unittest.TestCase):
         self.package(change=lambda p, m, base: m['files'][0].update(codeSignature=True))
         with self.assertRaises(ValueError):
             inspect_package(self.file, '4.1.1', COMMIT, 'macos-arm64')
+
+    def test_only_a_real_disk_image_is_accepted(self):
+        self.file.write_bytes(b'x' * 4096 + b'koly' + b'\0' * 508)
+        inspect_disk_image(self.file)
+        self.file.write_bytes(b'not a disk image' * 100)
+        with self.assertRaises(ValueError):
+            inspect_disk_image(self.file)
 
 
 if __name__ == '__main__':

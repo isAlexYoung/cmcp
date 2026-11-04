@@ -27,8 +27,10 @@
 |---|---|
 | Windows x64，安装向导（推荐） | `CMCP-<版本号>-windows-x64-setup.exe` |
 | Windows x64，便携版 | `CMCP-<版本号>-windows-x64.zip` |
-| macOS，Apple 芯片 | `CMCP-<版本号>-macos-arm64.zip` |
-| macOS，Intel 芯片 | `CMCP-<版本号>-macos-x64.zip` |
+| macOS，Apple 芯片 | `CMCP-<版本号>-macos-arm64.dmg` |
+| macOS，Intel 芯片 | `CMCP-<版本号>-macos-x64.dmg` |
+
+同名的 macOS `.zip` 文件供应用内更新使用，安装时请下载 `.dmg`。
 
 ## 快速开始
 
@@ -46,10 +48,18 @@
 
 **macOS**
 
-1. 解压后打开 `CMCP.app`，管理界面会在浏览器中打开。
-2. 按上面的第 3 到第 5 步操作。
+1. 打开 `.dmg`，把 `CMCP.app` 拖到“应用程序”文件夹。
+2. 从“应用程序”打开 CMCP，然后按上面的第 3 到第 5 步操作。
 
-应用使用临时签名，没有经过 Apple 公证，所以首次打开时 macOS 可能要求你确认。
+应用使用临时签名，没有经过 Apple 公证，所以首次打开时 macOS 会阻止它。按你的系统版本放行一次即可：
+
+- **macOS 15 及以上**：在提示框里点 **完成**，再打开 **系统设置 → 隐私与安全性**，在页面下方找到 CMCP，点击 **仍要打开** 并确认。
+- **macOS 13 和 14**：在“应用程序”里按住 Control 点击 CMCP，选择 **打开**，再在提示框里点 **打开**。
+- **提示“已损坏，无法打开”**：这是下载隔离标记造成的。确认安装包的 `.sha256` 校验无误后，在“终端”运行下面的命令，再打开 CMCP：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CMCP.app
+```
 
 ## 主要功能
 
@@ -76,15 +86,21 @@
 
 **怎么更新？**
 
-打开 **设置 → 检查更新**，CMCP 会自动下载并校验更新。
+打开 **设置 → 检查更新**，CMCP 会自动下载并校验更新。在 macOS 上，如果新版本启动失败，会自动回到原来的版本。更新需要修改 CMCP 所在文件夹的权限，所以装在“应用程序”时请用管理员账户更新。临时签名的应用更新后，macOS 可能要求你重新授予辅助功能等权限。
 
 **怎么卸载？**
 
 在 Windows 上打开 **设置 → 关于 → 卸载 CMCP**，用安装向导安装的版本也可以从系统的“已安装的应用”里卸载。它会断开全部连接，尽可能移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。安装版会同时删除程序文件和快捷方式；便携版请之后手动删除程序文件夹和桌面快捷方式。
 
+在 macOS 上打开 **设置 → 关于 → 卸载 CMCP**。它同样会断开全部连接，尽可能移除云电脑上的 Claude 配置，并删除应用、`~/Library/Application Support/CMCP` 里的数据、钥匙串中保存的密码和登录项。云电脑未连接又没有保存密码时无法移除它上面的配置，CMCP 会告诉你有几台未移除。如果已经把应用拖进废纸篓，可以运行下面的命令删除数据，再到“钥匙串访问”中删除名为 `CMCP Mac cloud password` 的项目：
+
+```bash
+rm -rf ~/Library/Application\ Support/CMCP
+```
+
 **日志在哪里？**
 
-打开 **设置 → 日志文件夹**。在 Windows 上，错误会写入程序文件夹里的 `user\error.log`。
+打开 **设置 → 日志文件夹**。在 Windows 上，错误会写入程序文件夹里的 `user\error.log`。在 macOS 上，日志和设置都保存在 `~/Library/Application Support/CMCP`。
 
 **CMCP 是 Anthropic 的产品吗？**
 

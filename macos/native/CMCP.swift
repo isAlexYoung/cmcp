@@ -12,7 +12,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     var process: Process?
     var origin = "", token = "", pendingOutput = Data()
     var language = "zh-CN", closeAction = "tray"
-    var exitApproved = false, exitPending = false, ready = false, startup: Bool, testing: Bool
+    var exitApproved = false, exitPending = false, uninstalling = false, ready = false, startup: Bool, testing: Bool
     var reportDirectory: URL?, testResults: [String] = []
     var updateRequest: URL?
     var testStderr = Data()
@@ -26,7 +26,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     init(arguments: [String]) {
         startup = arguments.contains("--startup")
         testing = arguments.contains("--self-test")
-        stateDirectory = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("user", isDirectory: true)
+        if let custom = ProcessInfo.processInfo.environment["CMCP_STATE_DIR"], !custom.isEmpty { stateDirectory = URL(fileURLWithPath: custom, isDirectory: true) }
+        else { stateDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/CMCP", isDirectory: true) }
         if testing {
             let index = arguments.firstIndex(of: "--self-test")!
             if index + 1 < arguments.count { reportDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true) }
@@ -196,7 +197,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         }
         child.terminationHandler = { [weak self] child in DispatchQueue.main.async {
             guard let self = self else { return }
-            if self.exitApproved { return }
+            if self.exitApproved || self.uninstalling { return }
             if self.exitPending { self.exitApproved = true; NSApp.reply(toApplicationShouldTerminate: true); return }
             if !self.ready { self.fail("后台未能启动，请检查应用完整性。 status=" + String(child.terminationStatus)); return }
             if child.terminationStatus != 0 && !self.testing {
@@ -268,7 +269,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func applicationWillTerminate(_ notification: Notification) { DistributedNotificationCenter.default().removeObserver(self); trayTimer?.invalidate(); if process?.isRunning == true { process?.terminate() }; if let item = item { NSStatusBar.system.removeStatusItem(item) } }
     func request(_ route: String, _ body: [String: Any], completion: @escaping (Result<[String: Any], Error>) -> Void) {
         guard let url = URL(string: origin + route), !token.isEmpty else { completion(.failure(NSError(domain: "CMCP", code: 1))); return }
-        var request = URLRequest(url: url); request.httpMethod = "POST"; request.timeoutInterval = route.contains("update") ? 900 : route == "/api/tray" ? 5 : 20
+        var request = URLRequest(url: url); request.httpMethod = "POST"; request.timeoutInterval = route.contains("update") ? 900 : route == "/api/uninstall" ? 170 : route == "/api/tray" ? 5 : 20
         request.setValue(token, forHTTPHeaderField: "x-cmcp-token"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: request) { data, response, error in DispatchQueue.main.async {
@@ -301,19 +302,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 request("/api/tray", [:]) { [weak self] result in guard let self = self else { return }; if case .success(let value) = result, let targets = value["targets"] as? [[String: Any]] { self.trayTargets = targets; self.updateTrayMenu(); self.runTests() } else { self.finishTests(error: "Tray snapshot unavailable") } }
             }
             else if let file = updateRequest {
-                let legacy = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ClaudeMcpMac", isDirectory: true)
-                if [stateDirectory.standardizedFileURL, legacy.standardizedFileURL].contains(file.deletingLastPathComponent().standardizedFileURL),
+                if stateDirectory.standardizedFileURL == file.deletingLastPathComponent().standardizedFileURL,
                    let bytes = try? Data(contentsOf: file), let values = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                    values["installRoot"] as? String == bundle.bundleURL.path, let nonce = values["nonce"] as? String {
                     try? Data(nonce.utf8).write(to: URL(fileURLWithPath: file.path + ".ack"), options: .atomic)
-                    if file.deletingLastPathComponent().standardizedFileURL == legacy.standardizedFileURL {
-                        let cleanup = Process(); cleanup.executableURL = resources.appendingPathComponent("runtime/node")
-                        cleanup.arguments = [resources.appendingPathComponent("macos/finalize-update.mjs").path, file.path, stateDirectory.path, bundle.bundleURL.path]
-                        cleanup.standardOutput = FileHandle.nullDevice; cleanup.standardError = FileHandle.nullDevice
-                        try? cleanup.run()
-                    }
                 }
-            } else if !startup { promptShortcut() }
+            } else if !startup { warnIfNotInstalled() }
         case "open":
             guard let text = value["url"] as? String, let url = URL(string: text), ["https", "http"].contains(url.scheme), url.user == nil, url.password == nil,
                   url.scheme == "https" || url.host == "127.0.0.1" else { reply(id, error: "Invalid URL"); return }
@@ -339,7 +333,30 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                     reply(id, true)
                 } catch { reply(id, error: tr("开机自启设置失败，请检查登录项权限。", "Could not change login settings. Check Login Items permissions.")) }
             }
+        case "uninstall":
+            uninstalling = true
+            request("/api/uninstall", ["appPid": ProcessInfo.processInfo.processIdentifier]) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let value):
+                    self.reply(id, true)
+                    Task { @MainActor in
+                        try? await SMAppService.mainApp.unregister()
+                        if let failed = value["cloudFailed"] as? Int, failed > 0 {
+                            self.alert(self.tr("CMCP 已卸载，但有 \(failed) 台云电脑上的 Claude 配置未能移除。", "CMCP was uninstalled, but the Claude configuration could not be removed from \(failed) cloud PC(s)."))
+                        }
+                        self.exitApproved = true; NSApp.terminate(nil)
+                    }
+                case .failure:
+                    self.uninstalling = false
+                    if self.process?.isRunning != true { self.exitApproved = true; NSApp.terminate(nil); return }
+                    self.reply(id, error: self.tr("卸载失败。请确认你有权限修改 CMCP 所在的文件夹，然后重试。", "Could not uninstall. Check that you can change the folder CMCP is in, then try again."))
+                }
+            }
         case "update":
+            guard FileManager.default.isWritableFile(atPath: bundle.bundleURL.deletingLastPathComponent().path) else {
+                reply(id, error: tr("无法更新：你没有修改 CMCP 所在文件夹的权限。请用管理员账户更新，或重新安装新版本。", "Cannot update: you do not have permission to change the folder CMCP is in. Update from an administrator account, or install the new version again.")); return
+            }
             request("/api/update/download", [:]) { [weak self] result in
                 guard let self = self else { return }
                 switch result {
@@ -370,16 +387,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         if FileManager.default.fileExists(atPath: destination.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: destination.path)) != nil { throw NSError(domain: "CMCP", code: 3) }
         try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: bundle.bundleURL)
     }
-    func promptShortcut() {
-        if hasShortcut() { return }
-        // Preferences are private user state; never persist session credentials here.
-        let file = stateDirectory.appendingPathComponent("application-preferences.json")
-        if let data = try? Data(contentsOf: file), let values = try? JSONSerialization.jsonObject(with: data) as? [String: Any], values["shortcutPrompt"] as? Bool == false { return }
-        let alert = NSAlert(); alert.messageText = tr("是否创建桌面快捷方式？", "Create a desktop shortcut?")
-        alert.addButton(withTitle: tr("是", "Yes")); alert.addButton(withTitle: tr("否", "No")); alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = tr("下次不再提示", "Do not ask again")
-        if alert.runModal() == .alertFirstButtonReturn { do { try createShortcut() } catch { self.alert(tr("快捷方式未能创建。", "Could not create the shortcut.")); return } }
-        if alert.suppressionButton?.state == .on { request("/api/settings", ["shortcutPrompt": false]) { _ in } }
+    func warnIfNotInstalled() {
+        let path = bundle.bundleURL.path, parent = bundle.bundleURL.deletingLastPathComponent().path
+        guard path.contains("/AppTranslocation/") || (path.hasPrefix("/Volumes/") && !FileManager.default.isWritableFile(atPath: parent)) else { return }
+        alert(tr("请把 CMCP 拖到“应用程序”文件夹，再从那里打开。直接从磁盘映像运行时无法更新，也无法开机自启。", "Drag CMCP to the Applications folder and open it from there. Running directly from the disk image, it cannot update or start at sign-in."))
     }
     func applyUpdate(_ response: [String: Any]) throws {
         guard let update = response["directory"] as? [String: Any] else { throw NSError(domain: "CMCP", code: 4) }
@@ -421,7 +432,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         guard item.menu?.appearance == nil, window.appearance == nil else { finishTests(error: "Default appearance must follow the system"); return }
         testResults.append("native tray and fresh main window follow system appearance")
         window.setContentSize(NSSize(width: 700, height: 580))
-        let checks = ["document.querySelector('.card-head').click(); document.querySelector('.card').classList.contains('expanded')", "document.querySelector('.card-head').click(); !document.querySelector('.card').classList.contains('expanded')", "document.querySelectorAll('.card.selected').length === 1", "getComputedStyle(document.documentElement,'::-webkit-scrollbar').display === 'none'", "document.body.scrollWidth <= window.innerWidth", "document.querySelector('header h1').textContent === 'CMCP'", "document.querySelectorAll('.card').length === 2", "document.querySelectorAll('.state-label').length === 2", "window.cmcpTest.showSettings('dark','en'); document.documentElement.dataset.theme === 'dark'", "document.querySelector('header h2').textContent === 'Settings'", "window.cmcpTest.showEditor(); document.querySelectorAll('input[type=password]').length === 1", "document.querySelectorAll('header').length === 1"] + ["window.cmcpTest.showUpdate(); document.querySelector('.update-banner progress').value === 37", "window.cmcpTest.showUpdateFailed(); !document.querySelector('.update-banner').hidden && document.querySelector('.update-banner').classList.contains('failed')"]
+        let checks = ["document.querySelector('.card-head').click(); document.querySelector('.card').classList.contains('expanded')", "document.querySelector('.card-head').click(); !document.querySelector('.card').classList.contains('expanded')", "document.querySelectorAll('.card.selected').length === 1", "getComputedStyle(document.documentElement,'::-webkit-scrollbar').display === 'none'", "document.body.scrollWidth <= window.innerWidth", "document.querySelector('header h1').textContent === 'CMCP'", "document.querySelectorAll('.card').length === 2", "document.querySelectorAll('.state-label').length === 2", "window.cmcpTest.showSettings('dark','en'); document.documentElement.dataset.theme === 'dark'", "document.querySelector('header h2').textContent === 'Settings'", "window.cmcpTest.showEditor(); document.querySelectorAll('input[type=password]').length === 1", "document.querySelectorAll('header').length === 1"] + ["window.cmcpTest.showUpdate(); document.querySelector('.update-banner progress').value === 37", "window.cmcpTest.showUpdateFailed(); !document.querySelector('.update-banner').hidden && document.querySelector('.update-banner').classList.contains('failed')", "window.cmcpTest.showAbout(); document.querySelectorAll('button.uninstall').length === 1"]
         let trayChecks = ["window.cmcpTest.renameFirst() && document.activeElement === document.querySelector('input[type=text]')", "document.activeElement.selectionStart === 0 && document.activeElement.selectionEnd === document.activeElement.value.length"]
         let allChecks = checks + trayChecks
         func next(_ index: Int) {
