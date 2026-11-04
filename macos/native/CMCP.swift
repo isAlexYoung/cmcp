@@ -459,8 +459,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     }
     // Reported apart from `passed`, which the workflow pins; a failure here still fails the run.
     // Each check inspects animations in the same turn as the click, so timing cannot flake it.
+    // CI Macs have Reduce Motion on, so a second pass drops the style sheet's reduced-motion
+    // rule: the first pass proves pages switch directly, the second that the animations run.
     func runMotionChecks() {
-        let shared = "const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,app=document.querySelector('#app'),wait=ms=>new Promise(done=>setTimeout(done,ms));const until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};const turning=(node,name)=>{const running=node.getAnimations();return reduced?running.length===0:running.some(a=>a.animationName===name&&a.effect.getTiming().duration===180);};const fading=(node,property,ms)=>{const running=node.getAnimations();return reduced?running.length===0:running.some(a=>a.transitionProperty===property&&a.effect.getTiming().duration===ms);};const settle=async node=>{const slide=node.getAnimations().find(a=>a.transitionProperty==='grid-template-rows');if(slide){await Promise.race([slide.finished.catch(()=>{}),wait(1500)]);if(slide.playState==='running')slide.finish();}await wait(20);};const cardTop=index=>document.querySelectorAll('.card')[index].getBoundingClientRect().top;"
+        let shared = "const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches&&!window.cmcpMotionForced,app=document.querySelector('#app'),wait=ms=>new Promise(done=>setTimeout(done,ms));const until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};const turning=(node,name)=>{const running=node.getAnimations();return reduced?running.length===0:running.some(a=>a.animationName===name&&a.effect.getTiming().duration===180);};const fading=(node,property,ms)=>{const running=node.getAnimations();return reduced?running.length===0:running.some(a=>a.transitionProperty===property&&a.effect.getTiming().duration===ms);};const settle=async node=>{const slide=node.getAnimations().find(a=>a.transitionProperty==='grid-template-rows');if(slide){await Promise.race([slide.finished.catch(()=>{}),wait(1500)]);if(slide.playState==='running')slide.finish();}await wait(20);};const cardTop=index=>document.querySelectorAll('.card')[index].getBoundingClientRect().top;"
         let steps: [(name: String, body: String, snapshot: String?)] = [
             ("leaving the editor turns back while the page under the pointer stays clickable", "document.querySelector('.form-footer button').click();const add=document.querySelector('header .primary'),box=add.getBoundingClientRect();return !!document.querySelector('header h1')&&turning(app,'turn-back')&&document.elementFromPoint(box.left+box.width/2,box.top+box.height/2).closest('button')===add;", nil),
             ("opening settings turns forward and the page is already there", "document.querySelector('header .group button').click();return !!document.querySelector('header h2')&&!!document.querySelector('.segments.tabs')&&turning(app,'turn-forward');", nil),
@@ -469,22 +471,29 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             ("settings options are rounded groups without overlap, autostart is a switch, hover fades in 110 ms", "const groups=[...document.querySelectorAll('.sheet .segments')];const tidy=groups.length===3&&groups.every(group=>{const frame=group.getBoundingClientRect(),boxes=[...group.children].map(option=>option.getBoundingClientRect());return group.querySelectorAll('.chosen').length===1&&getComputedStyle(group).borderTopLeftRadius==='12px'&&getComputedStyle(group.children[0]).borderTopLeftRadius==='8px'&&boxes.every((box,i)=>box.left>=frame.left&&box.right<=frame.right&&box.top>frame.top&&box.bottom<frame.bottom&&(i===0||box.left>=boxes[i-1].right-.5));});const box=document.querySelector('input.switch'),look=getComputedStyle(box),thumb=getComputedStyle(box,'::before'),hover=getComputedStyle(groups[0].children[0]);return tidy&&box.type==='checkbox'&&box.getAttribute('role')==='switch'&&look.width==='44px'&&look.height==='24px'&&thumb.width==='18px'&&(reduced?hover.transitionDuration==='0s':hover.transitionProperty.startsWith('background-color')&&hover.transitionDuration.startsWith('0.11s'));", nil),
             ("choosing a theme marks it at once, fades in 110 ms and does not rebuild the group", "window.cmcpTest.showSettings('dark','en');const group=document.querySelectorAll('.sheet .segments')[1],light=group.children[0];void light.offsetWidth;light.click();const immediate=light.classList.contains('chosen')&&light.getAttribute('aria-pressed')==='true'&&group.querySelectorAll('.chosen').length===1&&fading(light,'background-color',110);const saved=await until(()=>document.documentElement.dataset.theme==='light');await wait(60);return immediate&&saved&&light.isConnected&&light.classList.contains('chosen');", nil),
             ("changing the language rebuilds the page but keeps keyboard focus on the choice", "const zh=document.querySelector('.sheet .segments.compact').children[0];zh.focus();zh.click();const saved=await until(()=>document.querySelector('header h2').textContent==='设置');const now=document.activeElement;await wait(250);return saved&&now!==zh&&now.dataset.focusKey==='界面语言:zh-CN'&&now.classList.contains('chosen')&&document.body.scrollWidth<=window.innerWidth;", "mac-settings.png"),
+            ("the autostart switch is on screen for the snapshot", "const box=document.querySelector('input.switch');box.scrollIntoView({block:'center'});await wait(100);const rect=box.getBoundingClientRect();return rect.top>=0&&rect.bottom<=window.innerHeight;", "mac-settings-switch.png"),
             ("going back turns back to the card list", "document.querySelector('header button').click();return !!document.querySelector('header h1')&&turning(app,'turn-back');", nil),
             ("expanding a card slides for 170 ms and the card below moves down", "const card=document.querySelector('.card'),head=card.querySelector('.card-head'),accordion=card.querySelector('.accordion'),before=cardTop(1);void head.offsetHeight;head.click();const started=card.classList.contains('expanded')&&head.getAttribute('aria-expanded')==='true'&&fading(accordion,'grid-template-rows',170);await settle(accordion);await wait(250);return started&&cardTop(1)>before;", "mac-home-expanded.png"),
             ("collapsing a card slides for 170 ms and the card below moves back", "const card=document.querySelector('.card'),head=card.querySelector('.card-head'),accordion=card.querySelector('.accordion'),before=cardTop(1);void head.offsetHeight;head.click();const started=!card.classList.contains('expanded')&&head.getAttribute('aria-expanded')==='false'&&fading(accordion,'grid-template-rows',170);await settle(accordion);return started&&cardTop(1)<before;", nil)
         ]
-        func next(_ index: Int) {
-            guard index < steps.count else { finishTests(error: nil); return }
+        let forceMotion = "const sheet=document.styleSheets[0],rule=[...sheet.cssRules].findIndex(item=>item.cssText.includes('prefers-reduced-motion'));if(rule<0)return false;sheet.deleteRule(rule);window.cmcpMotionForced=true;window.cmcpTest.showEditor();return getComputedStyle(document.querySelector('.form-footer button')).transitionDuration.startsWith('0.11s');"
+        func next(_ index: Int, _ pass: String, then done: @escaping () -> Void) {
+            guard index < steps.count else { done(); return }
             let step = steps[index]
             web.callAsyncJavaScript(shared + step.body, arguments: [:], in: nil, in: .page) { result in
-                guard case .success(let value) = result, (value as? Bool) == true else { self.finishTests(error: "Motion check failed: " + step.name + " (" + String(describing: result) + ")"); return }
-                self.motionResults.append(step.name)
-                if let snapshot = step.snapshot { self.saveSnapshot(snapshot) { next(index + 1) } } else { next(index + 1) }
+                guard case .success(let value) = result, (value as? Bool) == true else { self.finishTests(error: "Motion check failed: " + pass + ": " + step.name + " (" + String(describing: result) + ")"); return }
+                self.motionResults.append(pass + ": " + step.name)
+                if let snapshot = step.snapshot { self.saveSnapshot(snapshot) { next(index + 1, pass, then: done) } } else { next(index + 1, pass, then: done) }
             }
         }
         web.evaluateJavaScript("matchMedia('(prefers-reduced-motion: reduce)').matches") { value, _ in
             self.reducedMotion = value as? Bool ?? false
-            next(0)
+            next(0, self.reducedMotion ? "reduced motion" : "animated") {
+                self.web.callAsyncJavaScript(forceMotion, arguments: [:], in: nil, in: .page) { result in
+                    guard case .success(let value) = result, (value as? Bool) == true else { self.finishTests(error: "Could not turn off the reduced-motion rule (" + String(describing: result) + ")"); return }
+                    next(0, "animated") { self.finishTests(error: nil) }
+                }
+            }
         }
     }
     func finishTests(error: String?) {
