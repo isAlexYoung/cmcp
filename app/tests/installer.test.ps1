@@ -14,7 +14,8 @@ function Install([string]$Directory,[string]$Tasks){
 function Registered {Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CMCP_is1' -ErrorAction SilentlyContinue}
 function StartupValue {(Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).CMCPManager}
 function Preferences {Get-Content -LiteralPath (Join-Path $root 'user\application-preferences.json') -Raw -Encoding UTF8|ConvertFrom-Json}
-function ShortcutTarget([string]$File){$shell=New-Object -ComObject WScript.Shell;$shell.CreateShortcut($File).TargetPath}
+# Windows Script Host returns question marks for characters outside the ANSI code page.
+function ShortcutTarget([string]$File){(New-Object -ComObject Shell.Application).NameSpace((Split-Path $File -Parent)).ParseName((Split-Path $File -Leaf)).GetLink.Path}
 
 $base=Join-Path $env:RUNNER_TEMP ('cmcp-installer-'+[guid]::NewGuid().ToString('N'))
 # A space and non-ASCII characters are ordinary in Windows account and folder names.
