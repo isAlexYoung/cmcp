@@ -112,7 +112,7 @@ async function saveEditor(save,nav,head){
   catch(error){if(sshErrors.some(text=>t(text)===error.message))showEditorTab('ssh',nav,head);throw error;}
   finally{save.disabled=false;}}
 function editorView(){const layout=el('div','settings-page editor-page'),side=el('aside','settings-side'),nav=el('nav','settings-nav'),body=el('div','settings-body'),head=el('header'),main=el('main');
-  for(const [value,[label,name]]of Object.entries(editorTabs)){const option=button(label,()=>showEditorTab(value,nav,head),{icon:name});option.dataset.value=value;option.dataset.focusKey='nav:'+value;if(value!=='general'){const mark=el('span','filled');mark.setAttribute('aria-hidden','true');option.append(mark);}nav.append(option);}markChosen(nav,editor.category);
+  for(const [value,[label,name]]of Object.entries(editorTabs)){const option=button(value==='web'&&data.preferences.language==='en'?'Shared web':label,()=>showEditorTab(value,nav,head),{icon:name});option.dataset.value=value;option.dataset.focusKey='nav:'+value;if(value!=='general'){const mark=el('span','filled');mark.setAttribute('aria-hidden','true');option.append(mark);}nav.append(option);}markChosen(nav,editor.category);
   const leave=()=>{editor=null;go('home');};
   side.append(button('返回',leave,{icon:'back'}),el('div','side-label',t(editor.id?'编辑设备':'添加设备')),nav);editorHeading(head);main.append(editorColumn());
   const footer=el('div','form-footer'),save=button(editor.id?'保存':'添加',()=>saveEditor(save,nav,head),{icon:editor.id?'check':'plus',classes:'primary'});footer.append(button('取消',leave),save);main.append(footer);body.append(head,main);layout.append(side,body);root.replaceChildren(layout);editorMarks();}
