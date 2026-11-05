@@ -177,6 +177,8 @@ namespace CMCP {
             {"此设备正在处理操作，请完成后重试。","This device is busy. Try again after the operation finishes."},
             {"信任并继续","Trust and continue"},
             {"请核对这台服务器的指纹，确认后才会继续连接：","Check this server's fingerprint. The connection continues only after you confirm:"},
+            {"SSH 通道已停止；已打开的终端窗口不受影响。","The SSH channel stopped. Open terminal windows are not affected."},
+            {"无法停止 SSH 通道，请稍后重试。","The SSH channel could not be stopped. Try again later."},
         };
         internal static string Text(string value){string translated;return Language=="en"&&words.TryGetValue(value,out translated)?translated:value;}
         internal static string Message(string value){

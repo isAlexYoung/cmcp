@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {ManagerState} from '../state.mjs';
 import {createManager} from '../manager.mjs';
+import {runWorker,sshWorkerState,stopSshWorker} from '../../app/ssh-terminal.mjs';
 import {VARIABLE,answerPrompt,classify,commandScript,detectTerminals,dialog,openArguments,openTerminal,resolveTerminal,sshOptions,sshProblem,validHost,validUser,writeLaunch} from '../ssh.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -253,4 +254,31 @@ test('invalid persisted sign-in choices are rejected without replacing the file'
   const original=JSON.stringify({schema:1,logins:[],order:[],modes:{[randomUUID()]:'other'}});
   fs.writeFileSync(file,original);assert.throws(()=>new ManagerState(f.directory,f.secrets),/损坏/);
   assert.equal(fs.readFileSync(file,'utf8'),original);
+});
+test('a real worker reports its state and stops for this device only',async t=>{
+  const f=fixture(t),id='device-a';
+  fs.writeFileSync(path.join(f.directory,'ssh-logins.json'),JSON.stringify({logins:[{id,host:'203.0.113.24',port:22,username:'root',method:'password',keyPath:''},{id:'device-b',host:'203.0.113.25',port:22,username:'root',method:'password',keyPath:''}]}));
+  assert.equal(sshWorkerState(f.directory,id),'');
+  let aborted=false;
+  const worker=runWorker({directory:f.directory,id,owner:process.pid,createDispatcher:async()=>({forward:async()=>({result:{}}),close:async()=>{}}),connect:({signal,status})=>new Promise(resolve=>{status('ready','ok');signal.addEventListener('abort',()=>{aborted=true;resolve();},{once:true});})});
+  for(let i=0;i<100&&sshWorkerState(f.directory,id)!=='ready';i++)await new Promise(done=>setTimeout(done,50));
+  assert.equal(sshWorkerState(f.directory,id),'ready');assert.equal(sshWorkerState(f.directory,'device-b'),'');
+  assert.equal(sshWorkerState(f.directory,id,Date.now()+60000),'','a record nobody refreshes counts as stopped');
+  await assert.rejects(stopSshWorker(f.directory,'device-b'));assert.equal(sshWorkerState(f.directory,id),'ready');
+  await stopSshWorker(f.directory,id);await worker;
+  assert.ok(aborted);assert.equal(sshWorkerState(f.directory,id),'');
+});
+test('the manager reports and stops one SSH channel without touching a web connection',async t=>{
+  const f=fixture(t),channels=new Map(),stops=[];
+  const m=await createManager({...f,detectShared:async()=>true,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}},terminals:()=>[],channelState:(directory,id)=>channels.get(id)||'',stopChannel:async(directory,id)=>{stops.push(id);channels.delete(id);}});t.after(()=>m.close());
+  const call=(route,body={})=>fetch(m.origin+'/api/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:JSON.stringify(body)});
+  const state=async()=>(await (await fetch(m.origin+'/api/state',{headers:{'x-cmcp-token':m.token}})).json()).targets;
+  const id=(await (await call('targets/save',{...web(),ssh:ssh(),preferSsh:true})).json()).id;
+  const plain=(await (await call('targets/save',web('https://second.invalid'))).json()).id;
+  assert.equal((await call('targets/start',{id})).status,200);
+  channels.set(id,'ready');
+  let list=await state();assert.equal(list.find(x=>x.id===id).sshState,'ready');assert.equal(list.find(x=>x.id===plain).sshState,undefined);
+  assert.equal((await call('targets/ssh-stop',{id})).status,200);assert.deepEqual(stops,[id]);
+  list=await state();assert.equal(list.find(x=>x.id===id).sshState,'');assert.equal(list.find(x=>x.id===id).enabled,true,'the web connection keeps running');
+  assert.equal((await call('targets/ssh-stop',{id:plain})).status,400);assert.deepEqual(stops,[id]);
 });

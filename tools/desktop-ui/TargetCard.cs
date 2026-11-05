@@ -27,6 +27,9 @@ namespace CMCP {
         internal Palette Colors=Palette.Create(false);
         internal bool Selected, Expanded, BusyConnect, BusyStop;
         internal SshLogin Ssh;
+        // The background SSH channel: empty while nothing runs, otherwise its reported phase.
+        internal string SshState="";
+        internal bool SshStopping;
         // Only the card's own button changes here; a running web connection is not touched.
         internal bool SshActive { get { return Preference.loginMode=="ssh"||(Preference.loginMode!="web"&&Ssh!=null&&(Ssh.active||Target.Url.Length==0)); } }
         internal string SshAddress {get{return Ssh==null?"":Ssh.Address;}}
@@ -127,7 +130,7 @@ namespace CMCP {
             Color fill=Selected?colors.Selected:colors.Surface;IconNote.Apply(colors,fill);
             Details.Apply(colors);Details.BackColor=fill;
             StatusText.BackColor=fill;
-            StatusText.ForeColor=Target.State=="connected"?colors.Success:colors.Muted;
+            StatusText.ForeColor=(SshActive?SshState=="ready":Target.State=="connected")?colors.Success:colors.Muted;
             foreach(var button in new[]{LoginSwitch,Connect,Edit,Copy,Delete,Toggle}){
                 button.Colors=colors;button.BackColor=fill;button.Invalidate();
             }
@@ -144,20 +147,19 @@ namespace CMCP {
             Connect.Enabled=!BusyStop;
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
-            StatusText.Text=BusyStop?"正在停止":(Target.State=="recovering"||Target.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
-            StatusText.Text=L.Text(StatusText.Text);StatusText.AccessibleName=StatusText.Text;
+            string shown=SshActive?(SshStopping?"正在停止":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):BusyStop?"正在停止":(Target.State=="recovering"||Target.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
+            StatusText.Text=(SshActive?"ssh":"web")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
             tips.SetToolTip(Connect,connected?"点击停止此设备的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台设备");
             Connect.AccessibleName=L.Text(Connect.Text)+" · "+Target.Url;
             Details.Stop.Text=BusyStop?"正在停止":"停止连接";
             LoginSwitch.Text=SshActive?"SSH":"网页";LoginSwitch.Enabled=!BusyStop;
             Details.Open.Text=SshActive?"打开终端":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":"monitor";
-            bool webRunning=Target.Url.Length>0&&(connected||connecting);
-            Details.Stop.Visible=!SshActive||webRunning;Details.Logs.Visible=Target.Url.Length>0;
+            Details.Stop.Visible=true;Details.Logs.Visible=Target.Url.Length>0;
             tips.SetToolTip(Copy,SshActive?"复制 IP":"复制设备地址");Copy.AccessibleName=L.Text(SshActive?"复制 IP":"复制设备地址");
             if(SshActive){
                 Connect.Text="打开终端";Connect.Glyph="terminal";Connect.Primary=false;Connect.Neutral=true;Connect.Enabled=true;
                 tips.SetToolTip(Connect,"用设置里选定的终端连接这台设备");Connect.AccessibleName=L.Text(Connect.Text)+" · "+SshAddress;
-                if(!webRunning&&!BusyStop){StatusText.Text="SSH";StatusText.AccessibleName="SSH";}
+                Details.Stop.Enabled=SshState.Length>0&&!SshStopping;Details.Stop.Text=SshStopping?"正在停止":"停止连接";
             }
             Details.PerformLayout();LoginSwitch.Invalidate();Details.Open.Invalidate();
             Connect.Invalidate();StatusText.Invalidate();
@@ -238,7 +240,7 @@ namespace CMCP {
             Copy.Bounds=new Rectangle(x+188,y,36,40);
             Delete.Bounds=new Rectangle(x+232,y,36,40);
             Toggle.Bounds=new Rectangle(Width-54,Compact?32:38,36,40);
-            StatusText.Bounds=new Rectangle(Width-250,Compact?103:38,176,40);
+            StatusText.Bounds=new Rectangle(Width-284,Compact?103:38,210,40);
             Details.Bounds=new Rectangle(20,HeaderHeight,Math.Max(1,Width-40),Details.NeededHeight(Width-40));
             if(Height!=FinalHeight)Height=FinalHeight;
         }

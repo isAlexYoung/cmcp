@@ -142,6 +142,22 @@ export async function ensureSshWorker({directory,id,owner,ssh='ssh',timeout=1800
   throw Error('SSH MCP 准备超时；通道会继续恢复，请查看连接或重新打开终端');
 }
 
+// Empty while nothing runs. The worker rewrites its record every second.
+export function sshWorkerState(directory,id,now=Date.now()) {
+  const {file}=workerPaths(directory,id);
+  try{
+    safeFile(file);const record=JSON.parse(fs.readFileSync(file,'utf8'));
+    return now-record.at>10000||!alive(record.pid)?'':String(record.state||'');
+  }catch{return '';}
+}
+// Only this device's background channel; a terminal window the user opened stays theirs.
+export async function stopSshWorker(directory,id) {
+  const paths=workerPaths(directory,id);
+  await queryWorker(paths,'stop');
+  for(let i=0;i<100;i++){await delay(100);try{await queryWorker(paths);}catch{return;}}
+  throw Error('SSH MCP 后台仍在停止，请稍后重试');
+}
+
 export async function stopSshWorkers(directory) {
   const folder=path.join(directory,'ssh-mcp');
   if(!fs.existsSync(folder))return;

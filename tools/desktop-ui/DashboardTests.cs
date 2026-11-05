@@ -98,7 +98,7 @@ namespace CMCP {
                 check(form.LayoutFits(),"real wide WinForms cards and toolbar fit inside window");
                 check(a.Connect.Text=="成功连接"&&a.Connect.Primary&&b.Connect.Text=="未连接"&&!b.Connect.Primary,"connection pill reflects confirmed versus disconnected state");
                 b.Target.State="unstable";b.TestHover(true);b.UpdateActions();
-                check(b.StatusText.Text=="正在恢复"&&b.Connect.Text=="连接中","soft recovery keeps the card in an active connection state");
+                check(b.StatusText.Text=="web · 正在恢复"&&b.Connect.Text=="连接中","soft recovery keeps the card in an active connection state");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","soft recovery stop action cancels only B instead of starting another connection");
                 b.TestHover(true);b.Connect.PerformClick();check(b.Target.State=="connected"&&a.Target.State=="connected","card connect dispatch addresses B only in isolated interactive demo");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","card disconnect leaves A intact in isolated interactive demo");
@@ -129,9 +129,9 @@ namespace CMCP {
                 check(form.Text=="CMCP","native title contains only CMCP");
                 check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");
                 check(Math.Abs(a.Font.Size-11F*UiFont.Scale)<0.01f&&a.Connect.Height==40&&a.Edit.Width==36&&a.Connect.Width==136,"card text and interactive controls are enlarged together");
-                b.ClearPointer();form.RefreshState();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
-                b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
-                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
+                b.ClearPointer();form.RefreshState();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="web · 已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
+                b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="web · 连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
+                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="web · 已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
                 b.TestHover(true);check(b.ActionsVisible&&!b.StatusText.Visible,"hover replaces idle status with full action set");
                 b.ClearPointer();for(int i=0;i<20;i++){b.TestHover(true);b.ClearPointer();b.UpdateActions();}
                 check(b.StatusText.Visible&&!b.ActionsVisible&&b.StatusText.Text.Length>0,"repeated hover exits and state updates never leave a blank status slot");

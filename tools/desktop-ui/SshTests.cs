@@ -15,6 +15,7 @@ namespace CMCP {
         static string Decoded(string arguments){string marker="-EncodedCommand ";int at=arguments.IndexOf(marker,StringComparison.Ordinal);string rest=arguments.Substring(at+marker.Length).Split(' ','"')[0];return Encoding.Unicode.GetString(Convert.FromBase64String(rest));}
         internal static void Run(string temp,Action<bool,string> check){
             Validation(check);Storage(temp,check);Answers(check);Commands(check);
+            Channel(temp,check);
             RealScript(temp,check);RealAskpass(temp,check);
             Editor(temp,check);Window(check);RealFiles(temp,check);CardDisplay(check);
         }
@@ -182,6 +183,24 @@ namespace CMCP {
                 page.ShowGeneral();page.HideAddress.Checked=false;page.Save.PerformClick();Pump();check(!card.Preference.hideAddress,"turning hiding off restores the address without changing the device");
             }
         }
+        // The record format and pipe protocol belong to app/ssh-terminal.mjs.
+        static void Channel(string temp,Action<bool,string> check){
+            check(SshWorkers.Key(@"F:\state","device")=="d9f86b451aa7791821a1e3c3f5a87771452b430dac0f03e40012326c2eebca66","the channel key matches the one the worker computes");
+            string state=Path.Combine(temp,"ssh-channel"),folder=Path.Combine(state,"ssh-mcp");Directory.CreateDirectory(folder);
+            string file=SshWorkers.RecordFile(state,"d");
+            check(SshWorkers.State(state,"d")=="","no record means the channel is stopped");
+            long now=(DateTime.UtcNow.Ticks-new DateTime(1970,1,1,0,0,0,DateTimeKind.Utc).Ticks)/TimeSpan.TicksPerMillisecond;int self=Process.GetCurrentProcess().Id;
+            Action<int,long,string> record=(pid,at,phase)=>File.WriteAllText(file,"{\"pid\":"+pid+",\"at\":"+at+",\"state\":\""+phase+"\",\"token\":\""+new string('a',64)+"\"}");
+            record(self,now,"ready");check(SshWorkers.State(state,"d")=="ready","a fresh record reports its phase");
+            record(self,now-60000,"ready");check(SshWorkers.State(state,"d")=="","a record nobody refreshes counts as stopped");
+            record(1999999,now,"ready");check(SshWorkers.State(state,"d")=="","a record from a dead process counts as stopped");
+            File.WriteAllText(file,"{broken");check(SshWorkers.State(state,"d")==null,"an unreadable record keeps the last known state");
+            record(self,now,"ready");check(!SshWorkers.Stop(state,"d",200),"stopping reports failure when no worker answers");
+            string received=null;
+            var server=new System.Threading.Thread(()=>{using(var pipe=new System.IO.Pipes.NamedPipeServerStream("cmcp-ssh-"+SshWorkers.Key(state,"d"),System.IO.Pipes.PipeDirection.InOut)){pipe.WaitForConnection();var bytes=new List<byte>();for(int b=pipe.ReadByte();b>=0&&b!='\n';b=pipe.ReadByte())bytes.Add((byte)b);received=Encoding.UTF8.GetString(bytes.ToArray());var reply=Encoding.UTF8.GetBytes("{}\n");pipe.Write(reply,0,reply.Length);pipe.Flush();pipe.WaitForPipeDrain();}}){IsBackground=true};server.Start();
+            bool stopped=SshWorkers.Stop(state,"d",3000);server.Join(3000);
+            check(stopped&&received!=null&&received.Contains(new string('a',64))&&received.Contains("\"action\":\"stop\""),"stopping sends the worker's token and the stop action");
+        }
         static void Window(Action<bool,string> check){
             using(var form=new Manager(true)){
                 form.Show();Pump();
@@ -192,9 +211,25 @@ namespace CMCP {
                 b.SetExpanded(true,false);Pump();check(b.Details.Stop.Visible,"web sign-in offers stop in the details");
                 b.LoginSwitch.PerformClick();Pump();
                 check(b.SshActive&&b.LoginSwitch.Text=="SSH"&&b.Connect.Text=="打开终端"&&b.Connect.Glyph=="terminal"&&b.Target.State==state,"switching changes the card's button and leaves the web connection alone");
-                check(!b.Details.Stop.Visible&&b.Details.Open.Text=="打开终端","stopped SSH mode offers only the terminal in the details");
+                check(b.Details.Stop.Visible&&!b.Details.Stop.Enabled&&b.Details.Open.Text=="打开终端"&&b.StatusText.Text=="ssh · 已停止","a stopped SSH channel shows its state and has nothing to stop");
                 b.Connect.PerformClick();Pump();check(b.Target.State==state,"opening a terminal never starts the web connection");
                 b.LoginSwitch.PerformClick();Pump();check(!b.SshActive&&b.Connect.Text!="打开终端"&&b.Details.Stop.Visible,"switching back restores shared web sign-in");b.SetExpanded(false,false);Pump();
+                var channels=new Dictionary<string,string>();var stops=new List<string>();bool stopWorks=true;
+                form.ReadSshState=(directory,id)=>{string phase;return channels.TryGetValue(id,out phase)?phase:"";};
+                form.StopSshWorker=(directory,id)=>{stops.Add(id);if(stopWorks)channels.Remove(id);return stopWorks;};
+                b.LoginSwitch.PerformClick();Pump();b.SetExpanded(true,false);
+                channels["preview-b"]="connecting";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 连接中"&&b.Details.Stop.Enabled,"a starting SSH channel can already be stopped");
+                channels["preview-b"]="recovering";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 正在恢复","a recovering SSH channel says so");
+                channels["preview-b"]="failed";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 连接异常"&&b.Details.Stop.Enabled,"a failed SSH channel can still be stopped");
+                channels["preview-b"]="ready";form.RefreshState();Pump();
+                check(b.StatusText.Text=="ssh · 已连接"&&b.StatusText.ForeColor.ToArgb()==b.Colors.Success.ToArgb()&&b.Details.Stop.Enabled&&b.Details.Stop.Visible,"a ready SSH channel shows as connected and can be stopped");
+                check(b.Target.State==state&&b.Details.Logs.Left>b.Details.Stop.Right,"the stop button sits where shared web sign-in has it");
+                stopWorks=false;b.Details.Stop.PerformClick();for(int i=0;i<40&&stops.Count==0;i++)Pump();Pump();
+                check(stops.Count==1&&b.StatusText.Text=="ssh · 已连接"&&b.Details.Stop.Enabled,"a failed stop leaves the channel shown as connected");
+                stopWorks=true;b.Details.Stop.PerformClick();for(int i=0;i<40&&b.SshState.Length>0;i++){Pump();System.Threading.Thread.Sleep(10);}Pump();form.RefreshState();Pump();
+                check(stops.Count==2&&stops.All(id=>id=="preview-b")&&b.StatusText.Text=="ssh · 已停止"&&!b.Details.Stop.Enabled&&b.Target.State==state,"stopping affects only this device's SSH channel, never its web connection");
+                b.Details.Stop.PerformClick();Pump();check(stops.Count==2,"there is nothing to stop once the channel has stopped");
+                b.LoginSwitch.PerformClick();Pump();check(b.StatusText.Text.StartsWith("web · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();
                 a.LoginSwitch.PerformClick();Pump();
                 check(form.Editor==null&&a.SshActive&&a.Ssh==null,"a card without SSH details switches without opening the editor");
                 a.Connect.PerformClick();Pump();check(form.Editor==null&&ContainsText(form,"还没有填写 SSH 信息，请编辑设备后再连接。")&&a.Target.State=="connected","missing SSH details are reported only when connecting and retain the running web link");

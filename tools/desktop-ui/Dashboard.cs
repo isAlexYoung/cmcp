@@ -47,6 +47,9 @@ namespace CMCP {
         internal readonly Dictionary<string,TargetCard> Cards = new Dictionary<string,TargetCard>(StringComparer.Ordinal);
         internal UiPreferences Preferences;
         internal SshStore Ssh;
+        internal Func<string,string,string> ReadSshState=SshWorkers.State;
+        internal Func<string,string,bool> StopSshWorker=(directory,id)=>SshWorkers.Stop(directory,id);
+        readonly HashSet<string> sshStopping=new HashSet<string>(StringComparer.Ordinal);
         internal Action<ProcessStartInfo> StartTerminal=info=>{using(Process.Start(info)){}};
         Palette colors;
         List<Target> targets = new List<Target>();
@@ -248,7 +251,19 @@ namespace CMCP {
             }catch{Error("操作未能启动，请确认便携包完整且 Windows PowerShell 可用。");}
         }
         void ConnectCard(TargetCard card){Select(card);if(card.SshActive){OpenTerminal(card);return;}bool active=card.Target.State=="connected"||card.BusyConnect||card.Target.State=="connecting"||card.Target.State=="configuring"||card.Target.State=="waiting-login"||card.Target.State=="recovering"||card.Target.State=="unstable";if(active)StopCard(card);else Launch("connect",card,"");}
-        void StopCard(TargetCard card){Launch("stop",card,"");}
+        void StopCard(TargetCard card){if(card.SshActive)StopSsh(card);else Launch("stop",card,"");}
+        // Stops the background channel of this device only. A terminal window the user opened stays theirs.
+        async void StopSsh(TargetCard card){
+            Select(card);string name=card.Target.Name;
+            if(card.SshState.Length==0||!sshStopping.Add(name))return;
+            card.SshStopping=true;card.UpdateActions();
+            bool stopped=false;try{stopped=await Task.Run(()=>StopSshWorker(stateDirectory,name));}catch{}
+            if(IsDisposed)return;
+            if(stopped){notice="SSH 通道已停止；已打开的终端窗口不受影响。";status.Text=L.Text(notice);}
+            else{sshStopping.Remove(name);card.SshStopping=false;Error("无法停止 SSH 通道，请稍后重试。");}
+            RefreshState();
+        }
+        int ConnectedDevices(){TargetCard card;return targets.Count(t=>t.State=="connected"||(Cards.TryGetValue(t.Name,out card)&&card.SshState=="ready"));}
         internal void OpenAdd(){
             if(BackendStarting||ExitPending)return;
             if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;
@@ -415,13 +430,16 @@ namespace CMCP {
             CollectActions();
             var snapshot=preview?new Snapshot{Running=true,Targets=!previewInitialized?Demo().Targets:targets}:LocalState.Load(stateDirectory);targets=WithSshOnly(snapshot.Targets);previewInitialized=true;
             count.Text="设备  ·  "+targets.Count;
-            status.Text=notice.Length>0?notice:preview?"交互预览 · 示例数据，不会连接 VPS":snapshot.ReadError?"本地状态暂时无法完整读取，将自动刷新":Preferences.ReadError?"界面偏好文件无法读取，已保留原文件":Ssh.ReadError?"SSH 配置文件无法读取，已保留原文件":snapshot.Stale?"后台状态未更新，请检查连接":snapshot.Running?targets.Count(t=>t.State=="connected")+" 台已连接 · 每台设备独立控制":"后台尚未运行 · 打开界面不会自动连接";
-            if(L.Language=="en"){count.Text="Devices  ·  "+targets.Count;status.Text=snapshot.Running&&notice.Length==0&&!preview&&!snapshot.ReadError&&!snapshot.Stale?targets.Count(t=>t.State=="connected")+" connected · Each PC is controlled independently":L.Message(status.Text);empty.Text="No devices yet\r\nAdd a device to get started.";}else empty.Text="还没有设备\r\n点击右上角「添加设备」，保存后即可连接。";
+            status.Text=notice.Length>0?notice:preview?"交互预览 · 示例数据，不会连接 VPS":snapshot.ReadError?"本地状态暂时无法完整读取，将自动刷新":Preferences.ReadError?"界面偏好文件无法读取，已保留原文件":Ssh.ReadError?"SSH 配置文件无法读取，已保留原文件":snapshot.Stale?"后台状态未更新，请检查连接":snapshot.Running?ConnectedDevices()+" 台已连接 · 每台设备独立控制":"后台尚未运行 · 打开界面不会自动连接";
+            if(L.Language=="en"){count.Text="Devices  ·  "+targets.Count;status.Text=snapshot.Running&&notice.Length==0&&!preview&&!snapshot.ReadError&&!snapshot.Stale?ConnectedDevices()+" connected · Each PC is controlled independently":L.Message(status.Text);empty.Text="No devices yet\r\nAdd a device to get started.";}else empty.Text="还没有设备\r\n点击右上角「添加设备」，保存后即可连接。";
             toolbar.Enabled=list.Enabled=!BackendStarting;
             foreach(var key in Cards.Keys.Where(key=>!targets.Any(t=>t.Name==key)).ToArray()){var old=Cards[key];Cards.Remove(key);list.Controls.Remove(old);old.Dispose();}
             if(!targets.Any(t=>t.Name==selected))selected=targets.Count>0?targets[0].Name:"";
             foreach(var target in targets){TargetCard card;if(!Cards.TryGetValue(target.Name,out card)){card=CreateCard(target);Cards.Add(target.Name,card);list.Controls.Add(card);}
-                card.Ssh=Ssh.Get(target.Name);card.BusyConnect=children.Any(p=>p.Name==target.Name&&p.Action=="connect"&&!p.Superseded);card.BusyStop=children.Any(p=>p.Name==target.Name&&(p.Action=="stop"||p.Action=="remove"));
+                card.Ssh=Ssh.Get(target.Name);
+                string channel=card.Ssh==null?"":preview&&ReadSshState==SshWorkers.State?"":ReadSshState(stateDirectory,target.Name);if(channel!=null)card.SshState=channel;
+                if(card.SshState.Length==0)sshStopping.Remove(target.Name);card.SshStopping=sshStopping.Contains(target.Name);
+                card.BusyConnect=children.Any(p=>p.Name==target.Name&&p.Action=="connect"&&!p.Superseded);card.BusyStop=children.Any(p=>p.Name==target.Name&&(p.Action=="stop"||p.Action=="remove"));
                 string message;if(progress.TryGetValue(target.Name,out message)){
                     target.Detail=LocalState.WorkerDetail(target,message,card.BusyConnect);
                 }
