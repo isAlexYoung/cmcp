@@ -10,6 +10,15 @@ on:
         description: 'Release notes shown on the release page'
         required: true
         type: string
+      platforms:
+        description: 'all, or windows now and macos later under the same version'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
 permissions:
   contents: read
 concurrency:
@@ -45,20 +54,30 @@ jobs:
         uses: actions/github-script@v7
         env:
           RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_PLATFORMS: ${{ inputs.platforms }}
         with:
           script: |
+            // Adding the Mac side needs the release to exist already.
+            if (process.env.RELEASE_PLATFORMS === 'macos') {
+              await github.rest.repos.getReleaseByTag({...context.repo,tag:'v'+process.env.RELEASE_VERSION});
+              return;
+            }
             try {
               await github.rest.repos.getReleaseByTag({...context.repo,tag:'v'+process.env.RELEASE_VERSION});
               throw Error('Version is already published; use the next shared version');
             } catch (error) { if (error.status !== 404) throw error; }
   windows:
     needs: version
+    if: ${{ inputs.platforms != 'macos' }}
     uses: ./.github/workflows/validate.yml
   macos:
     needs: version
+    if: ${{ inputs.platforms != 'windows' }}
     uses: ./.github/workflows/macos.yml
   publish:
-    needs: [windows, macos]
+    needs: [version, windows, macos]
+    # A side left out on purpose is skipped; anything else must have passed.
+    if: ${{ always() && !cancelled() && needs.version.result == 'success' && (inputs.platforms == 'macos' || needs.windows.result == 'success') && (inputs.platforms == 'windows' || needs.macos.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -67,50 +86,74 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.platforms != 'macos' }}
         with:
           name: cmcp-windows-x64-${{ github.sha }}
           path: incoming/windows
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.platforms != 'windows' }}
         with:
           name: cmcp-macos-arm64-${{ github.sha }}
           path: incoming/arm64
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.platforms != 'windows' }}
         with:
           name: cmcp-macos-x64-${{ github.sha }}
           path: incoming/x64
-      - name: Verify a common source and stage every platform
+      - name: Verify a common source and stage the chosen platforms
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-        run: python3 tools/prepare-release.py --packages incoming --output release-packages --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
+          RELEASE_PLATFORMS: ${{ inputs.platforms }}
+        run: python3 tools/prepare-release.py --packages incoming --output release-packages --version "$RELEASE_VERSION" --commit "$GITHUB_SHA" --platforms "$RELEASE_PLATFORMS"
       - uses: actions/upload-artifact@v4
         with:
           name: cmcp-unified-${{ inputs.version }}-${{ github.sha }}
           path: release-packages/
-      - name: Publish one version with all platform assets
+      - name: Publish the chosen platform assets under one version
         uses: actions/github-script@v7
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_PLATFORMS: ${{ inputs.platforms }}
         with:
           script: |
             const fs = require('fs'), crypto = require('crypto');
-            const version = process.env.RELEASE_VERSION, tag = 'v' + version;
+            const version = process.env.RELEASE_VERSION, tag = 'v' + version, platforms = process.env.RELEASE_PLATFORMS;
             const {owner, repo} = context.repo;
+            const body = process.env.RELEASE_NOTES.replace(/^\uFEFF/,'').trim();
+            const files = fs.readdirSync('release-packages').sort();
+            const counts = {all: 14, windows: 6, macos: 8};
+            if (files.length !== counts[platforms]) throw Error('Expected '+counts[platforms]+' assets for '+platforms+', found '+files.length);
+            const upload = async (release_id, name, data, hash) => {
+              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':name.endsWith('.dmg')?'application/x-apple-diskimage':'text/plain','content-length':data.length}});
+              if (asset.state !== 'uploaded' || asset.size !== data.length || asset.digest !== 'sha256:'+hash) throw Error('Asset verification failed: '+name);
+            };
+            if (platforms === 'macos') {
+              // Windows assets are never touched. Re-running after a failed upload skips what already arrived intact.
+              const {data: release} = await github.rest.repos.getReleaseByTag({owner,repo,tag});
+              if (release.draft) throw Error('The release is still a draft');
+              for (const name of files) {
+                if (!name.includes('-macos-')) throw Error('Not a Mac asset: '+name);
+                const data = fs.readFileSync('release-packages/'+name);
+                const hash = crypto.createHash('sha256').update(data).digest('hex');
+                const existing = release.assets.find(asset => asset.name === name);
+                if (existing) { if (existing.digest !== 'sha256:'+hash) throw Error('A different asset is already published: '+name); continue; }
+                await upload(release.id, name, data, hash);
+              }
+              if (!(release.body || '').includes(body)) await github.rest.repos.updateRelease({owner,repo,release_id:release.id,body:(release.body || '').trim()+'\n\n'+body});
+              core.notice('Added the Mac assets to '+release.html_url);
+              return;
+            }
             try { await github.rest.repos.getReleaseByTag({owner,repo,tag}); throw Error('Release already exists; refusing to replace it'); }
             catch (error) { if (error.status !== 404) throw error; }
             try {
               const {data: ref} = await github.rest.git.getRef({owner,repo,ref:'tags/'+tag});
               if (ref.object.type !== 'commit' || ref.object.sha !== context.sha) throw Error('Tag points to a different source');
             } catch (error) { if (error.status !== 404) throw error; }
-            const body = process.env.RELEASE_NOTES.replace(/^\uFEFF/,'').trim();
             const {data: release} = await github.rest.repos.createRelease({owner,repo,tag_name:tag,target_commitish:context.sha,name:'CMCP '+version,body,draft:true,prerelease:false,make_latest:'false'});
-            const files = fs.readdirSync('release-packages').sort();
-            if (files.length !== 14) throw Error('Expected four archives, the Windows installer, two Mac disk images and seven checksums');
             for (const name of files) {
               const data = fs.readFileSync('release-packages/'+name);
-              const hash = crypto.createHash('sha256').update(data).digest('hex');
-              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id:release.id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':name.endsWith('.dmg')?'application/x-apple-diskimage':'text/plain','content-length':data.length}});
-              if (asset.state !== 'uploaded' || asset.size !== data.length || asset.digest !== 'sha256:'+hash) throw Error('Asset verification failed: '+name);
+              await upload(release.id, name, data, crypto.createHash('sha256').update(data).digest('hex'));
             }
             await github.rest.repos.updateRelease({owner,repo,release_id:release.id,draft:false,prerelease:false,make_latest:'true'});
             core.notice('Published '+release.html_url);

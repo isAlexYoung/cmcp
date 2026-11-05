@@ -1,4 +1,4 @@
-"""Stage one release from Windows and both Mac builds of the same commit."""
+"""Stage one release from the Windows and Mac builds of one commit, or from one side only."""
 import argparse
 import hashlib
 import json
@@ -61,7 +61,21 @@ def inspect_disk_image(file):
             raise ValueError('Not a disk image: ' + file.name)
 
 
-def prepare(packages, output, version, commit):
+def planned(platforms):
+    """Package platforms, extra installers and whether the source archive belongs to this publish."""
+    windows = (('windows-x64',), ('windows-x64-setup.exe',))
+    mac = (('macos-arm64', 'macos-x64'), ('macos-arm64.dmg', 'macos-x64.dmg'))
+    if platforms == 'all':
+        return windows[0] + mac[0], windows[1] + mac[1], True
+    if platforms == 'windows':
+        return windows[0], windows[1], True
+    if platforms == 'macos':
+        # Added later to a release that already holds the source archive.
+        return mac[0], mac[1], False
+    raise ValueError('Unknown platforms: ' + str(platforms))
+
+
+def prepare(packages, output, version, commit, platforms='all'):
     if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', version) or not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('Canonical version and full source commit required')
     for name in ('app/package.json', 'macos/package.json'):
@@ -69,7 +83,8 @@ def prepare(packages, output, version, commit):
         if package['version'] != version:
             raise ValueError('Source package version mismatch')
     selected = []
-    for platform in ('windows-x64', 'macos-arm64', 'macos-x64'):
+    package_platforms, installers, with_source = planned(platforms)
+    for platform in package_platforms:
         name = 'CMCP-' + version + '-' + platform + '.zip'
         files = list(packages.rglob(name))
         if len(files) != 1:
@@ -81,7 +96,7 @@ def prepare(packages, output, version, commit):
         inspect_package(file, version, commit, platform)
         selected.append(file)
     # Built from the packages above and exercised by the Windows and Mac jobs.
-    for suffix in ('windows-x64-setup.exe', 'macos-arm64.dmg', 'macos-x64.dmg'):
+    for suffix in installers:
         name = 'CMCP-' + version + '-' + suffix
         files = list(packages.rglob(name))
         if len(files) != 1:
@@ -96,8 +111,9 @@ def prepare(packages, output, version, commit):
         raise ValueError('Release staging directory must be empty')
     for file in selected:
         shutil.copyfile(file, output / file.name)
-    source = output / ('CMCP-' + version + '-source.zip')
-    subprocess.run(['git', 'archive', '--format=zip', '--prefix=CMCP-' + version + '-source/', '--output=' + str(source.resolve()), commit], check=True)
+    if with_source:
+        source = output / ('CMCP-' + version + '-source.zip')
+        subprocess.run(['git', 'archive', '--format=zip', '--prefix=CMCP-' + version + '-source/', '--output=' + str(source.resolve()), commit], check=True)
     for file in list(output.glob('*.zip')) + list(output.glob('*.exe')) + list(output.glob('*.dmg')):
         Path(str(file) + '.sha256').write_bytes((sha256(file.read_bytes()) + '  ' + file.name + '\n').encode('ascii'))
     print(json.dumps({'version': version, 'commit': commit, 'assets': sorted(p.name for p in output.iterdir())}))
@@ -109,5 +125,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--version', required=True)
     parser.add_argument('--commit', required=True)
+    parser.add_argument('--platforms', default='all', choices=('all', 'windows', 'macos'))
     args = parser.parse_args()
-    prepare(args.packages, args.output, args.version, args.commit)
+    prepare(args.packages, args.output, args.version, args.commit, args.platforms)

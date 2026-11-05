@@ -9,6 +9,7 @@ from pathlib import Path
 release_tools = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'tools/prepare-release.py'))
 inspect_package = release_tools['inspect_package']
 inspect_disk_image = release_tools['inspect_disk_image']
+planned = release_tools['planned']
 COMMIT = 'a' * 40
 
 
@@ -58,6 +59,13 @@ class UnifiedReleaseTests(unittest.TestCase):
         self.package(change=lambda p, m, base: m['files'][0].update(codeSignature=True))
         with self.assertRaises(ValueError):
             inspect_package(self.file, '4.1.1', COMMIT, 'macos-arm64')
+
+    def test_each_kind_of_release_holds_only_its_own_side(self):
+        self.assertEqual(planned('all'), (('windows-x64', 'macos-arm64', 'macos-x64'), ('windows-x64-setup.exe', 'macos-arm64.dmg', 'macos-x64.dmg'), True))
+        self.assertEqual(planned('windows'), (('windows-x64',), ('windows-x64-setup.exe',), True))
+        self.assertEqual(planned('macos'), (('macos-arm64', 'macos-x64'), ('macos-arm64.dmg', 'macos-x64.dmg'), False))
+        with self.assertRaises(ValueError):
+            planned('linux')
 
     def test_only_a_real_disk_image_is_accepted(self):
         self.file.write_bytes(b'x' * 4096 + b'koly' + b'\0' * 508)

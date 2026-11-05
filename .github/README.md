@@ -40,7 +40,7 @@ You need a cloud PC that is reachable at an HTTPS address and has Claude install
 
 1. Run the installer and choose the install folder, shortcuts and whether to start at sign-in. It does not need administrator rights. The installer is not code-signed yet, so if Windows says it protected your PC, click **More info → Run anyway**. For the portable version, extract the whole zip to a folder and run `CMCP.exe`.
 2. Open CMCP.
-3. Click **Add cloud PC** and enter its address.
+3. Click **Add device** and enter its address.
 4. Start the connection and sign in to the cloud PC when asked.
 5. After adding a new cloud PC, fully quit and reopen Claude on it.
 
@@ -67,6 +67,7 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 - **Card-based interface**: custom names and icons, drag to reorder, collapsible details.
 - **Connection recovery**: reconnection, request waiting, result lookup and de-duplication after a dropped connection.
 - **Easy sign-in**: share a browser sign-in, or save the password encrypted and sign in automatically.
+- **SSH sign-in**: open your chosen terminal connected to a VPS with one click, using a password or a key. A device can have SSH, shared web sign-in or both. SSH opens a terminal only; it does not carry the MCP connection. Windows for now.
 - **Personalization**: light and dark themes, English and Simplified Chinese.
 - **Desktop integration**: system tray (menu bar on macOS), start at login, desktop shortcut and in-app updates.
 
@@ -82,7 +83,7 @@ Fully quit and reopen Claude on the cloud PC. A newly added configuration is onl
 
 **What happens when I close the window?**
 
-It depends on **Settings → General → Minimize to tray on close** (**Minimize to menu bar on close** on macOS). When on, connected cloud PCs stay connected. When off, closing the window exits and disconnects every cloud PC.
+It depends on **Settings → General → Minimize to tray on close** (**Minimize to menu bar on close** on macOS). When on, connected devices stay connected. When off, closing the window exits and disconnects every cloud PC.
 
 **How do I update?**
 
