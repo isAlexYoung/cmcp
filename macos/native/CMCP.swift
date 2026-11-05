@@ -528,12 +528,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         // Real AppKit events go through WebKit's hit testing, focus and key handling, which the
         // script events above skip. They are still sent by a program, not by a hand on a mouse.
         let actions: [(name: String, kind: String, argument: String, check: String)] = [
-            ("prepare", "none", "", "window.cmcpTest.showSettings('dark','en');document.querySelectorAll('.settings-nav button')[1].focus();return true;"),
+            ("prepare", "none", "", "window.cmcpMoves=0;document.addEventListener('pointermove',()=>window.cmcpMoves++,true);window.cmcpTest.showSettings('dark','en');document.querySelectorAll('.settings-nav button')[1].focus();return true;"),
             ("Tab reaches the field", "key", "tab", "return document.activeElement===menuBox()&&expandedIs(false);"),
             ("the down arrow opens it", "key", "down", "return expandedIs(true)&&!!menuList()&&arrow()===UP;"),
             ("Esc closes it and keeps focus", "key", "escape", "return expandedIs(false)&&!menuList()&&arrow()===DOWN&&document.activeElement===menuBox();"),
             ("a click opens it and focuses the field", "click", "menuBox()", "return expandedIs(true)&&!!menuList()&&document.activeElement===menuBox();"),
-            ("moving over a row highlights it", "move", "menuRows()[0]", "return menuRows()[0].classList.contains('active');"),
+            ("moving over a row highlights it, unless an inactive page never got the event", "move", "menuRows()[0]", "return (window.cmcpMoves===0&&!document.hasFocus())||menuRows()[0].classList.contains('active');"),
             ("a second click closes it and does not reopen it", "click", "menuBox()", "return expandedIs(false)&&!menuList();"),
             ("a click opens it again", "click", "menuBox()", "return expandedIs(true)&&!!menuList();"),
             ("a click outside closes it", "click", "document.querySelector('.settings-section h3')", "return expandedIs(false)&&!menuList();"),
@@ -546,7 +546,14 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             if let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x, y: web.bounds.height - point.y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: moving ? 0 : 1, pressure: moving ? 0 : 1) { if moving { web.mouseMoved(with: event) } else { window.sendEvent(event) } }
         }
         func input(_ index: Int) {
-            guard index < actions.count else { finishTests(error: nil); return }
+            guard index < actions.count else {
+                // WebKit gives an inactive page's mouse moves to its scrollbars only, so the report says which case this run saw.
+                web.evaluateJavaScript("'page active: '+document.hasFocus()+', pointer moves seen: '+window.cmcpMoves") { value, _ in
+                    self.motionResults.append("real input: " + (value as? String ?? "unknown"))
+                    self.finishTests(error: nil)
+                }
+                return
+            }
             let action = actions[index]
             func verify() {
                 let pause: TimeInterval = action.kind == "none" ? 0 : 0.35
