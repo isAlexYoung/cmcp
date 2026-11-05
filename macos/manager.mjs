@@ -16,10 +16,11 @@ import {managedTargetFactory} from '../app/managed-target.mjs';
 import {staticAssets} from '../app/static-assets.mjs';
 import {checkFailed,checkRelease,downloadUpdate} from './updates.mjs';
 import {currentInstallation} from './uninstall.mjs';
+import {detectTerminals,openTerminal} from './ssh.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch}={}){
+export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
   const dispatcher=injected||await createDispatcher({roots:store.config.roots});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
@@ -31,7 +32,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false;
-  const snapshot=()=>({...store.view(states),version,platform:'macos-'+arch,updates});
+  const snapshot=()=>({...store.view(states),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label}))});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
@@ -48,19 +49,22 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     const cloudFailed=(await Promise.all(store.targets.map(target=>Promise.race([removeCloudConfig(target),delay(45000,undefined,{ref:false}).then(()=>{throw Error('Cloud removal timed out');})]).then(()=>0,()=>1)))).reduce((sum,failed)=>sum+failed,0);
     await store.serial(()=>store.setEnabled(null,false));
     await Promise.allSettled(store.targets.map(t=>{const ref=t.credentialId||(!t.authMode?t.id:null);return ref?secrets('delete',ref):null;}));
+    await Promise.allSettled(store.ssh.logins.map(l=>l.credentialId?secrets('delete',l.credentialId):null));
     installation.launch([process.pid,process.ppid,appPid]);
     return {uninstalled:true,cloudFailed};
   }
   async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
-    '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled})=>({id,label,state,enabled})),language:store.preferences.language,updating}),
+    '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled,ssh})=>({id,label,state,enabled,...(ssh?.active?{ssh:true}:{})})),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
     '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();return {started:true};}),
     '/api/targets/stop':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};}),
     '/api/targets/delete':input=>store.serial(async()=>{await store.remove(input.id);connections.tick();return {deleted:true};}),
     '/api/targets/order':input=>store.serial(()=>{store.reorder(input.ids);return {saved:true};}),
     '/api/targets/open':async input=>({url:await entry(input.id)}),
+    '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.active);return {saved:true};}),
+    '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error('连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal)};},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates=checkFailed(updates);}return updates;},
     '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}})};}catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},

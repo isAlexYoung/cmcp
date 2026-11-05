@@ -130,15 +130,16 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             trayOrder = ids
         }
         if ids.isEmpty && !trayTracking && menu.items.count == 4 { let empty = NSMenuItem(title: "", action: nil, keyEquivalent: ""); empty.identifier = NSUserInterfaceItemIdentifier("empty"); empty.isEnabled = false; menu.insertItem(empty, at: 2) }
-        if let empty = menu.items.first(where: { $0.identifier?.rawValue == "empty" }) { empty.title = tr("暂无云电脑", "No cloud PCs") }
+        if let empty = menu.items.first(where: { $0.identifier?.rawValue == "empty" }) { empty.title = tr("暂无设备", "No devices") }
         for target in trayTargets {
             guard let id = target["id"] as? String, let row = trayRows[id], let sub = row.submenu else { continue }
             let state = target["state"] as? String ?? "stopped", enabled = target["enabled"] as? Bool == true
-            row.title = (target["label"] as? String ?? "CMCP") + " · " + trayState(state); row.toolTip = row.title
+            let ssh = target["ssh"] as? Bool == true
+            row.title = (target["label"] as? String ?? "CMCP") + " · " + (ssh && !enabled ? "SSH" : trayState(state)); row.toolTip = row.title
             let active = ["connected", "connecting", "configuring", "waiting-login", "recovering", "unstable"].contains(state)
             let blocked = !ready || exitPending || trayUpdating || trayPending.contains(id)
-            sub.items[0].title = tr("连接云电脑", "Connect cloud PC"); sub.items[0].isEnabled = !blocked && !active
-            sub.items[1].title = tr("断开云电脑", "Disconnect cloud PC"); sub.items[1].isEnabled = !blocked && enabled
+            sub.items[0].title = tr("连接设备", "Connect device"); sub.items[0].isEnabled = !blocked && (ssh || !active)
+            sub.items[1].title = tr("断开设备", "Disconnect device"); sub.items[1].isEnabled = !blocked && enabled
             sub.items[2].title = tr("重命名", "Rename"); sub.items[2].isEnabled = !blocked
         }
     }
@@ -166,7 +167,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     func menuDidClose(_ menu: NSMenu) { if menu === item.menu { trayTracking = false; updateTrayMenu() } }
     func trayAction(_ sender: NSMenuItem, route: String) {
         guard let id = sender.representedObject as? String, let row = trayRows[id], let sub = row.submenu else { return }
-        let index = route == "start" ? 0 : 1; guard sub.items[index].isEnabled else { return }
+        let index = route == "stop" ? 1 : 0; guard sub.items[index].isEnabled else { return }
         trayPending.insert(id); updateTrayMenu()
         request("/api/targets/" + route, ["id": id]) { [weak self] result in
             guard let self = self else { return }; self.trayPending.remove(id)
@@ -174,7 +175,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             self.refreshTray()
         }
     }
-    @objc func trayConnect(_ sender: NSMenuItem) { trayAction(sender, route: "start") }
+    @objc func trayConnect(_ sender: NSMenuItem) {
+        let ssh = trayTargets.first { $0["id"] as? String == sender.representedObject as? String }?["ssh"] as? Bool == true
+        trayAction(sender, route: ssh ? "terminal" : "start")
+    }
     @objc func trayDisconnect(_ sender: NSMenuItem) { trayAction(sender, route: "stop") }
     @objc func trayRename(_ sender: NSMenuItem) {
         guard sender.isEnabled, let id = sender.representedObject as? String, let bytes = try? JSONSerialization.data(withJSONObject: [id]), let args = String(data: bytes, encoding: .utf8) else { return }
@@ -324,6 +328,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         case "confirm":
             let alert = NSAlert(); alert.messageText = String((value["text"] as? String ?? "").prefix(200)); alert.addButton(withTitle: tr("确定", "Confirm")); alert.addButton(withTitle: tr("取消", "Cancel"))
             reply(id, alert.runModal() == .alertFirstButtonReturn)
+        case "pickKey":
+            let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false; panel.showsHiddenFiles = true
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh"); panel.message = tr("选择私钥文件", "Choose a private key file")
+            panel.begin { [weak self] response in self?.reply(id, response == .OK ? (panel.url?.path ?? "") : "") }
         case "logs":
             reply(id, NSWorkspace.shared.open(stateDirectory))
         case "program":
@@ -429,7 +437,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         let unrelated = NSMenu(); menuWillOpen(unrelated); menuDidClose(unrelated)
         guard item.menu === nativeMenu, !trayTracking else { finishTests(error: "Another menu changed tray tracking"); return }
         testResults.append("unrelated menus cannot change native tray tracking or positioning")
-        guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接云电脑", "Connect cloud PC"), tr("断开云电脑", "Disconnect cloud PC"), tr("重命名", "Rename")] }) else { finishTests(error: "Tray submenu actions missing"); return }
+        guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接设备", "Connect device"), tr("断开设备", "Disconnect device"), tr("重命名", "Rename")] }) else { finishTests(error: "Tray submenu actions missing"); return }
         testResults.append("native cloud submenus expose connect disconnect and rename")
         let savedTargets = trayTargets, firstID = trayTargets[0]["id"] as! String, firstRow = trayRows[trayTargets[0]["id"] as! String]
         trayTargets[0]["label"] = "Tray note"; trayTargets[0]["state"] = "connected"; trayTargets[0]["enabled"] = true; updateTrayMenu()
@@ -487,7 +495,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             ("leaving the editor turns back while the page under the pointer stays clickable", "document.querySelector('.form-footer button').click();const add=document.querySelector('header .primary'),box=add.getBoundingClientRect();return !!document.querySelector('header h1')&&turning(app,'turn-back')&&document.elementFromPoint(box.left+box.width/2,box.top+box.height/2).closest('button')===add;", nil),
             ("opening settings turns forward and the page is already there", "document.querySelector('header .gear').click();return !!document.querySelector('header h2')&&!!document.querySelector('.settings-side')&&turning(app,'turn-forward');", nil),
             ("switching to About moves only the content and keeps keyboard focus", "const side=document.querySelector('.settings-side'),header=document.querySelector('header'),nav=side.querySelector('.settings-nav'),old=document.querySelector('.settings-column'),title=header.querySelector('h2').textContent,about=nav.children[1];about.focus();about.click();const column=document.querySelector('.settings-column');return header===document.querySelector('header')&&side===document.querySelector('.settings-side')&&column!==old&&header.querySelector('h2').textContent!==title&&document.activeElement===about&&about.classList.contains('chosen')&&about.getAttribute('aria-pressed')==='true'&&column.querySelectorAll('button.uninstall').length===1&&turning(column,'turn-forward')&&header.getAnimations().length===0&&side.getAnimations().length===0;", nil),
-            ("a click during that transition still switches back", "const nav=document.querySelector('.settings-nav'),general=nav.children[0];general.click();const column=document.querySelector('.settings-column');return general.classList.contains('chosen')&&!nav.children[1].classList.contains('chosen')&&column.querySelectorAll('.select-box').length===1&&column.querySelectorAll('input.switch').length===2&&turning(column,'turn-back');", nil),
+            ("a click during that transition still switches back", "const nav=document.querySelector('.settings-nav'),general=nav.children[0];general.click();const column=document.querySelector('.settings-column');return general.classList.contains('chosen')&&!nav.children[1].classList.contains('chosen')&&column.querySelectorAll('.select-box').length===2&&column.querySelectorAll('input.switch').length===2&&turning(column,'turn-back');", nil),
             ("General rows fit in English with a language menu, icon segments and switches, and hover fades in 110 ms", "await wait(230);window.cmcpTest.showSettings('dark','en');const group=document.querySelector('.settings-column .segments'),options=[...group.children],boxes=[...group.children].map(option=>option.getBoundingClientRect()),box=document.querySelector('input.switch'),look=getComputedStyle(box),thumb=getComputedStyle(box,'::before'),hover=getComputedStyle(options[0]);return rowsFit()&&options.length===3&&options.every(option=>option.querySelector('svg'))&&boxes.every((rect,i)=>i===0||rect.left>=boxes[i-1].right-.5)&&group.querySelectorAll('.chosen').length===1&&options[2].classList.contains('chosen')&&document.querySelector('.settings-column .select-box').textContent==='English'&&box.type==='checkbox'&&box.getAttribute('role')==='switch'&&look.width==='44px'&&look.height==='24px'&&thumb.width==='18px'&&[...document.querySelectorAll('.row-title')].some(title=>title.textContent==='Minimize to menu bar on close')&&(reduced?hover.transitionDuration==='0s':hover.transitionProperty.startsWith('background-color')&&hover.transitionDuration.startsWith('0.11s'));", "mac-general-en.png"),
             ("About rows fit in English", "window.cmcpTest.showAbout();await wait(60);const ok=rowsFit()&&document.querySelectorAll('.set-row').length===5&&getComputedStyle(document.querySelector('button.uninstall')).boxShadow!=='none';window.cmcpTest.showSettings('dark','en');return ok;", nil),
             ("choosing a theme marks it at once, fades in 110 ms and does not rebuild the group", "window.cmcpTest.showSettings('dark','en');const group=document.querySelector('.settings-column .segments'),light=group.children[1];void light.offsetWidth;light.click();const immediate=light.classList.contains('chosen')&&light.getAttribute('aria-pressed')==='true'&&group.querySelectorAll('.chosen').length===1&&fading(light,'background-color',110);const saved=await until(()=>document.documentElement.dataset.theme==='light');await wait(60);return immediate&&saved&&light.isConnected&&light.classList.contains('chosen');", nil),
@@ -513,7 +521,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             ("collapsing a card slides for 170 ms and the card below moves back", "const card=document.querySelector('.card'),head=card.querySelector('.card-head'),accordion=card.querySelector('.accordion'),before=cardTop(1);void head.offsetHeight;head.click();const started=!card.classList.contains('expanded')&&head.getAttribute('aria-expanded')==='false'&&fading(accordion,'grid-template-rows',170);await settle(accordion);return started&&cardTop(1)<before;", nil),
             ("a collapsed card's buttons cannot take focus and an expanded card's can", "const card=document.querySelector('.card'),head=card.querySelector('.card-head'),inner=card.querySelector('.accordion>div'),action=inner.querySelector('button');const hidden=await until(()=>getComputedStyle(inner).visibility==='hidden');action.focus();const closed=document.activeElement!==action;head.click();action.focus();const open=document.activeElement===action;action.blur();head.click();const hiddenAgain=await until(()=>getComputedStyle(inner).visibility==='hidden');return hidden&&closed&&open&&hiddenAgain;", nil),
             ("the list updates while a card holds focus, keeps that focus and is not rebuilt without a change", "await wait(200);const first=document.querySelector('.card'),head=first.querySelector('.card-head');head.focus();window.cmcpTest.resendState();const same=document.querySelector('.card')===first&&document.activeElement===head;const connect=first.querySelector('.actions .connect');connect.focus();const key=connect.dataset.focusKey;window.cmcpTest.relabelFirst('Renamed');const now=document.activeElement,card=document.querySelector('.card');return same&&card!==first&&card.querySelector('strong').textContent==='Renamed'&&now!==connect&&now.dataset.focusKey===key&&card.contains(now);", nil),
-            ("a change waits for a card's slide and is applied on the next refresh", "document.activeElement.blur();const first=document.querySelector('.card');first.querySelector('.card-head').click();window.cmcpTest.relabelFirst('Held back');const held=document.querySelector('.card')===first&&first.querySelector('strong').textContent!=='Held back';await wait(200);window.cmcpTest.relabelFirst('Held back');const card=document.querySelector('.card'),applied=card.querySelector('strong').textContent==='Held back'&&card.classList.contains('expanded');card.querySelector('.card-head').click();await wait(200);await window.cmcpTest.refreshNow();const label=document.querySelector('.card strong').textContent;return held&&applied&&label!=='Held back'&&label!=='Renamed';", nil)
+            ("a change waits for a card's slide and is applied on the next refresh", "document.activeElement.blur();const first=document.querySelector('.card');first.querySelector('.card-head').click();window.cmcpTest.relabelFirst('Held back');const held=document.querySelector('.card')===first&&first.querySelector('strong').textContent!=='Held back';await wait(200);window.cmcpTest.relabelFirst('Held back');const card=document.querySelector('.card'),applied=card.querySelector('strong').textContent==='Held back'&&card.classList.contains('expanded');card.querySelector('.card-head').click();await wait(200);await window.cmcpTest.refreshNow();const label=document.querySelector('.card strong').textContent;return held&&applied&&label!=='Held back'&&label!=='Renamed';", nil),
+            ("the editor has three categories and the SSH page follows the chosen method", "window.cmcpTest.showEditor();const tabs=[...document.querySelectorAll('.settings-nav button')];tabs[2].click();const rows=[...document.querySelectorAll('.edit-row')],off=document.querySelector('.edit-row.off');return tabs.length===3&&tabs[2].classList.contains('chosen')&&rows.length===6&&!!off&&off.querySelector('input').disabled&&rows.every(row=>row.getBoundingClientRect().right<=window.innerWidth&&row.scrollWidth<=row.clientWidth+1)&&document.body.scrollWidth<=window.innerWidth;", "mac-editor-ssh.png"),
+            ("the general page of the editor fits and keeps its footer", "const tabs=[...document.querySelectorAll('.settings-nav button')];tabs[0].click();await wait(230);const rows=[...document.querySelectorAll('.edit-row')];return rows.length===4&&rows.every(row=>row.scrollWidth<=row.clientWidth+1)&&!!document.querySelector('.form-footer button.primary');", "mac-editor-general.png"),
+            ("a card on SSH offers the terminal and shows its address", "document.querySelector('.form-footer button').click();window.cmcpTest.sshFirst();const card=document.querySelector('.card');card.querySelector('.card-head').focus();const connect=card.querySelector('.connect');return card.querySelector('.url').textContent==='root@192.0.2.9:22'&&card.querySelector('.login-switch').textContent.trim()==='SSH'&&!connect.classList.contains('primary')&&card.querySelector('.state-label').textContent==='SSH'&&document.body.scrollWidth<=window.innerWidth;", "mac-home-ssh.png"),
+            ("the list returns to the saved devices", "await window.cmcpTest.refreshNow();return document.querySelector('.url').textContent!=='root@192.0.2.9:22';", nil)
         ]
         let forceMotion = "const sheet=document.styleSheets[0],rule=[...sheet.cssRules].findIndex(item=>item.cssText.includes('prefers-reduced-motion'));if(rule<0)return false;sheet.deleteRule(rule);window.cmcpMotionForced=true;window.cmcpTest.showEditor();return getComputedStyle(document.querySelector('.form-footer button')).transitionDuration.startsWith('0.11s');"
         func next(_ index: Int, _ pass: String, then done: @escaping () -> Void) {
