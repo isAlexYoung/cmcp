@@ -48,6 +48,16 @@ namespace CMCP {
                     var language=sheet.Controls.OfType<DropdownField>().Single();
                     check(language.Choose("en")&&form.Options.language=="en"&&language.Value=="en","choosing a language saves it");
                     check(language.Choose("zh-CN")&&form.Options.language=="zh-CN"&&!language.Choose("zh-CN"),"choosing the current language does nothing");
+                    var inside=language.PointToScreen(new Point(5,5));
+                    check(language.Arrow=="chevron"&&!language.IsOpen,"a closed dropdown points down");
+                    language.TestClick();check(language.IsOpen&&language.Arrow=="up","the first click opens the dropdown and points the arrow up");
+                    check(!language.Menu.ShowCheckMargin&&!language.Menu.ShowImageMargin&&language.Menu.Items.OfType<ToolStripMenuItem>().All(i=>!i.Checked),"dropdown items have no check box");
+                    language.Menu.Close(ToolStripDropDownCloseReason.AppClicked);language.NoteClosing(ToolStripDropDownCloseReason.AppClicked,inside);language.TestClick();
+                    check(!language.IsOpen&&language.Arrow=="chevron","a second click on the field closes the dropdown and stays closed");
+                    language.TestClick();check(language.IsOpen,"the next click opens it again");
+                    language.Menu.Close(ToolStripDropDownCloseReason.AppClicked);language.NoteClosing(ToolStripDropDownCloseReason.AppClicked,new Point(-5000,-5000));language.TestClick();
+                    check(language.IsOpen,"closing by clicking elsewhere does not block the next click on the field");
+                    language.Menu.Close(ToolStripDropDownCloseReason.ItemClicked);Application.DoEvents();
                     page.ShowAbout();check(NothingOverlaps(page.Viewport.Controls[0]),"about page controls do not cover each other");
                 }
                 form.CloseSettings();

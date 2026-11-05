@@ -239,30 +239,47 @@ namespace CMCP {
             public override Color CheckPressedBackground{get{return colors.Active;}}
         }
         readonly KeyValuePair<string,string>[] items;
-        readonly ContextMenuStrip menu=new ContextMenuStrip{ShowImageMargin=false,ShowCheckMargin=true};
-        bool hover;
+        internal readonly ContextMenuStrip Menu=new ContextMenuStrip{ShowImageMargin=false,ShowCheckMargin=false};
+        bool hover,dismissedByThisClick;
         internal Palette Colors=Palette.Create(false);
         internal string Value;
         internal event Action<string> Chosen;
         internal DropdownField(KeyValuePair<string,string>[] choices){
             items=choices;TabStop=true;Cursor=Cursors.Hand;AccessibleRole=AccessibleRole.ComboBox;
             SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable|ControlStyles.StandardClick,true);
+            Menu.Opened+=delegate{Invalidate();};Menu.Closed+=delegate{Invalidate();};
+            Menu.Closing+=delegate(object sender,ToolStripDropDownClosingEventArgs e){NoteClosing(e.CloseReason,Cursor.Position);};
         }
+        internal bool IsOpen{get{return Menu.Visible;}}
+        internal string Arrow{get{return IsOpen?"up":"chevron";}}
+        // The menu closes on mouse down, before this field sees the click, so a click on the
+        // field while it is open must be remembered or it would open the menu straight again.
+        internal void NoteClosing(ToolStripDropDownCloseReason reason,Point screen){
+            dismissedByThisClick=reason==ToolStripDropDownCloseReason.AppClicked&&IsHandleCreated&&ClientRectangle.Contains(PointToClient(screen));
+        }
+        internal void TestClick(){OnClick(EventArgs.Empty);OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,0,0,0));}
         internal bool Choose(string key){
             if(key==Value||!items.Any(i=>i.Key==key))return false;
             if(Chosen!=null)Chosen(key);
             return true;
         }
         void Open(){
-            foreach(ToolStripItem old in menu.Items.Cast<ToolStripItem>().ToArray())old.Dispose();
-            menu.Items.Clear();menu.Font=Font;menu.BackColor=Colors.Surface;menu.ForeColor=Colors.Text;menu.Renderer=new ToolStripProfessionalRenderer(new MenuColors(Colors));
+            foreach(ToolStripItem old in Menu.Items.Cast<ToolStripItem>().ToArray())old.Dispose();
+            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Renderer=new ToolStripProfessionalRenderer(new MenuColors(Colors));
             foreach(var pair in items){
-                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){Checked=key==Value,ForeColor=Colors.Text};
-                item.Click+=delegate{Choose(key);};menu.Items.Add(item);
+                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text};
+                // No check box: the current choice is shown in bold.
+                if(key==Value)item.Font=new Font(Font,FontStyle.Bold);
+                item.Click+=delegate{Choose(key);};Menu.Items.Add(item);
             }
-            menu.Show(this,new Point(0,Height+2));
+            Menu.Show(this,new Point(0,Height+2));
         }
-        protected override void OnClick(EventArgs e){base.OnClick(e);Focus();Open();}
+        protected override void OnClick(EventArgs e){
+            base.OnClick(e);Focus();
+            if(dismissedByThisClick)return;
+            if(IsOpen)Menu.Close(ToolStripDropDownCloseReason.ItemClicked);else Open();
+        }
+        protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);dismissedByThisClick=false;}
         protected override bool IsInputKey(Keys key){return key==Keys.Down||base.IsInputKey(key);}
         protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter||e.KeyCode==Keys.Down){e.Handled=true;Open();}base.OnKeyDown(e);}
         protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
@@ -275,9 +292,9 @@ namespace CMCP {
             PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),8,hover?Colors.Subtle:Colors.Surface,Focused&&ShowFocusCues?Colors.SelectionBorder:Colors.Border);
             string text=items.Where(i=>i.Key==Value).Select(i=>L.Text(i.Value)).FirstOrDefault()??"";
             PaintUi.Text(g,text,Font,new Rectangle(12,0,Width-40,Height),Colors.Text);
-            PaintUi.Icon(g,"chevron",new Rectangle(Width-28,(Height-16)/2,16,16),Colors.Muted);
+            PaintUi.Icon(g,Arrow,new Rectangle(Width-28,(Height-16)/2,16,16),Colors.Muted);
         }
-        protected override void Dispose(bool disposing){if(disposing)menu.Dispose();base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing)Menu.Dispose();base.Dispose(disposing);}
     }
     // Still a CheckBox, so keyboard use, accessibility and wheel handling stay as they were.
     // Its row shows the label, so only the switch itself is painted.
