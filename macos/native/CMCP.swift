@@ -533,7 +533,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             ("the down arrow opens it", "key", "down", "return expandedIs(true)&&!!menuList()&&arrow()===UP;"),
             ("Esc closes it and keeps focus", "key", "escape", "return expandedIs(false)&&!menuList()&&arrow()===DOWN&&document.activeElement===menuBox();"),
             ("a click opens it and focuses the field", "click", "menuBox()", "return expandedIs(true)&&!!menuList()&&document.activeElement===menuBox();"),
-            ("moving over a row highlights it, unless an inactive page never got the event", "move", "menuRows()[0]", "return (window.cmcpMoves===0&&!document.hasFocus())||menuRows()[0].classList.contains('active');"),
+            ("moving over a row highlights it, unless an inactive page never got the event", "move", "menuRows()[0]", "if(!menuRows()[0].classList.contains('active')&&!(inactive&&window.cmcpMoves===0))throw Error('pointer moves seen: '+window.cmcpMoves+', inactive: '+inactive);return true;"),
             ("a second click closes it and does not reopen it", "click", "menuBox()", "return expandedIs(false)&&!menuList();"),
             ("a click opens it again", "click", "menuBox()", "return expandedIs(true)&&!!menuList();"),
             ("a click outside closes it", "click", "document.querySelector('.settings-section h3')", "return expandedIs(false)&&!menuList();"),
@@ -548,8 +548,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         func input(_ index: Int) {
             guard index < actions.count else {
                 // WebKit gives an inactive page's mouse moves to its scrollbars only, so the report says which case this run saw.
-                web.evaluateJavaScript("'page active: '+document.hasFocus()+', pointer moves seen: '+window.cmcpMoves") { value, _ in
-                    self.motionResults.append("real input: " + (value as? String ?? "unknown"))
+                let active = NSApp.keyWindow === window
+                web.evaluateJavaScript("window.cmcpMoves") { value, _ in
+                    self.motionResults.append("real input: key window: " + String(active) + ", pointer moves seen: " + String(describing: value ?? "unknown"))
                     self.finishTests(error: nil)
                 }
                 return
@@ -558,7 +559,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             func verify() {
                 let pause: TimeInterval = action.kind == "none" ? 0 : 0.35
                 DispatchQueue.main.asyncAfter(deadline: .now() + pause) {
-                    self.web.callAsyncJavaScript(shared + action.check, arguments: [:], in: nil, in: .page) { result in
+                    let inactive = "const inactive=" + String(NSApp.keyWindow !== self.window) + ";"
+                    self.web.callAsyncJavaScript(shared + inactive + action.check, arguments: [:], in: nil, in: .page) { result in
                         guard case .success(let value) = result, (value as? Bool) == true else { self.finishTests(error: "Real input check failed: " + action.name + " (" + String(describing: result) + ")"); return }
                         self.motionResults.append("real input: " + action.name)
                         input(index + 1)
