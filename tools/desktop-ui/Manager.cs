@@ -216,6 +216,7 @@ namespace CMCP {
                     if(page=="editor")form.OpenEditor(first.Target.Name);
                     else if(page=="add")form.OpenAdd();
                     else if(page=="settings"||page=="settings-en"||page=="about"){if(page=="settings-en"){var options=form.Options.Copy();options.language="en";form.ChangeSettings(options);}form.OpenSettings();if(page=="about")form.Settings.ShowAbout();}
+                    else if(page=="dropdown"){form.OpenSettings();var field=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().Single();field.TestClick();Application.DoEvents();using(var menu=new Bitmap(field.Menu.Width,field.Menu.Height)){field.Menu.DrawToBitmap(menu,new Rectangle(Point.Empty,menu.Size));menu.Save(Path.GetFullPath(args[1])+".menu.png",System.Drawing.Imaging.ImageFormat.Png);}field.Menu.Close();}
                     else if(page=="update-available"){form.OpenSettings();form.Settings.ShowAbout();form.SimulateUpdate("4.12.0");}
                     else if(page=="main-update"){form.SimulateUpdate("4.12.0");foreach(var card in form.Cards.Values)card.ClearPointer();}
                     else if(page.StartsWith("update")){var update=new UpdateProgress{Stage=page=="update-failed"?"failed":"download",Code="network",Received=14680064,Total=41037076};if(page=="update-expanded")first.SetExpanded(true,false);form.SetUpdateProgress(update);if(page=="update-about"){form.OpenSettings();form.Settings.ShowAbout();form.Settings.SetUpdateProgress(update);}}

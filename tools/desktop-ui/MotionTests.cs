@@ -92,7 +92,17 @@ namespace CMCP {
                     toggle.Checked=!wasOn;check(toggle.Level>0&&toggle.Level<1||toggle.Level==(wasOn?1:0),"the switch slides instead of jumping");
                     for(int i=0;i<200&&toggle.Level!=(wasOn?0:1);i++){Application.DoEvents();Thread.Sleep(5);}
                     check(toggle.Level==(wasOn?0:1),"the switch settles on its new position");
-                    toggle.Checked=wasOn;form.CloseSettings();Settle(form);
+                    toggle.Checked=wasOn;
+                    var field=tabs.Viewport.Controls[0].Controls.OfType<DropdownField>().Single();
+                    Action settleMenu=()=>{for(int i=0;i<200&&field.Animating;i++){Application.DoEvents();Thread.Sleep(5);}};
+                    field.TestClick();check(field.IsOpen&&field.Animating&&field.Menu.Region!=null,"opening the dropdown unfolds it");
+                    check(field.Menu.Items.Cast<ToolStripItem>().Count(i=>Equals(i.Tag,true))==1,"exactly one language is marked as current");
+                    settleMenu();check(field.IsOpen&&!field.Animating&&field.Menu.Region==null&&field.Menu.Opacity==1,"the dropdown ends fully shown");
+                    field.TestClick();check(!field.IsOpen&&field.Animating&&field.Menu.Visible,"closing folds it away while still on screen");
+                    settleMenu();check(!field.Menu.Visible&&!field.Animating,"the dropdown is gone after folding away");
+                    field.TestClick();field.TestClick();field.TestClick();check(field.IsOpen,"a click during the fold reopens it");
+                    settleMenu();field.TestClick();settleMenu();
+                    form.CloseSettings();Settle(form);
 
                     var a=form.Cards.Values.First();var b=form.Cards.Values.Skip(1).First();
                     form.OpenEditor(a.Target.Name);check(form.Editor!=null&&form.Transition!=null,"opening the editor plays a transition");Settle(form);

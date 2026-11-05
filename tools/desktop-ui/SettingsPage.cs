@@ -238,6 +238,22 @@ namespace CMCP {
             public override Color CheckSelectedBackground{get{return colors.Active;}}
             public override Color CheckPressedBackground{get{return colors.Active;}}
         }
+        // Rows fill the menu's whole width; the current choice stays pale blue.
+        sealed class MenuRenderer : ToolStripProfessionalRenderer {
+            readonly Palette colors;
+            internal MenuRenderer(Palette palette):base(new MenuColors(palette)){colors=palette;}
+            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e){
+                bool current=Equals(e.Item.Tag,true),hot=e.Item.Selected;
+                Color fill=current?Motion.Mix(colors.Surface,colors.Blue,hot?0.32:0.22):hot?colors.Active:colors.Surface;
+                using(var b=new SolidBrush(fill))e.Graphics.FillRectangle(b,new Rectangle(Point.Empty,e.Item.Size));
+            }
+        }
+        const double MenuMilliseconds=130;
+        readonly System.Diagnostics.Stopwatch menuClock=new System.Diagnostics.Stopwatch();
+        FrameClock menuFrames;
+        bool closingMenu,finishingMenu;
+        double menuFrom,menuLevel;
+        internal bool Animating{get{return menuFrames!=null;}}
         readonly KeyValuePair<string,string>[] items;
         internal readonly ContextMenuStrip Menu=new ContextMenuStrip{ShowImageMargin=false,ShowCheckMargin=false};
         bool hover,dismissedByThisClick;
@@ -248,14 +264,38 @@ namespace CMCP {
             items=choices;TabStop=true;Cursor=Cursors.Hand;AccessibleRole=AccessibleRole.ComboBox;
             SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable|ControlStyles.StandardClick,true);
             Menu.Opened+=delegate{Invalidate();};Menu.Closed+=delegate{Invalidate();};
-            Menu.Closing+=delegate(object sender,ToolStripDropDownClosingEventArgs e){NoteClosing(e.CloseReason,Cursor.Position);};
+            Menu.Closing+=delegate(object sender,ToolStripDropDownClosingEventArgs e){
+                NoteClosing(e.CloseReason,Cursor.Position);
+                if(finishingMenu||!Motion.Enabled||!IsHandleCreated)return;
+                // Keep it on screen while it folds away; the animation closes it for real.
+                e.Cancel=true;if(!closingMenu)AnimateMenu(true);
+            };
         }
-        internal bool IsOpen{get{return Menu.Visible;}}
+        internal bool IsOpen{get{return Menu.Visible&&!closingMenu;}}
+        void AnimateMenu(bool closing){
+            closingMenu=closing;menuFrom=menuLevel;menuClock.Restart();Invalidate();
+            if(menuFrames==null){menuFrames=new FrameClock(this,MenuFrame);menuFrames.Start();}
+        }
+        void MenuFrame(){
+            double t=Math.Min(1,menuClock.ElapsedMilliseconds/MenuMilliseconds),goal=closingMenu?0:1;
+            ApplyMenuLevel(menuFrom+(goal-menuFrom)*Motion.EaseOut(t));
+            if(t<1)return;
+            menuFrames.Stop();menuFrames=null;
+            if(closingMenu){finishingMenu=true;try{Menu.Close();}finally{finishingMenu=false;closingMenu=false;}}
+            else ClearMenuMotion();
+            Invalidate();
+        }
+        void ApplyMenuLevel(double level){
+            menuLevel=level;Menu.Opacity=Math.Max(0.01,level);
+            var old=Menu.Region;Menu.Region=new Region(new Rectangle(0,0,Menu.Width,Math.Max(1,(int)Math.Round(Menu.Height*level))));if(old!=null)old.Dispose();
+        }
+        void ClearMenuMotion(){var old=Menu.Region;Menu.Region=null;if(old!=null)old.Dispose();Menu.Opacity=1;menuLevel=1;}
         internal string Arrow{get{return IsOpen?"up":"chevron";}}
         // The menu closes on mouse down, before this field sees the click, so a click on the
         // field while it is open must be remembered or it would open the menu straight again.
         internal void NoteClosing(ToolStripDropDownCloseReason reason,Point screen){
-            dismissedByThisClick=reason==ToolStripDropDownCloseReason.AppClicked&&IsHandleCreated&&ClientRectangle.Contains(PointToClient(screen));
+            if(reason!=ToolStripDropDownCloseReason.AppClicked)return;
+            dismissedByThisClick=IsHandleCreated&&ClientRectangle.Contains(PointToClient(screen));
         }
         internal void TestClick(){OnClick(EventArgs.Empty);OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,0,0,0));}
         internal bool Choose(string key){
@@ -264,20 +304,21 @@ namespace CMCP {
             return true;
         }
         void Open(){
+            if(closingMenu&&Menu.Visible){AnimateMenu(false);return;}
             foreach(ToolStripItem old in Menu.Items.Cast<ToolStripItem>().ToArray())old.Dispose();
-            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Renderer=new ToolStripProfessionalRenderer(new MenuColors(Colors));
+            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Padding=Padding.Empty;Menu.DropShadowEnabled=false;Menu.Renderer=new MenuRenderer(Colors);
             foreach(var pair in items){
-                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text};
-                // No check box: the current choice is shown in bold.
-                if(key==Value)item.Font=new Font(Font,FontStyle.Bold);
+                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(Width,34)};
                 item.Click+=delegate{Choose(key);};Menu.Items.Add(item);
             }
-            Menu.Show(this,new Point(0,Height+2));
+            if(!Motion.Enabled||!IsHandleCreated){ClearMenuMotion();Menu.Show(this,new Point(0,Height+2));return;}
+            // Fully clipped first, so no frame shows the whole menu before it unfolds.
+            menuLevel=0;Menu.Show(this,new Point(0,Height+2));ApplyMenuLevel(0);AnimateMenu(false);
         }
         protected override void OnClick(EventArgs e){
             base.OnClick(e);Focus();
             if(dismissedByThisClick)return;
-            if(IsOpen)Menu.Close(ToolStripDropDownCloseReason.ItemClicked);else Open();
+            if(IsOpen)Menu.Close();else Open();
         }
         protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);dismissedByThisClick=false;}
         protected override bool IsInputKey(Keys key){return key==Keys.Down||base.IsInputKey(key);}
@@ -294,7 +335,7 @@ namespace CMCP {
             PaintUi.Text(g,text,Font,new Rectangle(12,0,Width-40,Height),Colors.Text);
             PaintUi.Icon(g,Arrow,new Rectangle(Width-28,(Height-16)/2,16,16),Colors.Muted);
         }
-        protected override void Dispose(bool disposing){if(disposing)Menu.Dispose();base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing){if(menuFrames!=null){menuFrames.Stop();menuFrames=null;}Menu.Dispose();}base.Dispose(disposing);}
     }
     // Still a CheckBox, so keyboard use, accessibility and wheel handling stay as they were.
     // Its row shows the label, so only the switch itself is painted.
