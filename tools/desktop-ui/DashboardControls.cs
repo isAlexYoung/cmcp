@@ -70,6 +70,7 @@ namespace CMCP {
                         var outline=new System.Collections.Generic.List<PointF>();
                         for(int i=0;i<8;i++){double a=i*Math.PI/4;foreach(var step in new[]{new[]{-0.28,7.7},new[]{-0.15,10.6},new[]{0.15,10.6},new[]{0.28,7.7}})outline.Add(new PointF(12+(float)(Math.Cos(a+step[0])*step[1]),12+(float)(Math.Sin(a+step[0])*step[1])));}
                         g.DrawPolygon(p,outline.ToArray());g.DrawEllipse(p,8.6f,8.6f,6.8f,6.8f);break;}
+                    case "profile":using(var path=Round(new Rectangle(2,5,20,15),2))g.DrawPath(p,path);g.DrawEllipse(p,5,8,4,4);g.DrawArc(p,4,14,6,5,180,180);g.DrawLine(p,13,9,19,9);g.DrawLine(p,13,12,19,12);g.DrawLine(p,13,16,17,16);break;
                     case "sliders":g.DrawLine(p,4,7,14,7);g.DrawLine(p,18,7,20,7);g.DrawLine(p,4,17,6,17);g.DrawLine(p,10,17,20,17);g.DrawEllipse(p,14,5,4,4);g.DrawEllipse(p,6,15,4,4);break;
                     case "info":g.DrawEllipse(p,3,3,18,18);g.DrawLine(p,12,11,12,16);using(var b=new SolidBrush(color))g.FillEllipse(b,11,7,2,2);break;
                     case "sun":g.DrawEllipse(p,8,8,8,8);for(int i=0;i<8;i++){double a=i*Math.PI/4;g.DrawLine(p,12+(float)Math.Cos(a)*7.5f,12+(float)Math.Sin(a)*7.5f,12+(float)Math.Cos(a)*10,12+(float)Math.Sin(a)*10);}break;
@@ -85,6 +86,7 @@ namespace CMCP {
     internal sealed class ModernButton : Control, IButtonControl {
         internal Palette Colors=Palette.Create(false);
         internal string Glyph="";
+        internal int TextOffsetX;
         internal bool Primary, Neutral, Destructive, CenterText, Segment, Nav, Dot, DotOk;
         bool hover, pressed;
         // One shared timer: the pointer often leaves one button as it enters the next.
@@ -157,23 +159,23 @@ namespace CMCP {
             PaintUi.Box(g,new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),8,bg,Destructive&&Text.Length>0?fg:bg);
             int glyphSize=Height>=40?22:20, x=Text.Length==0?(Width-glyphSize)/2:12;
             if(Glyph.Length>0)PaintUi.Icon(g,Glyph,new Rectangle(x,(Height-glyphSize)/2,glyphSize,glyphSize),fg);
-            if(Text.Length>0){if(CenterText)TextRenderer.DrawText(g,L.Text(Text),Font,ClientRectangle,fg,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);else PaintUi.Text(g,L.Text(Text),Font,new Rectangle(Glyph.Length>0?39:10,0,Width-(Glyph.Length>0?44:20),Height),fg);}
+            if(Text.Length>0){if(CenterText)TextRenderer.DrawText(g,L.Text(Text),Font,ClientRectangle,fg,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);else PaintUi.Text(g,L.Text(Text),Font,new Rectangle((Glyph.Length>0?39:10)+TextOffsetX,0,Width-(Glyph.Length>0?44:20)-TextOffsetX,Height),fg);}
             if(Dot)using(var b=new SolidBrush(DotOk?Colors.Success:Colors.Danger))g.FillEllipse(b,Width-(Nav?22:13),Nav?(Height-8)/2:5,8,8);
             if(Focused&&ShowFocusCues)using(var path=PaintUi.Round(new Rectangle(2,2,Width-5,Height-5),8))using(var p=new Pen(Colors.SelectionBorder))g.DrawPath(p,path);
         }
     }
     internal sealed class DashboardToolbar : Panel {
-        internal readonly ModernButton Settings=new ModernButton { Glyph="settings",Neutral=true,AccessibleName="设置" }, Add=new ModernButton { Glyph="plus",Text="添加设备",Primary=true,AccessibleName="添加设备" };
+        internal readonly ModernButton Settings=new ModernButton { Glyph="settings",Neutral=true,AccessibleName="设置" }, Add=new ModernButton { Glyph="plus",Text="添加设备",Primary=true,AccessibleName="添加设备",TextOffsetX=4 };
+        internal readonly UpdateProgressRing Progress=new UpdateProgressRing();
         readonly LocalToolTip tips=new LocalToolTip();
         internal Palette Colors=Palette.Create(false);
         internal DashboardToolbar() {
             Height=72;Dock=DockStyle.Top;DoubleBuffered=true;Font=new Font("Microsoft YaHei UI",9F);
-            Controls.AddRange(new Control[]{Settings,Add});
-            tips.SetToolTip(Settings,"设置");tips.SetToolTip(Add,"添加新设备，不会自动连接");
+            Controls.AddRange(new Control[]{Settings,Add,Progress});
         }
-        internal void SetUpdateDot(bool available){if(Settings.Dot==available)return;Settings.Dot=available;tips.SetToolTip(Settings,available?"设置 · 有可用更新":"设置");Settings.AccessibleDescription=available?L.Text("有可用更新"):null;Settings.Invalidate();}
-        internal void Apply(Palette colors){Colors=colors;tips.Apply(colors);BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}Invalidate();}
-        protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(160,16,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
+        internal void SetUpdateDot(bool available){if(Settings.Dot==available)return;Settings.Dot=available;Settings.AccessibleDescription=available?L.Text("有可用更新"):null;Settings.Invalidate();}
+        internal void Apply(Palette colors){Colors=colors;tips.Apply(colors);BackColor=colors.Surface;Progress.Apply(colors);foreach(ModernButton b in Controls.OfType<ModernButton>()){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}Invalidate();}
+        protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Settings.Bounds=new Rectangle(160,16,40,40);Progress.Bounds=new Rectangle(216,16,40,40);Add.Bounds=new Rectangle(Width-176,16,148,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;using(var f=new Font(Font.FontFamily,14*UiFont.Scale,FontStyle.Bold))PaintUi.Text(e.Graphics,"CMCP",f,new Rectangle(28,17,124,36),Colors.Blue);using(var p=new Pen(Colors.Border))e.Graphics.DrawLine(p,0,Height-1,Width,Height-1);}
         protected override void Dispose(bool disposing){if(disposing)tips.Dispose();base.Dispose(disposing);}
     }
@@ -182,23 +184,24 @@ namespace CMCP {
         internal string StatusOverride="";
         // Set only while the card is in SSH mode. The web connection underneath keeps running.
         internal SshLogin Ssh;
+        internal bool SshMode;
         internal string Note="";
         internal Palette Colors=Palette.Create(false);
         internal readonly ModernButton Open=new ModernButton{Glyph="monitor",Text="打开云电脑"}, Stop=new ModernButton{Glyph="stop",Text="停止连接",Destructive=true}, Logs=new ModernButton{Text="查看日志"};
         internal ConnectionDetails(){DoubleBuffered=true;Controls.AddRange(new Control[]{Open,Stop,Logs});}
         internal void Apply(Palette colors){Colors=colors;BackColor=colors.Surface;foreach(ModernButton b in Controls){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}Invalidate();}
-        int ClientRows{get{return Ssh==null&&Target!=null&&(Target.DesktopClient!=null||Target.CliClient!=null)?60:0;}}
+        int ClientRows{get{return !SshMode&&Target!=null&&(Target.DesktopClient!=null||Target.CliClient!=null)?60:0;}}
         void ClientRow(Graphics g,string label,bool? running,int y){string value=LocalState.ClientState(Target.State,running==true);PaintUi.Text(g,label,Font,new Rectangle(18,y,190,24),Colors.Muted);PaintUi.Text(g,L.Text(value),Font,new Rectangle(130,y,Width-148,24),value=="已连接"?Colors.Success:Colors.Text,true);}
         string Body{get{
             if(Target==null)return "";
-            string text=Ssh==null?L.Message(Target.Detail??""):L.Text("点击“打开终端”，用设置里选定的终端连接这台设备。SSH 不经过 MCP 连接。")+(Target.Url.Length>0&&Target.State!="stopped"?"\r\n"+L.Text("共享网页连接")+"："+L.Text(LocalState.Caption(Target.State)):"");
-            return Note.Length>0?L.Text("备注")+"："+Note+"\r\n"+text:text;
+            string text=!SshMode?L.Message(Target.Detail??""):L.Text("点击“打开终端”，用设置里选定的终端连接这台设备。SSH 不经过 MCP 连接。")+(Target.Url.Length>0&&Target.State!="stopped"?"\r\n"+L.Text("共享网页连接")+"："+L.Text(LocalState.Caption(Target.State)):"");
+            return text;
         }}
         internal int NeededHeight(int width){return 164+ClientRows+TextRenderer.MeasureText(Body,Font,new Size(Math.Max(100,width-44),1000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Open.Bounds=new Rectangle(14,Height-54,164,40);Stop.Bounds=new Rectangle(185,Height-54,144,40);Logs.Bounds=new Rectangle(Stop.Visible?336:185,Height-54,140,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(Target==null)return;var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),11,Colors.Surface,Colors.Border);
-            PaintUi.Text(g,L.Text(Ssh!=null?"SSH 地址":"连接状态"),Font,new Rectangle(18,10,100,24),Colors.Muted);PaintUi.Text(g,Ssh!=null?Ssh.Address:StatusOverride.Length>0?L.Text(StatusOverride):L.Text(LocalState.Caption(Target.State)),Font,new Rectangle(130,10,Width-148,24),Ssh==null&&Target.State=="connected"?Colors.Success:Colors.Text,true);
-            PaintUi.Text(g,L.Text("登录方式"),Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,Ssh!=null?"SSH · "+L.Text(Ssh.UsesKey?"公钥":"密码"):L.Text(Target.Mode),Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
+            PaintUi.Text(g,L.Text(SshMode?"SSH 地址":"连接状态"),Font,new Rectangle(18,10,100,24),Colors.Muted);PaintUi.Text(g,SshMode?(Ssh==null?"":Ssh.Address):StatusOverride.Length>0?L.Text(StatusOverride):L.Text(LocalState.Caption(Target.State)),Font,new Rectangle(130,10,Width-148,24),!SshMode&&Target.State=="connected"?Colors.Success:Colors.Text,true);
+            PaintUi.Text(g,L.Text("登录方式"),Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,SshMode?(Ssh==null?"SSH":"SSH · "+L.Text(Ssh.UsesKey?"公钥":"密码")):Target.Url.Length==0?L.Text("共享网页"):L.Text(Target.Mode),Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
             int rows=ClientRows;if(rows>0){ClientRow(g,"Claude Desktop",Target.DesktopClient,70);ClientRow(g,"CLI",Target.CliClient,100);}
             using(var p=new Pen(Colors.Border))g.DrawLine(p,18,76+rows,Width-18,76+rows);
             TextRenderer.DrawText(g,Body,Font,new Rectangle(18,88+rows,Width-36,Height-153-rows),Colors.Muted,TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix);

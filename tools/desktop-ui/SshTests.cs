@@ -11,11 +11,12 @@ namespace CMCP {
     internal static class SshTests {
         static void Pump(){for(int i=0;i<4;i++){Application.DoEvents();System.Threading.Thread.Sleep(5);}}
         static SshLogin Sample(string secret="",string method="password",string key=""){return new SshLogin{name="dev'ice",host="203.0.113.24",port=2222,username="root",method=method,keyPath=key,secret=secret};}
+        static bool ContainsText(Control c,string text){return c.Text.Contains(L.Text(text))||c.Controls.Cast<Control>().Any(child=>ContainsText(child,text));}
         static string Decoded(string arguments){string marker="-EncodedCommand ";int at=arguments.IndexOf(marker,StringComparison.Ordinal);string rest=arguments.Substring(at+marker.Length).Split(' ','"')[0];return Encoding.Unicode.GetString(Convert.FromBase64String(rest));}
         internal static void Run(string temp,Action<bool,string> check){
             Validation(check);Storage(temp,check);Answers(check);Commands(check);
             RealScript(temp,check);RealAskpass(temp,check);
-            Editor(temp,check);Window(check);RealFiles(temp,check);
+            Editor(temp,check);Window(check);RealFiles(temp,check);CardDisplay(check);
         }
         static void Validation(Action<bool,string> check){
             check(new[]{"example.com","a-b.example.com","203.0.113.24","2001:db8::1","h"}.All(SshLogin.ValidHost),"ordinary host names and addresses are accepted");
@@ -146,7 +147,7 @@ namespace CMCP {
             string state=Path.Combine(temp,"ssh-real"),kit=Path.Combine(state,"kit");Directory.CreateDirectory(kit);
             using(var form=new Manager(false,state,kit)){
                 form.Show();Pump();form.OpenAdd();Pump();form.Editor.ShowSsh();Pump();
-                form.Editor.HostInput.Box.Text="192.0.2.9";form.Editor.UserInput.Box.Text="root";form.Editor.SshSecretInput.Box.Text="TESTONLY";form.Editor.Save.PerformClick();Pump();
+                form.Editor.HostInput.Box.Text="192.0.2.9";form.Editor.UserInput.Box.Text="root";form.Editor.SshSecretInput.Box.Text="TESTONLY";form.Editor.HideAddress.Checked=true;form.Editor.Save.PerformClick();Pump();
                 check(form.Editor==null&&form.Cards.Count==1&&form.Cards.Values.First().SshActive,"a device with only SSH saves without any backend worker");
                 string file=SshStore.PathFor(state);
                 check(File.Exists(file)&&!File.ReadAllText(file).Contains("TESTONLY"),"the password reaches the disk only in encrypted form");
@@ -154,10 +155,27 @@ namespace CMCP {
                 ProcessStartInfo started=null;form.StartTerminal=info=>started=info;form.Options.terminal="cmd";
                 form.Cards.Values.First().Connect.PerformClick();Pump();
                 check(started!=null&&started.Arguments.StartsWith("/d /k")&&Decoded(started.Arguments).Contains("'192.0.2.9'")&&!started.Arguments.Contains("TESTONLY"),"the card's button opens the chosen terminal with this device's address");
+                form.Cards.Values.First().LoginSwitch.PerformClick();Pump();check(!form.Cards.Values.First().SshActive,"an SSH-only device can persist web as its selected mode");
+                started=null;form.Cards.Values.First().Connect.PerformClick();Pump();check(started==null&&ContainsText(form,"还没有填写共享网页地址，请编辑设备后再连接。"),"missing web details never open the SSH terminal");
             }
             using(var again=new Manager(false,state,kit)){
                 again.Show();Pump();var card=again.Cards.Values.FirstOrDefault();
-                check(card!=null&&card.SshActive&&card.Ssh.Address=="root@192.0.2.9:22"&&card.Ssh.secret.Length>0,"the device and its saved password survive a restart");
+                check(card!=null&&!card.SshActive&&card.Preference.loginMode=="web"&&card.Preference.hideAddress&&card.Ssh.Address=="root@192.0.2.9:22"&&card.Ssh.secret.Length>0,"the selected mode and untouched SSH password survive a restart");
+            }
+        }
+        static void CardDisplay(Action<bool,string> check){
+            using(var form=new Manager(true)){
+                form.Show();Pump();var card=form.Cards["preview-b"];
+                check(card.Address==card.Target.Url,"web mode exposes only the web address for display and copying");
+                card.LoginSwitch.PerformClick();Pump();check(card.Address==card.Ssh.host&&!card.Address.Contains("@"),"SSH mode displays and copies the host without user, port or command");
+                check(form.Cards["preview-a"].Top<card.Top,"switching sign-in preserves the existing card order");
+                form.OpenEditor(card.Target.Name);Pump();form.Editor.HideAddress.Checked=true;form.Editor.NoteInput.Box.Text="Private device note";form.Editor.NameInput.Box.Text="Work device";form.Editor.Save.PerformClick();Pump();
+                check(form.Editor==null&&card.Preference.hideAddress&&card.Caption=="Work device"&&card.IconNote.AccessibleDescription=="Private device note"&&card.Details.Note=="","hidden address and icon note save without adding a note to the detail panel");
+                card.LoginSwitch.PerformClick();Pump();check(card.Preference.hideAddress&&card.Address==card.Target.Url,"changing sign-in retains address hiding while copying still uses the current address");
+                form.OpenEditor(card.Target.Name);Pump();var page=form.Editor;
+                check(page.HideAddress.Checked&&page.HideAddress.Right==page.HideAddress.Parent.Width-16,"editing restores the saved display switch and aligns it at the right edge");
+                page.ShowWeb();Pump();check(page.Remember.Right==page.Remember.Parent.Width-16,"remember-password switch uses the same right edge");
+                page.ShowGeneral();page.HideAddress.Checked=false;page.Save.PerformClick();Pump();check(!card.Preference.hideAddress,"turning hiding off restores the address without changing the device");
             }
         }
         static void Window(Action<bool,string> check){
@@ -174,14 +192,17 @@ namespace CMCP {
                 b.Connect.PerformClick();Pump();check(b.Target.State==state,"opening a terminal never starts the web connection");
                 b.LoginSwitch.PerformClick();Pump();check(!b.SshActive&&b.Connect.Text!="打开终端"&&b.Details.Stop.Visible,"switching back restores shared web sign-in");b.SetExpanded(false,false);Pump();
                 a.LoginSwitch.PerformClick();Pump();
-                check(form.Editor!=null&&form.Editor.TargetName=="preview-a"&&form.Editor.CurrentCategory=="SSH 登录"&&!a.SshActive,"a card without SSH details opens the SSH page instead of switching");
+                check(form.Editor==null&&a.SshActive&&a.Ssh==null,"a card without SSH details switches without opening the editor");
+                a.Connect.PerformClick();Pump();check(form.Editor==null&&ContainsText(form,"还没有填写 SSH 信息，请编辑设备后再连接。")&&a.Target.State=="connected","missing SSH details are reported only when connecting and retain the running web link");
+                form.OpenEditor(a.Target.Name);form.Editor.ShowSsh();
                 form.Editor.HostInput.Box.Text="198.51.100.7";form.Editor.UserInput.Box.Text="root";form.Editor.Save.PerformClick();Pump();
                 check(form.Editor==null&&a.Ssh!=null&&a.Ssh.host=="198.51.100.7"&&a.Target.State=="connected","SSH details save without touching a running connection");
                 int before=form.Cards.Count;form.OpenAdd();Pump();form.Editor.ShowSsh();form.Editor.NameInput.Box.Text="我的 VPS";form.Editor.HostInput.Box.Text="192.0.2.9";form.Editor.UserInput.Box.Text="root";form.Editor.Save.PerformClick();Pump();
                 var only=form.Cards.Values.FirstOrDefault(c=>c.Target.Url.Length==0);
                 check(form.Editor==null&&form.Cards.Count==before+1&&only!=null&&only.SshActive&&only.Caption=="我的 VPS"&&only.Connect.Text=="打开终端","a device with only SSH gets its own card");
                 check(only.Ssh.Address=="root@192.0.2.9:22"&&only.AccessibleName.StartsWith("我的 VPS"),"an SSH-only card shows its address and needs no web address");
-                only.LoginSwitch.PerformClick();Pump();check(form.Editor!=null&&form.Editor.CurrentCategory=="共享网页登录"&&only.SshActive,"an SSH-only card asks for the missing web address instead of switching");form.CloseEditor();Pump();
+                only.LoginSwitch.PerformClick();Pump();check(form.Editor==null&&!only.SshActive,"an SSH-only card switches to web without opening the editor");
+                only.Connect.PerformClick();Pump();check(ContainsText(form,"还没有填写共享网页地址，请编辑设备后再连接。")&&only.Target.State=="stopped","missing web details are reported on connect without starting the backend");only.LoginSwitch.PerformClick();Pump();
                 form.FinishTransition();Pump();
                 check(form.TrayItems.Length>0,"the tray still builds with an SSH-only device");
                 form.TrayAction(only.Target.Name,"connect");Pump();check(only.Target.State=="stopped","connecting from the tray only opens a terminal for an SSH-only device");

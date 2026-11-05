@@ -18,6 +18,36 @@ const sshInput=(extra={},sshExtra={})=>({...web(''),label:'VPS',ssh:ssh(sshExtra
 const run=(file,args,options)=>new Promise(resolve=>execFile(file,args,{timeout:30000,...options},(error,stdout,stderr)=>resolve({code:error?error.code:0,stdout,stderr})));
 const login=(extra={})=>({id:randomUUID(),host:'203.0.113.24',port:2222,username:'root',method:'password',keyPath:'',...extra});
 
+test('card address hiding persists across edits, sign-in switches and web-to-SSH-only changes',async t=>{
+  const f=fixture(t);let state=new ManagerState(f.directory,f.secrets);
+  const id=await state.save({...web(),ssh:ssh(),hideAddress:true,note:'Device note'},async()=>true);
+  assert.equal(state.view().targets[0].hideAddress,true);
+  state.setEnabled(id,false);
+  const before=fs.readFileSync(path.join(f.directory,'target-controls.json'),'utf8');
+  state.setLogin(id,true);
+  assert.equal(state.view().targets[0].hideAddress,true);
+  assert.equal(fs.readFileSync(path.join(f.directory,'target-controls.json'),'utf8'),before);
+  state=new ManagerState(f.directory,f.secrets);
+  assert.equal(state.view().targets[0].hideAddress,true);
+  assert.equal(state.view().targets[0].note,'Device note');
+  await state.save({...sshInput({id}),label:'SSH only'},async()=>true);
+  state=new ManagerState(f.directory,f.secrets);
+  assert.equal(state.view().targets[0].hideAddress,true);
+  assert.equal(state.view().targets[0].url,'');
+  await state.save({...web('https://second.invalid'),id,ssh:ssh()},async()=>true);
+  assert.equal(state.view().targets[0].hideAddress,true);
+  await state.save({...web('https://second.invalid'),id,ssh:ssh(),hideAddress:false},async()=>true);
+  assert.equal(new ManagerState(f.directory,f.secrets).view().targets[0].hideAddress,false);
+});
+test('legacy devices show addresses by default and invalid display options leave the original configuration intact',async t=>{
+  const f=fixture(t),state=new ManagerState(f.directory,f.secrets);
+  const id=await state.save(web(),async()=>true);
+  assert.equal(state.view().targets[0].hideAddress,false);
+  const file=path.join(f.directory,'targets.json'),before=fs.readFileSync(file,'utf8');
+  await assert.rejects(state.save({...web(),id,hideAddress:'yes'},async()=>true),/显示设置无效/);
+  assert.equal(fs.readFileSync(file,'utf8'),before);
+});
+
 test('a host or user cannot pass as an option or a shell separator',()=>{
   for(const value of ['example.com','a-b.example.com','203.0.113.24','2001:db8::1','h'])assert.ok(validHost(value),value);
   for(const value of ['','-oProxyCommand=x','a b','a;b','a&b',"a'b",'a"b','a|b','$(x)','a\nb'])assert.ok(!validHost(value),value);
@@ -147,7 +177,7 @@ test('a saved secret is kept only for the same server, user and method',async t=
 });
 test('web and SSH live side by side; switching and SSH edits leave a running connection alone',async t=>{
   const f=fixture(t),s=new ManagerState(f.directory,f.secrets),id=await s.save(web(),async()=>true);
-  assert.equal(s.view().targets[0].ssh,null);assert.throws(()=>s.setLogin(id,true));
+  assert.equal(s.view().targets[0].ssh,null);s.setLogin(id,true);assert.equal(s.view().targets[0].loginMode,'ssh');s.setLogin(id,false);
   s.setEnabled(id,true);const revision=s.controlMap().get(id).revision;
   await s.save({...web(),id,ssh:ssh(),preferSsh:false},()=>assert.fail('SSH edits must not probe the address'));
   let device=s.view({[id]:{state:'connected',message:'ok'}}).targets[0];
@@ -187,5 +217,39 @@ test('the manager opens the terminal, lists terminals and marks SSH cards for th
   assert.equal((await call('targets/terminal',{id:randomUUID()})).status,400);
   assert.equal((await call('targets/start',{id})).status,400,'an SSH-only device has no connection to start');
   const webId=(await (await call('targets/save',web())).json()).id;assert.equal((await (await call('tray')).json()).targets.find(x=>x.id===webId).ssh,undefined);
-  assert.equal((await call('targets/login',{id:webId,active:true})).status,400);
+  assert.equal((await call('targets/login',{id:webId,active:true})).status,200);
+  const missing=await call('targets/terminal',{id:webId});assert.equal(missing.status,400);assert.match((await missing.json()).error,/还没有填写 SSH/);
+});
+
+test('missing SSH mode persists through restart and edits without touching a web connection',async t=>{
+  const f=fixture(t),s=new ManagerState(f.directory,f.secrets),id=await s.save(web(),async()=>true);
+  s.setEnabled(id,true);const controls=fs.readFileSync(path.join(f.directory,'target-controls.json'),'utf8');
+  const config=fs.readFileSync(path.join(f.directory,'targets.json'),'utf8');s.setLogin(id,true);
+  assert.equal(s.view().targets[0].loginMode,'ssh');assert.equal(s.view().targets[0].ssh,null);
+  assert.equal(fs.readFileSync(path.join(f.directory,'target-controls.json'),'utf8'),controls);
+  assert.equal(fs.readFileSync(path.join(f.directory,'targets.json'),'utf8'),config);
+  const again=new ManagerState(f.directory,f.secrets);assert.equal(again.view().targets[0].loginMode,'ssh');
+  await again.save({...web(),id,label:'Renamed',ssh:null},()=>assert.fail('edit must not log in'));
+  assert.equal(again.view().targets[0].loginMode,'ssh');assert.equal(again.view().targets[0].ssh,null);
+  await again.save({...web(),id,ssh:ssh()},async()=>true);assert.equal(again.view().targets[0].ssh.active,true);
+  await again.save({...web(),id,ssh:null},async()=>true);assert.equal(again.view().targets[0].loginMode,'ssh');
+  assert.equal(again.view().targets[0].ssh,null);
+  await again.remove(id);assert.equal(again.ssh.modes[id],undefined);
+});
+
+test('SSH-only mode can select missing web and survives restart and credential edits',async t=>{
+  const f=fixture(t),s=new ManagerState(f.directory,f.secrets),id=await s.save(sshInput({},{secret:'fixture-secret'}),async()=>true);
+  s.setLogin(id,false);assert.equal(s.view().targets[0].loginMode,'web');assert.equal(s.view().targets[0].ssh.active,false);
+  assert.throws(()=>s.setEnabled(id,true),/还没有填写共享网页地址/);
+  const again=new ManagerState(f.directory,f.secrets);assert.equal(again.view().targets[0].loginMode,'web');
+  const secret=again.sshFor(id).credentialId;await again.save(sshInput({id,label:'Renamed'}),async()=>true);
+  assert.equal(again.view().targets[0].loginMode,'web');assert.equal(again.sshFor(id).credentialId,secret);
+  again.setLogin(id,true);assert.equal(again.view().targets[0].ssh.active,true);
+});
+
+test('invalid persisted sign-in choices are rejected without replacing the file',t=>{
+  const f=fixture(t),file=path.join(f.directory,'ssh-logins.json');
+  const original=JSON.stringify({schema:1,logins:[],order:[],modes:{[randomUUID()]:'other'}});
+  fs.writeFileSync(file,original);assert.throws(()=>new ManagerState(f.directory,f.secrets),/损坏/);
+  assert.equal(fs.readFileSync(file,'utf8'),original);
 });

@@ -98,7 +98,7 @@ namespace CMCP {
                     form.ClientSize=size;Pump();check(form.LayoutFits(),"responsive layout fits at "+size.Width+"x"+size.Height);
                 }
                 form.SetTheme(true);Pump();DarkCaptionResult=NativeFrame.LastCaptionResult;check(form.Preferences.dark&&a.Colors.Dark&&a.Details.Colors.Dark,"dark theme reaches cards and nested details");form.SetTheme(false);Pump();LightCaptionResult=NativeFrame.LastCaptionResult;check(!a.Colors.Dark,"light theme restores semantic colors");
-                var bar=form.Controls.OfType<DashboardToolbar>().Single();check(bar.Settings.Enabled&&bar.Add.Enabled&&bar.Controls.Count==2,"the toolbar holds only the settings and add entries");
+                var bar=form.Controls.OfType<DashboardToolbar>().Single();check(bar.Settings.Enabled&&bar.Add.Enabled&&bar.Controls.Count==3,"the toolbar holds only the settings and add entries");
                 check(!File.Exists(Path.Combine(directory,"config.json")),"all UI tests use isolated state and never create a bridge token");
                 check(form.Text=="CMCP","native title contains only CMCP");
                 check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");
@@ -149,7 +149,7 @@ namespace CMCP {
                 using(var host=new Form{ClientSize=new Size(660,500)})using(var page=new TargetEditorPage(new Target{Name=add?"":"edit",Url=add?"":"https://example.invalid"},new CardPreference(),Palette.Create(dark))){
                     host.Controls.Add(page);host.Show();Pump();
                     check(!page.viewport.NativeBarsVisible&&page.LayoutFits,"editor hides both native bars in "+(dark?"dark":"light")+" "+(add?"add":"edit"));
-                    page.viewport.Wheel(-360);Pump();check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"hidden editor scrollbar retains wheel scrolling in "+dark+" "+add);
+                    page.ShowSsh();Pump();page.viewport.Wheel(-360);Pump();check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"hidden editor scrollbar retains wheel scrolling in "+dark+" "+add);
                     page.ShowSsh();Pump();page.viewport.AutoScrollPosition=Point.Empty;page.SshSecretInput.Box.Focus();Pump();
                     check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"keyboard focus still scrolls the password field into view in "+dark+" "+add);
                     host.ClientSize=new Size(1440,850);Pump();host.ClientSize=new Size(700,540);Pump();

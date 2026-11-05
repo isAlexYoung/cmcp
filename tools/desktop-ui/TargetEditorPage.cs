@@ -107,22 +107,20 @@ namespace CMCP {
         internal readonly ModernButton Save = new ModernButton { Glyph="check",Text="保存",Primary=true,AccessibleName="保存设备" };
         internal readonly EditorInput NameInput = new EditorInput(), NoteInput = new EditorInput{Height=64}, UrlInput = new EditorInput(), PasswordInput = new EditorInput();
         internal readonly EditorInput HostInput = new EditorInput(), PortInput = new EditorInput(), UserInput = new EditorInput(), SshSecretInput = new EditorInput(), KeyInput = new EditorInput();
-        internal readonly ToggleSwitch Remember = new ToggleSwitch{Size=new Size(48,30)};
+        internal readonly ToggleSwitch Remember = new ToggleSwitch{Size=new Size(48,30)}, HideAddress = new ToggleSwitch{Size=new Size(48,30)};
         internal readonly DropdownField MethodField = new DropdownField(new[]{new KeyValuePair<string,string>("password","密码"),new KeyValuePair<string,string>("key","公钥")}){Height=38,Value="password"};
-        internal readonly ModernButton WebChoice = new ModernButton{Text="共享网页",Segment=true,CenterText=true}, SshChoice = new ModernButton{Text="SSH",Segment=true,CenterText=true};
         internal bool AutoLogin {get{return Remember.Checked;}}
         internal bool IsNew { get { return TargetName.Length==0; } }
         internal string Password { get { return PasswordInput.Box.Text; } }
-        readonly ModernButton choose = new ModernButton { Text="选择图片…",Neutral=true,CenterText=true,Size=new Size(110,36) }, reset = new ModernButton { Text="恢复默认",CenterText=true,Size=new Size(90,36) };
+        readonly ModernButton choose = new ModernButton { Text="选择本机图片",Neutral=true,CenterText=true,Size=new Size(156,36) }, reset = new ModernButton { Text="恢复默认",CenterText=true,Size=new Size(90,36) };
         readonly ModernButton browse = new ModernButton { Text="浏览…",Neutral=true,CenterText=true,Size=new Size(84,38) }, forget = new ModernButton { Text="清除",Neutral=true,CenterText=true,Size=new Size(64,38) };
         readonly Label pageTitle = new Label{TextAlign=ContentAlignment.MiddleLeft}, group = new Label(), error = new Label{TextAlign=ContentAlignment.MiddleLeft};
         readonly PictureBox icon = new PictureBox { SizeMode=PictureBoxSizeMode.Zoom,Size=new Size(44,44) };
-        readonly RoundedSheet choiceTrack = new RoundedSheet{Size=new Size(254,40)};
         readonly ResizePanel side = new ResizePanel{Dock=DockStyle.Left,Width=212}, top = new ResizePanel{Dock=DockStyle.Top,Height=56}, footer = new ResizePanel{Dock=DockStyle.Bottom,Height=78};
         internal readonly EditorViewport viewport = new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
         readonly SettingsSheet sheet = new SettingsSheet();
         readonly LocalToolTip tips = new LocalToolTip();
-        readonly Category general=new Category{Title="常规",Glyph="sliders"},web=new Category{Title="共享网页登录",Glyph="monitor"},ssh=new Category{Title="SSH 登录",Glyph="terminal"};
+        readonly Category general=new Category{Title="常规",Glyph="profile"},web=new Category{Title="共享网页登录",Glyph="monitor"},ssh=new Category{Title="SSH 登录",Glyph="terminal"};
         readonly List<Category> categories=new List<Category>();
         Row secretRow,keyRow;
         Category current;
@@ -150,18 +148,17 @@ namespace CMCP {
             initialUrl=target.Url;storedAutoPassword=target.AutoLogin&&target.HasSavedPassword;savedSsh=login;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);
             side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);pageTitle.Font=new Font(UiFont.Points(13F),FontStyle.Bold);
-            NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;NameInput.Cue="显示在卡片上的名字";
+            NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             NoteInput.Box.Multiline=true;NoteInput.Box.MaxLength=200;NoteInput.Box.Text=preference.note??"";
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;UrlInput.Cue="https://";
             PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;PasswordInput.Cue=target.HasSavedPassword?"已加密保存；同一地址留空保留":"手动共享网页登录可留空";
-            Remember.Checked=target.AutoLogin;
+            Remember.Checked=target.AutoLogin;HideAddress.Checked=preference.hideAddress;HideAddress.AccessibleName=L.Text("隐藏网址和 IP");
             HostInput.Box.MaxLength=253;PortInput.Box.MaxLength=5;UserInput.Box.MaxLength=64;KeyInput.Box.MaxLength=512;
             SshSecretInput.Box.UseSystemPasswordChar=true;SshSecretInput.Box.MaxLength=256;
             HostInput.Cue="域名或 IP";PortInput.Box.Text="22";UserInput.Cue="root";
             if(login!=null){HostInput.Box.Text=login.host;PortInput.Box.Text=Convert.ToString(login.port);UserInput.Box.Text=login.username;MethodField.Value=login.method;KeyInput.Box.Text=login.keyPath;preferSsh=login.active;}
             if(target.Url.Length==0&&login!=null)preferSsh=true;
-            choiceTrack.Controls.AddRange(new Control[]{WebChoice,SshChoice});WebChoice.Bounds=new Rectangle(5,4,122,32);SshChoice.Bounds=new Rectangle(127,4,122,32);
-            WebChoice.Click+=delegate{preferSsh=false;RefreshChoice();};SshChoice.Click+=delegate{preferSsh=true;RefreshChoice();};
+            if(preference.loginMode.Length>0)preferSsh=preference.loginMode=="ssh";
             MethodField.Chosen+=key=>{MethodField.Value=key;MethodField.Invalidate();forgetSecret=false;RefreshMethod();LayoutSheet();ApplyVisibility();};
             BuildCategories();
             Back.Click+=delegate{if(BackRequested!=null)BackRequested();};
@@ -200,7 +197,7 @@ namespace CMCP {
             side.SizeChanged+=delegate{LayoutSide();};viewport.SizeChanged+=delegate{PlaceSheet();};sheet.SizeChanged+=delegate{LayoutSheet();};
             footer.SizeChanged+=delegate{Save.Bounds=new Rectangle(Math.Max(28,footer.Width-156),18,128,42);error.Bounds=new Rectangle(28,8,Math.Max(10,footer.Width-200),62);};
             current=general;
-            RefreshMethod();RefreshChoice();RefreshTabs();LayoutSide();RefreshIcon();Apply(colors);PlaceSheet();Show(general,false);
+            RefreshMethod();RefreshTabs();LayoutSide();RefreshIcon();Apply(colors);PlaceSheet();Show(general,false);
         }
         Section AddSection(Category category,string text,string note=null){
             var section=new Section{Heading=new Label{Text=L.Text(text),Font=new Font(sheet.Font,FontStyle.Bold),TextAlign=ContentAlignment.MiddleLeft}};
@@ -220,8 +217,7 @@ namespace CMCP {
             AddRow(looks,"图标",icon,44,reset,choose);
             AddRow(looks,"名称",NameInput);
             AddRow(looks,"备注",NoteInput).Height=84;
-            var signin=AddSection(general,"登录");
-            AddRow(signin,"当前登录方式",choiceTrack,254);
+            var display=AddSection(general,"显示");AddRow(display,"隐藏网址和 IP",HideAddress,48);
             var address=AddSection(web,"连接");
             AddRow(address,"网页地址",UrlInput);
             AddRow(address,"密码",PasswordInput);
@@ -253,7 +249,6 @@ namespace CMCP {
             keyRow.Title.ForeColor=key?colors.Text:colors.Muted;
             ApplyVisibility();
         }
-        void RefreshChoice(){WebChoice.Selected=!preferSsh;SshChoice.Selected=preferSsh;WebChoice.Invalidate();SshChoice.Invalidate();}
         void RefreshTabs(){
             if(web.Tab==null)return;
             web.Tab.Dot=web.Tab.DotOk=HasWeb;ssh.Tab.Dot=ssh.Tab.DotOk=HasSsh;
@@ -289,7 +284,7 @@ namespace CMCP {
                                 extra.Location=new Point(right-extra.Width,y+(row.Height-extra.Height)/2);right=extra.Left-8;
                             }
                             int mainWidth=row.MainWidth>0?row.MainWidth:Math.Max(40,right-left);
-                            row.Main.Bounds=new Rectangle(left,y+(row.Height-row.Main.Height)/2,mainWidth,row.Main.Height);
+                            row.Main.Bounds=new Rectangle(row.Main is ToggleSwitch?right-mainWidth:left,y+(row.Height-row.Main.Height)/2,mainWidth,row.Main.Height);
                             y+=row.Height;first=false;
                         }
                         if(shown)sheet.Cards.Add(new Rectangle(0,cardTop,Math.Max(1,width-1),y-cardTop));
@@ -362,7 +357,7 @@ namespace CMCP {
         }
         internal void ShowError(string message) { error.Text=L.Message(message); }
         internal void SetBusy(bool busy){
-            foreach(var control in new Control[]{Save,Back,choose,reset,browse,forget,NameInput,NoteInput,UrlInput,PasswordInput,Remember,HostInput,PortInput,UserInput,SshSecretInput,KeyInput,MethodField,WebChoice,SshChoice})control.Enabled=!busy;
+            foreach(var control in new Control[]{Save,Back,choose,reset,browse,forget,NameInput,NoteInput,UrlInput,PasswordInput,Remember,HideAddress,HostInput,PortInput,UserInput,SshSecretInput,KeyInput,MethodField})control.Enabled=!busy;
             if(!busy)RefreshMethod();
         }
         bool Fail(Category category,string message){Show(category,false);ShowError(message);return false;}

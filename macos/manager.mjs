@@ -36,7 +36,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
-  async function entry(id){for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===id);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(id)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
+  async function entry(id){if(!store.targets.some(t=>t.id===id)&&store.sshFor(id))throw Error('还没有填写共享网页地址，请编辑设备后再连接。');for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===id);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(id)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
   // A running connection already holds a session; otherwise only a saved password can open one.
   const removeCloudConfig=removeCloud||(async target=>{
     const record=connections.values().find(t=>t.name===target.id);
@@ -56,7 +56,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
-    '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled,ssh})=>({id,label,state,enabled,...(ssh?.active?{ssh:true}:{})})),language:store.preferences.language,updating}),
+    '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled,loginMode})=>({id,label,state,enabled,...(loginMode==='ssh'?{ssh:true}:{})})),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
     '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();return {started:true};}),
     '/api/targets/stop':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};}),
@@ -64,7 +64,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/targets/order':input=>store.serial(()=>{store.reorder(input.ids);return {saved:true};}),
     '/api/targets/open':async input=>({url:await entry(input.id)}),
     '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.active);return {saved:true};}),
-    '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error('连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal)};},
+    '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error(store.targets.some(t=>t.id===input.id)?'还没有填写 SSH 信息，请编辑设备后再连接。':'连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal)};},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates=checkFailed(updates);}return updates;},
     '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}})};}catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},

@@ -1,7 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {updateView,updateSchedule,FIRST_CHECK_MS,CHECK_EVERY_MS} from '../ui/update-state.js';
+import {updateRing,updateView,updateSchedule,FIRST_CHECK_MS,CHECK_EVERY_MS} from '../ui/update-state.js';
 import {checkFailed} from '../updates.mjs';
+
+test('the progress ring follows the Mac checksum-before-download sequence without going backwards',()=>{
+  let previous={},percentages=[];
+  for(const value of [{phase:'release'},{phase:'checksum'},{phase:'download',received:0,total:100},{phase:'download',received:50,total:100},{phase:'download',received:100,total:100},{phase:'verify',received:100,total:100},{phase:'restart'}]){
+    previous=updateRing({state:'updating',...value},previous);percentages.push(previous.percent);
+  }
+  assert.deepEqual(percentages,[0,8,10,47,85,99,100]);
+});
+test('failed updates retain their ring and retry or idle states reset it',()=>{
+  const running=updateRing({state:'updating',phase:'download',received:70,total:100});
+  const failed=updateRing({state:'failed',code:'checksum'},running);
+  assert.equal(failed.percent,running.percent);assert.equal(failed.failed,true);assert.equal(failed.visible,true);
+  assert.equal(updateRing({state:'updating',phase:'release'},failed).percent,0);
+  assert.equal(updateRing({state:'available'},failed).visible,false);
+  assert.equal(updateRing({state:'latest'},running).percent,0);
+});
+test('unknown or invalid stage counters never invent measured completion',()=>{
+  for(const counters of [{},{received:5,total:0},{received:Infinity,total:10},{received:20,total:10},{received:-1,total:10}]){
+    assert.equal(updateRing({state:'updating',phase:'download',...counters}).percent,10);
+  }
+});
 
 test('an available version is offered with its number',()=>{
   const view=updateView({state:'available',version:'4.12.0'});

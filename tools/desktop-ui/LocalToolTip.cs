@@ -13,20 +13,22 @@ namespace CMCP {
     // tooltip theme. It never activates or takes keyboard focus from the owner.
     internal sealed class LocalToolTip : Component {
         readonly Dictionary<Control,string> source=new Dictionary<Control,string>();
+        readonly HashSet<Control> literal=new HashSet<Control>();
         readonly Timer delay=new Timer();
         Palette colors=Palette.Create(false);
         Control current;
         Form owner;
         TipWindow popup;
-        bool waiting,disposed;
+        bool waiting,disposed,focusHint;
         internal LocalToolTip(){delay.Tick+=Tick;L.Changed+=RefreshLanguage;}
-        internal void SetToolTip(Control control,string text){
+        internal void SetToolTip(Control control,string text,bool raw=false){
             if(disposed||control.IsDisposed)return;
             if(!source.ContainsKey(control)){
                 control.MouseEnter+=Enter;control.MouseMove+=Move;control.MouseLeave+=Leave;
                 control.MouseDown+=Dismiss;control.KeyDown+=Key;control.Disposed+=Remove;
             }
-            string previous;bool changed=!source.TryGetValue(control,out previous)||previous!=text;
+            string previous;bool changed=!source.TryGetValue(control,out previous)||previous!=text||literal.Contains(control)!=raw;
+            if(raw)literal.Add(control);else literal.Remove(control);
             source[control]=text;
             if(changed&&current==control&&popup!=null&&popup.Visible)Present();
         }
@@ -39,11 +41,12 @@ namespace CMCP {
         void Leave(object sender,EventArgs e){if(current==sender)Hide();}
         void Dismiss(object sender,MouseEventArgs e){Hide();}
         void Key(object sender,KeyEventArgs e){Hide();}
-        void Remove(object sender,EventArgs e){var control=(Control)sender;if(current==control)Hide();Unhook(control);source.Remove(control);}
+        void Remove(object sender,EventArgs e){var control=(Control)sender;if(current==control)Hide();Unhook(control);source.Remove(control);literal.Remove(control);}
         void Unhook(Control control){control.MouseEnter-=Enter;control.MouseMove-=Move;control.MouseLeave-=Leave;control.MouseDown-=Dismiss;control.KeyDown-=Key;control.Disposed-=Remove;}
-        void Arm(Control control){
+        internal void ShowForFocus(Control control){Arm(control,true);}
+        void Arm(Control control,bool focus=false){
             string text;if(!source.TryGetValue(control,out text)||String.IsNullOrEmpty(text))return;
-            Hide();current=control;waiting=true;delay.Interval=450;delay.Start();
+            Hide();current=control;focusHint=focus;waiting=true;delay.Interval=450;delay.Start();
         }
         void Tick(object sender,EventArgs e){
             delay.Stop();if(!waiting){Hide();return;}
@@ -59,13 +62,13 @@ namespace CMCP {
         bool Present(){
             if(disposed||current==null||current.IsDisposed||!current.Visible||!current.Enabled)return false;
             var form=current.FindForm();if(form==null||!form.ContainsFocus)return false;
-            if(!current.RectangleToScreen(current.ClientRectangle).Contains(Cursor.Position))return false;
+            if(focusHint?!current.ContainsFocus:!current.RectangleToScreen(current.ClientRectangle).Contains(Cursor.Position))return false;
             BindOwner(form);
             using(var scope=new TrayDisplay.Scope()){
                 if(popup==null||popup.IsDisposed)popup=new TipWindow();
                 var point=TrayDisplay.Pointer();
                 TrayDisplay.Move(popup,new Point(point.X+12,point.Y+20));
-                popup.SetContent(L.Text(source[current]),colors);
+                popup.SetContent(literal.Contains(current)?source[current]:L.Text(source[current]),colors);
                 var area=TrayDisplay.WorkingArea(point);
                 var at=new Point(Math.Max(area.Left,Math.Min(point.X+12,area.Right-popup.Width)),point.Y+20);
                 if(at.Y+popup.Height>area.Bottom)at.Y=point.Y-popup.Height-10;
@@ -75,9 +78,9 @@ namespace CMCP {
             return true;
         }
         void RefreshLanguage(){if(popup!=null&&popup.Visible)Present();}
-        internal void Hide(){delay.Stop();waiting=false;current=null;if(popup!=null)popup.Hide();}
+        internal void Hide(){delay.Stop();waiting=false;focusHint=false;current=null;if(popup!=null)popup.Hide();}
         protected override void Dispose(bool disposing){
-            if(disposing&&!disposed){disposed=true;Hide();BindOwner(null);delay.Dispose();L.Changed-=RefreshLanguage;foreach(var control in source.Keys.ToArray())Unhook(control);source.Clear();if(popup!=null)popup.Dispose();}
+            if(disposing&&!disposed){disposed=true;Hide();BindOwner(null);delay.Dispose();L.Changed-=RefreshLanguage;foreach(var control in source.Keys.ToArray())Unhook(control);source.Clear();literal.Clear();if(popup!=null)popup.Dispose();}
             base.Dispose(disposing);
         }
 

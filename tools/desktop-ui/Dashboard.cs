@@ -17,7 +17,7 @@ namespace CMCP {
         internal readonly CardList list = new CardList();
         readonly Label status = new Label(), count = new Label(), empty = new Label();
         readonly ResizePanel content = new ResizePanel();
-        internal readonly UpdateProgressView UpdateView=new UpdateProgressView{Dock=DockStyle.Top,Visible=false};
+        internal UpdateProgressRing UpdateView {get{return toolbar.Progress;}}
         internal TargetEditorPage Editor;
         internal SettingsPage Settings;
         internal AppSettings Options;
@@ -41,7 +41,7 @@ namespace CMCP {
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         // The update button moved to About, so a new version is announced by a dot instead.
         readonly System.Windows.Forms.Timer updateCheck = new System.Windows.Forms.Timer{Interval=15000};
-        sealed class PendingAction { internal Process Process; internal InlineWorker Worker; internal string Name, Action, Label="", Icon="", Message="", Note="", SshFrom=""; internal bool Superseded, Failed, Saved, DropSsh, DeleteSsh; internal SshLogin SshDraft; }
+        sealed class PendingAction { internal Process Process; internal InlineWorker Worker; internal string Name, Action, Label="", Icon="", Message="", Note="", SshFrom="", LoginMode=""; internal bool Superseded, Failed, Saved, DropSsh, DeleteSsh, HideAddress; internal SshLogin SshDraft; }
         readonly Dictionary<string,string> progress=new Dictionary<string,string>();
         readonly List<PendingAction> children = new List<PendingAction>();
         internal readonly Dictionary<string,TargetCard> Cards = new Dictionary<string,TargetCard>(StringComparer.Ordinal);
@@ -76,7 +76,7 @@ namespace CMCP {
             status.Bounds=new Rectangle(0,34,850,24);status.Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top;heading.Controls.Add(status);
             list.Dock=DockStyle.Fill;list.AutoScroll=true;list.Sorted+=MoveCard;
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有设备\r\n点击右上角「添加设备」，保存后即可连接。";empty.Margin=new Padding(0,30,0,0);
-            content.Controls.Add(list);content.Controls.Add(UpdateView);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
+            content.Controls.Add(list);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
             toolbar.Add.Click+=delegate{OpenAdd();};
             toolbar.Settings.Click+=delegate{OpenSettings();};
             updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();},SetUpdateProgress);
@@ -174,14 +174,10 @@ namespace CMCP {
             else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
         void RunUpdate(){if(BackendStarting||ExitPending)return;updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
-        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.SetUpdateDot(updates.Available);if(Settings!=null){Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion);Settings.SetUpdateStatus(message);}else if(updateNotice){notice=message;status.Text=L.Text(message);}}
+        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.SetUpdateDot(updates.Available);if(Settings!=null){Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion);Settings.SetUpdateStatus(message);}else if(updateNotice&&(updates.Progress==null||!updates.Progress.Visible)){notice=message;status.Text=L.Text(message);}}
         internal void SetUpdateProgress(UpdateProgress value){
             if(IsDisposed)return;
-            bool reflow=(value!=null&&value.Visible)!=(UpdateView.Value!=null&&UpdateView.Value.Visible);
-            if(reflow)content.SuspendLayout();
-            try{UpdateView.Set(value);UpdateView.Apply(colors);}
-            finally{if(reflow)content.ResumeLayout(true);}
-            if(reflow){Arrange();content.Invalidate(true);}
+            UpdateView.Set(value);UpdateView.Apply(colors);
             if(Settings!=null)Settings.SetUpdateProgress(value);
         }
         void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction,position:trayPosition);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.ActivationMenu,Visible=!isolated};tray.DoubleClick+=delegate{RestoreManager();};TrayVisible=true;SyncTray();}
@@ -235,7 +231,7 @@ namespace CMCP {
         void Launch(string action,TargetCard card,string initialUrl){
             if(BackendStarting||ExitPending)return;
             // A device with only SSH has no connection in the backend at all.
-            if(card!=null&&card.Target.Url.Length==0)return;
+            if(card!=null&&card.Target.Url.Length==0){if(action=="connect"||action=="open")Error("还没有填写共享网页地址，请编辑设备后再连接。");return;}
             if(updates.Installing){Error("正在下载并校验更新…");return;}
             if(preview){if(card!=null&&(action=="connect"||action=="stop")){card.Target.State=action=="connect"?"connected":"stopped";card.Target.Detail=LocalState.Detail(card.Target.State);card.RefreshTarget(card.Target);}return;}
             if(action!="add"&&card==null)return;
@@ -262,7 +258,7 @@ namespace CMCP {
             Turn(1,delegate{
                 Editor=new TargetEditorPage(target,preference,colors,Ssh.Get(target.Name));Editor.AnimateContent=TurnPart;
                 Editor.BackRequested+=CloseEditor;Editor.SaveRequested+=SaveEditor;
-                content.Visible=false;toolbar.Visible=false;Controls.Add(Editor);Editor.BringToFront();Editor.NameInput.Box.Focus();
+                content.Visible=false;toolbar.Visible=false;Controls.Add(Editor);Editor.BringToFront();ActiveControl=null;
             });
         }
         void EditCard(TargetCard card){OpenEditor(card.Target.Name);}
@@ -305,7 +301,7 @@ namespace CMCP {
             try{
                 string name=card.Target.Name,url=editor.Url;
                 var login=editor.BuildSsh(name);if(login!=null){Ssh.Put(login);SaveSsh();}else if(Ssh.Remove(name))SaveSsh();card.Ssh=login;
-                Preferences.Set(name,editor.DisplayName,editor.IconData,targets,editor.Note);SavePreferences();Mark("editor-save preferences saved");card.UpdatePreference(Preferences.Get(name));Mark("editor-save card presentation updated");
+                Preferences.Set(name,editor.DisplayName,editor.IconData,targets,editor.Note,editor.HideAddress.Checked);SavePreferences();Mark("editor-save preferences saved");card.UpdatePreference(Preferences.Get(name));Mark("editor-save card presentation updated");
                 CloseEditor();Mark("editor-save returned to list");if(changed)Launch("edit",Cards[name],url);RefreshState();Mark("editor-save complete");
             }catch{if(Editor!=null)Editor.ShowError("无法保存界面偏好，未更改连接信息。");else Error("无法保存界面偏好，未更改连接信息。");}
         }
@@ -317,7 +313,7 @@ namespace CMCP {
                 bool add=card==null||card.Target.Url.Length==0;
                 var draft=editor.BuildSsh("");
                 var worker=new InlineWorker(kit,add?"add":"edit",add?"":editor.TargetName,editor.Url,editor.Password,editor.AutoLogin);
-                children.Add(new PendingAction{Worker=worker,Process=worker.Process,Name=editor.TargetName,Action=add?"add":"edit",Label=editor.DisplayName,Icon=editor.IconData,Note=editor.Note,SshDraft=draft,DropSsh=draft==null,SshFrom=card!=null&&add?card.Target.Name:""});
+                children.Add(new PendingAction{Worker=worker,Process=worker.Process,Name=editor.TargetName,Action=add?"add":"edit",Label=editor.DisplayName,Icon=editor.IconData,Note=editor.Note,HideAddress=editor.HideAddress.Checked,SshDraft=draft,DropSsh=draft==null,LoginMode=card==null?"":card.Preference.loginMode,SshFrom=card!=null&&add?card.Target.Name:""});
                 editor.PasswordInput.Box.Clear();editor.SetBusy(true);editor.ShowError("正在校验地址和登录协议…");
             }catch{editor.ShowError("无法启动校验，请确认便携包完整。");}
         }
@@ -327,7 +323,7 @@ namespace CMCP {
             try{
                 var login=editor.BuildSsh(name);
                 if(login!=null){Ssh.Put(login);SaveSsh();}
-                Preferences.Set(name,editor.DisplayName,editor.IconData,WithSshOnly(targets),editor.Note);SavePreferences();
+                Preferences.Set(name,editor.DisplayName,editor.IconData,WithSshOnly(targets),editor.Note,editor.HideAddress.Checked);SavePreferences();
                 if(card!=null){card.Ssh=login;card.UpdatePreference(Preferences.Get(name));}
             }catch{editor.ShowError("无法保存 SSH 信息，未更改其他内容。");return false;}
             CloseEditor();RefreshState();return true;
@@ -349,15 +345,17 @@ namespace CMCP {
             }catch{Error("地址已保存，但 SSH 信息保存失败，请稍后编辑。");}
         }
         internal void SwitchLogin(TargetCard card){
-            Select(card);string name=card.Target.Name;
-            if(card.Ssh==null){OpenEditor(name);if(Editor!=null){Editor.ShowSsh();Editor.ShowError("还没有填写 SSH 信息，填写并保存后就能切换。");}return;}
-            if(card.Target.Url.Length==0){OpenEditor(name);if(Editor!=null){Editor.ShowWeb();Editor.ShowError("还没有填写共享网页地址，填写并保存后就能切换。");}return;}
-            card.Ssh.active=!card.Ssh.active;
-            try{SaveSsh();}catch{Error("无法保存 SSH 信息，未更改其他内容。");}
-            card.RefreshTarget(card.Target);card.PerformLayout();SyncTray();
+            Select(card);string name=card.Target.Name,mode=card.SshActive?"web":"ssh",previous=card.Preference.loginMode;
+            var before=Preferences.cards.ToList();
+            try{
+                Preferences.cards=Preferences.Sort(targets).Select(t=>Preferences.Get(t.Name)).ToList();
+                Preferences.Set(name,card.Preference.label,card.Preference.icon,targets,card.Preference.note);
+                var next=Preferences.Get(name);TurnPart(card,mode=="ssh"?1:-1,delegate{next.loginMode=mode;SavePreferences();card.UpdatePreference(next);});
+            }catch{Preferences.Get(name).loginMode=previous;Preferences.cards=before;card.UpdatePreference(Preferences.Get(name));Error("无法保存登录方式，请重试。");}
+            card.PerformLayout();SyncTray();
         }
         internal void OpenTerminal(TargetCard card){
-            Select(card);var login=card.Ssh;if(login==null)return;
+            Select(card);var login=card.Ssh;if(login==null){Error("还没有填写 SSH 信息，请编辑设备后再连接。");return;}
             if(preview){notice="预览不会打开终端。";status.Text=L.Text(notice);return;}
             var terminal=Terminals.Resolve(Options.terminal,Terminals.Detect());
             string ssh=SshCommand.FindSsh();
@@ -381,7 +379,7 @@ namespace CMCP {
                             string name=LocalState.Text(LocalState.Get(data,"name"));
                             var saved=LocalState.Load(stateDirectory).Targets;
                             if(!saved.Any(t=>t.Name==name)){pending.Failed=true;continue;}
-                            ApplySshAfterSave(pending,name);Preferences.Set(name,pending.Label,pending.Icon,WithSshOnly(saved),pending.Note);
+                            ApplySshAfterSave(pending,name);Preferences.Set(name,pending.Label,pending.Icon,WithSshOnly(saved),pending.Note,pending.HideAddress);Preferences.Get(name).loginMode=pending.LoginMode;
                             try{SavePreferences();pending.Saved=true;TargetCard card;if(Cards.TryGetValue(name,out card)){card.Ssh=Ssh.Get(name);card.UpdatePreference(Preferences.Get(name));}}
                             catch{Error("地址已保存，但备注或图标保存失败，请稍后编辑。");pending.Saved=true;}
                         }
@@ -405,7 +403,7 @@ namespace CMCP {
         void DeleteCard(TargetCard card){Select(card);if(preview){Ssh.Remove(card.Target.Name);targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,(L.Language=="en"?"Remove this device and stop its connection?\r\n":"删除这台设备的本地配置并停止它的连接？\r\n")+(card.Target.Url.Length>0?card.Target.Url:card.Ssh!=null?card.Ssh.Address:"")+(L.Language=="en"?"\r\nVPS and local files are preserved. Other connections remain unchanged.":"\r\n不会删除 VPS 或本机文件，其他连接保持不变。"),L.Text("删除设备"),MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK){
             if(card.Target.Url.Length==0){Ssh.Remove(card.Target.Name);try{SaveSsh();}catch{Error("无法保存 SSH 信息，未更改其他内容。");}targets.Remove(card.Target);RefreshState();return;}
             Launch("remove",card,"");foreach(var pending in children.Where(p=>p.Name==card.Target.Name&&p.Action=="remove"))pending.DeleteSsh=true;}}
-        void CopyCard(TargetCard card){try{Clipboard.SetText(card.SshActive?card.Ssh.CopyCommand:card.Target.Url);notice=card.SshActive?"SSH 命令已复制（不包含密码）":"地址已复制（不包含登录凭据）";status.Text=L.Text(notice);}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
+        void CopyCard(TargetCard card){if(card.SshActive?card.Ssh==null:card.Target.Url.Length==0)return;try{Clipboard.SetText(card.Address);notice="地址已复制（不包含登录凭据）";status.Text=L.Text(notice);}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
         TargetCard CreateCard(Target target){var card=new TargetCard(target,Preferences.Get(target.Name)){Margin=new Padding(0,0,0,Palette.Gap),Font=Font};card.SelectedCard+=Select;card.SwitchRequested+=SwitchLogin;card.ConnectRequested+=ConnectCard;card.StopRequested+=StopCard;card.EditRequested+=EditCard;card.DeleteRequested+=DeleteCard;card.CopyRequested+=CopyCard;card.OpenRequested+=delegate(TargetCard c){Select(c);if(c.SshActive)OpenTerminal(c);else Launch("open",c,"");};card.LogsRequested+=delegate{if(!preview)OpenLocal(stateDirectory);};card.MoveRequested+=MoveByKeyboard;card.AnimateExpansion=AnimateExpansion;card.SizeChanged+=delegate{Arrange();};
             card.DragEnter+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragOver+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragDrop+=delegate(object sender,DragEventArgs e){if(CanDrop(e))DropMove((string)e.Data.GetData(typeof(string)),card.Target.Name,card.PointToClient(new Point(e.X,e.Y)).Y>card.Height/2);};return card;}
         bool CanDrop(DragEventArgs e){return e.Data.GetDataPresent(typeof(string))&&Cards.ContainsKey((string)e.Data.GetData(typeof(string)));}
