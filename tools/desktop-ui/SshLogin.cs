@@ -13,8 +13,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace CMCP {
-    // One device's SSH details. They stay out of the connector's target file on purpose:
-    // SSH only opens a terminal here and never takes part in the MCP link.
+    // SSH credentials remain separate from web targets. A dedicated background
+    // SSH worker prepares Claude Code MCP before the visible terminal opens.
     internal sealed class SshLogin {
         public string name="",host="",username="",method="password",keyPath="",secret="";
         public int port=22;
@@ -125,6 +125,11 @@ namespace CMCP {
         internal static TerminalChoice Resolve(string id,List<TerminalChoice> found){return found.FirstOrDefault(t=>t.Id==id)??found.FirstOrDefault();}
     }
     internal static class SshCommand {
+        internal sealed class McpLaunch {
+            internal string Node,Script,Directory;
+            internal int Owner;
+            internal string[] Arguments(SshLogin login,string ssh){return new[]{Script,"--state",Directory,"--id",login.name,"--owner",Owner.ToString(),"--ssh",ssh??"ssh"};}
+        }
         internal static string FindSsh(){return Terminals.FirstExisting(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"OpenSSH\ssh.exe"))??Terminals.OnPath("ssh.exe");}
         // PowerShell also treats typographic quotes as quotes, so those are doubled too.
         internal static string QuotePowerShell(string value){return "'"+Regex.Replace(value,"['\u2018\u2019\u201a\u201b]","$0$0")+"'";}
@@ -139,26 +144,35 @@ namespace CMCP {
             options.Add("--");options.Add(login.host);
             return options;
         }
-        internal static string PowerShellScript(SshLogin login,string ssh,string askpass){
-            var text=new StringBuilder();bool secret=HasSecret(login);
+        internal static string PowerShellScript(SshLogin login,string ssh,string askpass,McpLaunch mcp=null){
+            var text=new StringBuilder();bool secret=HasSecret(login)||mcp!=null;
             text.Append("$Host.UI.RawUI.WindowTitle="+QuotePowerShell(login.username+"@"+login.host)+"\n");
             if(secret){
                 text.Append("$env:SSH_ASKPASS="+QuotePowerShell(askpass)+";$env:SSH_ASKPASS_REQUIRE='force';$env:"+SshAskpass.Variable+"="+QuotePowerShell(login.name)+"\n");
                 string state=Environment.GetEnvironmentVariable("CMCP_STATE_DIR");
                 if(state!=null)text.Append("$env:CMCP_STATE_DIR="+QuotePowerShell(state)+"\n");
             }
+            if(mcp!=null){
+                text.Append("$env:CMCP_STATE_DIR="+QuotePowerShell(mcp.Directory)+"\n");
+                text.Append("& "+QuotePowerShell(mcp.Node)+" "+String.Join(" ",mcp.Arguments(login,ssh).Select(QuotePowerShell))+"\n");
+                text.Append("if($LASTEXITCODE -ne 0){Write-Warning 'MCP 尚未就绪；仍可进入 SSH 终端检查服务器。'}\n");
+            }
             text.Append("& "+QuotePowerShell(ssh)+" "+String.Join(" ",Options(login,p=>p).Select(QuotePowerShell))+"\n");
             // The shell stays open afterwards; another ssh typed there must not receive this device's password.
             if(secret)text.Append("Remove-Item Env:SSH_ASKPASS,Env:SSH_ASKPASS_REQUIRE,Env:"+SshAskpass.Variable+" -ErrorAction SilentlyContinue\n");
             return text.ToString();
         }
-        internal static string BashScript(SshLogin login,string askpass){
+        internal static string BashScript(SshLogin login,string askpass,McpLaunch mcp=null){
             Func<string,string> slashes=p=>p.Replace('\\','/');
-            var text=new StringBuilder();bool secret=HasSecret(login);
+            var text=new StringBuilder();bool secret=HasSecret(login)||mcp!=null;
             if(secret){
                 text.Append("export SSH_ASKPASS="+QuoteBash(slashes(askpass))+" SSH_ASKPASS_REQUIRE=force "+SshAskpass.Variable+"="+QuoteBash(login.name)+"; ");
                 string state=Environment.GetEnvironmentVariable("CMCP_STATE_DIR");
                 if(state!=null)text.Append("export CMCP_STATE_DIR="+QuoteBash(state)+"; ");
+            }
+            if(mcp!=null){
+                text.Append("export CMCP_STATE_DIR="+QuoteBash(slashes(mcp.Directory))+"; ");
+                text.Append(QuoteBash(slashes(mcp.Node))+" "+String.Join(" ",mcp.Arguments(login,"ssh").Select((v,i)=>QuoteBash(i==0||i==2?slashes(v):v)))+" || printf '%s\\n' 'MCP 尚未就绪；仍可进入 SSH 终端检查服务器。'; ");
             }
             text.Append("ssh "+String.Join(" ",Options(login,slashes).Select(QuoteBash))+"; ");
             if(secret)text.Append("unset SSH_ASKPASS SSH_ASKPASS_REQUIRE "+SshAskpass.Variable+"; ");
@@ -166,15 +180,15 @@ namespace CMCP {
             return text.ToString();
         }
         internal static string Encoded(string script){return Convert.ToBase64String(Encoding.Unicode.GetBytes(script));}
-        internal static ProcessStartInfo Start(TerminalChoice terminal,SshLogin login,string ssh,string askpass){
+        internal static ProcessStartInfo Start(TerminalChoice terminal,SshLogin login,string ssh,string askpass,McpLaunch mcp=null){
             string home=Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             // Through the shell, so every terminal gets a window of its own whoever started this program.
             var start=new ProcessStartInfo(terminal.Path){UseShellExecute=true,WorkingDirectory=home};
-            string shell=" -NoLogo -NoProfile",encoded=terminal.Id=="gitbash"?"":" -EncodedCommand "+Encoded(PowerShellScript(login,ssh,askpass));
+            string shell=" -NoLogo -NoProfile",encoded=terminal.Id=="gitbash"?"":" -EncodedCommand "+Encoded(PowerShellScript(login,ssh,askpass,mcp));
             switch(terminal.Id){
                 case "wt":start.Arguments="-w 0 new-tab --title \""+login.username+"@"+login.host+"\" -d \""+home+"\" -- \""+Terminals.WindowsPowerShell+"\""+shell+" -NoExit"+encoded;break;
                 case "cmd":start.Arguments="/d /k \"\""+Terminals.WindowsPowerShell+"\""+shell+encoded+"\"";break;
-                case "gitbash":start.Arguments="--cd-to-home -c \""+BashScript(login,askpass).Replace("\"","\\\"")+"\"";break;
+                case "gitbash":start.Arguments="--cd-to-home -c \""+BashScript(login,askpass,mcp).Replace("\"","\\\"")+"\"";break;
                 default:start.Arguments=shell.TrimStart()+" -NoExit"+encoded;break;
             }
             return start;

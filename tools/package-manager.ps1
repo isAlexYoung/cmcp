@@ -20,6 +20,7 @@ $required += @('app\connection-transport.mjs')
 $required += @('app\manager-restart.ps1','tools\desktop-ui\BackendRestart.cs')
 $required += @('app\update.ps1','app\update-core.ps1','app\update-apply.ps1','tools\desktop-ui\SettingsPage.cs','tools\desktop-ui\AppSettings.cs','tools\desktop-ui\Language.cs','tools\desktop-ui\Updater.cs','tools\desktop-ui\SettingsTests.cs')
 $required += @('app\request-recovery.mjs','app\manager-exit.ps1')
+$required += @('app\ssh-terminal.mjs','app\ssh-mcp.mjs','app\ssh-local-tools.mjs','app\ssh-bootstrap.py')
 $required += @('tools\desktop-ui\LocalToolTip.cs','tools\desktop-ui\ToolTipTests.cs')
 $required += @('tools\desktop-ui\UpdateProgress.cs','tools\desktop-ui\UpdateProgressTests.cs')
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }

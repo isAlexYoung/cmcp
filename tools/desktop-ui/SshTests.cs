@@ -74,6 +74,10 @@ namespace CMCP {
             var git=SshCommand.Start(choice("gitbash"),withSecret,null,@"C:\CMCP.exe");
             check(git.Arguments.StartsWith("--cd-to-home -c \"")&&git.Arguments.Contains("ssh '-p' '2222'"),"Git Bash runs its own ssh");
             check(!wt.Arguments.Contains("TESTONLY")&&!String.IsNullOrEmpty(wt.WorkingDirectory),"no secret reaches the command line and the program folder is not held open");
+            var mcp=new SshCommand.McpLaunch{Node=@"C:\CMCP app\node.exe",Script=@"C:\CMCP app\ssh-terminal.mjs",Directory=@"C:\local user's data",Owner=123};
+            string prepared=SshCommand.PowerShellScript(without,@"C:\ssh.exe",@"C:\CMCP.exe",mcp);
+            check(prepared.Contains("ssh-terminal.mjs")&&prepared.Contains("'--owner' '123'")&&prepared.IndexOf("ssh-terminal.mjs")<prepared.IndexOf("& 'C:\\ssh.exe'"),"the terminal prepares a per-device background MCP before interactive SSH");
+            check(prepared.Contains("SSH_ASKPASS_REQUIRE='force'")&&!prepared.Contains("TESTONLY")&&SshCommand.BashScript(without,@"C:\CMCP.exe",mcp).Contains("ssh-terminal.mjs"),"key, password and Git Bash terminals share MCP preflight without inline secrets");
             var found=Terminals.Detect();
             check(found.Any(t=>t.Id=="powershell")&&found.Any(t=>t.Id=="cmd")&&found.All(t=>File.Exists(t.Path)),"the built-in terminals are always offered and only installed ones are listed");
             check(Terminals.Resolve("wt",new List<TerminalChoice>{choice("cmd")}).Id=="cmd"&&Terminals.Resolve("cmd",new List<TerminalChoice>{choice("wt"),choice("cmd")}).Id=="cmd","an uninstalled choice falls back and a present choice is kept");

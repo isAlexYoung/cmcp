@@ -1,5 +1,5 @@
-// One device's SSH details and how a terminal gets opened for them. SSH only opens a
-// terminal here and never takes part in the MCP link. Nothing secret reaches a command line
+// One device's SSH details and terminal launch. A separate SSH MCP worker is
+// prepared first; the visible shell never carries tool packets. Nothing secret reaches a command line
 // or the script: a saved password stays in Keychain and reaches ssh through SSH_ASKPASS.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -47,9 +47,10 @@ export function sshOptions(login){
   return options;
 }
 // The shell stays open afterwards; another ssh typed there must not receive this device's password.
-export function commandScript(login,{askpass,state,ssh='/usr/bin/ssh'}={}){
-  const secret=!!login.credentialId,lines=['#!/bin/sh','rm -f "$0"',`printf '\\033]0;%s\\007' ${quote(login.username+'@'+login.host)}`];
+export function commandScript(login,{askpass,state,ssh='/usr/bin/ssh',mcp}={}){
+  const secret=!!login.credentialId||!!mcp,lines=['#!/bin/sh','rm -f "$0"',`printf '\\033]0;%s\\007' ${quote(login.username+'@'+login.host)}`];
   if(secret)lines.push(`export SSH_ASKPASS=${quote(askpass)} SSH_ASKPASS_REQUIRE=force ${VARIABLE}=${quote(login.id)} CMCP_STATE_DIR=${quote(state)}`);
+  if(mcp)lines.push([mcp.node,mcp.script,'--state',state,'--id',login.id,'--owner',String(mcp.owner),'--ssh',ssh].map(quote).join(' ')+" || printf '%s\\n' 'MCP 尚未就绪；仍可进入 SSH 终端检查服务器。'");
   lines.push([ssh,...sshOptions(login)].map(quote).join(' '));
   if(secret)lines.push(`unset SSH_ASKPASS SSH_ASKPASS_REQUIRE ${VARIABLE}`);
   lines.push('exec "${SHELL:-/bin/zsh}" -l','');
@@ -65,16 +66,17 @@ export function openArguments(terminal,script){
 }
 function clearOld(folder,now=Date.now()){try{for(const name of fs.readdirSync(folder)){const file=path.join(folder,name);if(name.endsWith('.command')&&now-fs.statSync(file).mtimeMs>3600000)fs.unlinkSync(file);}}catch{}}
 // The script deletes itself when it starts. A small wrapper is needed because ssh runs SSH_ASKPASS with no arguments of its own.
-export function writeLaunch(login,directory,{node=process.execPath,kit=KIT}={}){
+export function writeLaunch(login,directory,{node=process.execPath,kit=KIT,owner=process.pid,prepareMcp=true}={}){
   const folder=privateDir(path.join(directory,'ssh-run'));clearOld(folder);
   let askpass;
-  if(login.credentialId){
+  if(login.credentialId||prepareMcp){
     askpass=path.join(directory,'ssh-askpass');
     atomicWrite(askpass,`#!/bin/sh\nexec ${quote(node)} ${quote(path.join(kit,'ssh-askpass.mjs'))} "$1"\n`,0o700);
     fs.chmodSync(askpass,0o700);
   }
   const script=path.join(folder,randomUUID()+'.command');
-  atomicWrite(script,commandScript(login,{askpass,state:directory}),0o700);fs.chmodSync(script,0o700);
+  const mcp=prepareMcp?{node,script:path.join(kit,'../app/ssh-terminal.mjs'),owner}:undefined;
+  atomicWrite(script,commandScript(login,{askpass,state:directory,mcp}),0o700);fs.chmodSync(script,0o700);
   return script;
 }
 export async function openTerminal(login,directory,chosen,{found=detectTerminals(),run=runFile}={}){

@@ -3,6 +3,11 @@
 . (Join-Path $PSScriptRoot 'common.ps1')
 try {
     Initialize-StateDir
+    $sshNode = Get-NodeExe
+    if ($sshNode -and (Test-Path -LiteralPath (Join-Path $StateDir 'ssh-mcp'))) {
+        & $sshNode (Join-Path $KitDir 'ssh-terminal.mjs') --stop-all --state $StateDir
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to stop SSH MCP connections' }
+    }
     Invoke-LinkLifecycleLock {
         # A switch that cannot be saved must not keep the backend running: the user asked to exit.
         for ($try = 1; ; $try++) {

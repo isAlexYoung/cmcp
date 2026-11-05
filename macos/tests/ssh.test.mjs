@@ -69,7 +69,7 @@ test('a saved password is tried once; nothing saved leaves ssh to ask in the ter
   assert.deepEqual(sshOptions(login()),['-p','2222','-l','root','--','203.0.113.24']);
   assert.deepEqual(sshOptions(login({method:'key',keyPath:'/k/id'})),['-p','2222','-l','root','-i','/k/id','-o','IdentitiesOnly=yes','--','203.0.113.24']);
 });
-test('the real shell passes every value as one argument and forgets the helper once ssh ends',async t=>{
+test('the real shell passes every value as one argument and forgets the helper once ssh ends',{skip:process.platform==='win32'},async t=>{
   const f=fixture(t),folder=path.join(f.directory,"it's here");fs.mkdirSync(folder);
   const seen=path.join(folder,'seen'),after=path.join(folder,'after'),fake=path.join(folder,'fake-ssh'),shell=path.join(folder,'fake-shell');
   fs.writeFileSync(fake,`#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > ${JSON.stringify(seen)}\nprintf '%s\\n' "$SSH_ASKPASS_REQUIRE" >> ${JSON.stringify(seen)}\n`,{mode:0o755});
@@ -83,12 +83,13 @@ test('the real shell passes every value as one argument and forgets the helper o
   assert.equal(fs.readFileSync(after,'utf8').trim(),'[][]');
   assert.ok(!fs.existsSync(script),'the script deletes itself');
 });
-test('the launch script holds no secret, is private, and needs no helper without a saved secret',t=>{
+test('the launch script prepares MCP even without a saved secret and keeps the helper private',t=>{
   const f=fixture(t),plain=writeLaunch(login(),f.directory);
-  assert.ok(!fs.readFileSync(plain,'utf8').includes('SSH_ASKPASS'));assert.ok(!fs.existsSync(path.join(f.directory,'ssh-askpass')));
-  assert.equal(fs.statSync(plain).mode&0o777,0o700);assert.ok(plain.endsWith('.command'));
+  assert.ok(fs.readFileSync(plain,'utf8').includes('SSH_ASKPASS'));assert.ok(fs.existsSync(path.join(f.directory,'ssh-askpass')));
+  assert.ok(fs.readFileSync(plain,'utf8').includes('ssh-terminal.mjs'));assert.ok(fs.readFileSync(plain,'utf8').includes("'--owner' '"+process.pid+"'"));
+  if(process.platform!=='win32')assert.equal(fs.statSync(plain).mode&0o777,0o700);assert.ok(plain.endsWith('.command'));
   const script=writeLaunch(login({credentialId:randomUUID()}),f.directory,{node:'/app/run time/node',kit:'/app/kit'}),helper=path.join(f.directory,'ssh-askpass');
-  assert.equal(fs.statSync(helper).mode&0o777,0o700);assert.ok(fs.readFileSync(helper,'utf8').includes("'/app/run time/node' '/app/kit/ssh-askpass.mjs' \"$1\""));
+  if(process.platform!=='win32')assert.equal(fs.statSync(helper).mode&0o777,0o700);assert.ok(fs.readFileSync(helper,'utf8').replaceAll('\\','/').includes("'/app/run time/node' '/app/kit/ssh-askpass.mjs' \"$1\""));
   assert.ok(fs.readFileSync(script,'utf8').includes('SSH_ASKPASS_REQUIRE=force'));
 });
 test('only installed terminals are offered and each one gets its own way of running the script',()=>{

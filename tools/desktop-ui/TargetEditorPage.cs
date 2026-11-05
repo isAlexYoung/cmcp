@@ -152,7 +152,7 @@ namespace CMCP {
             NoteInput.Box.Multiline=true;NoteInput.Box.MaxLength=200;NoteInput.Box.Text=preference.note??"";
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;UrlInput.Cue="https://";
             PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;PasswordInput.Cue=target.HasSavedPassword?"已加密保存；同一地址留空保留":"手动共享网页登录可留空";
-            Remember.Checked=target.AutoLogin;HideAddress.Checked=preference.hideAddress;HideAddress.AccessibleName=L.Text("隐藏网址和 IP");
+            Remember.Checked=target.AutoLogin;HideAddress.Checked=preference.hideAddress;HideAddress.AccessibleName=L.Text("隐藏卡片中的网址和IP");
             HostInput.Box.MaxLength=253;PortInput.Box.MaxLength=5;UserInput.Box.MaxLength=64;KeyInput.Box.MaxLength=512;
             SshSecretInput.Box.UseSystemPasswordChar=true;SshSecretInput.Box.MaxLength=256;
             HostInput.Cue="域名或 IP";PortInput.Box.Text="22";UserInput.Cue="root";
@@ -217,7 +217,7 @@ namespace CMCP {
             AddRow(looks,"图标",icon,44,reset,choose);
             AddRow(looks,"名称",NameInput);
             AddRow(looks,"备注",NoteInput).Height=84;
-            var display=AddSection(general,"显示");AddRow(display,"隐藏网址和 IP",HideAddress,48);
+            var display=AddSection(general,"显示");AddRow(display,"隐藏卡片中的网址和IP",HideAddress,48);
             var address=AddSection(web,"连接");
             AddRow(address,"网页地址",UrlInput);
             AddRow(address,"密码",PasswordInput);
@@ -284,6 +284,7 @@ namespace CMCP {
                                 extra.Location=new Point(right-extra.Width,y+(row.Height-extra.Height)/2);right=extra.Left-8;
                             }
                             int mainWidth=row.MainWidth>0?row.MainWidth:Math.Max(40,right-left);
+                            if(row.Main is ToggleSwitch)row.Title.Width=Math.Max(1,right-mainWidth-RowPadding-12);
                             row.Main.Bounds=new Rectangle(row.Main is ToggleSwitch?right-mainWidth:left,y+(row.Height-row.Main.Height)/2,mainWidth,row.Main.Height);
                             y+=row.Height;first=false;
                         }

@@ -17,6 +17,7 @@ import {staticAssets} from '../app/static-assets.mjs';
 import {checkFailed,checkRelease,downloadUpdate} from './updates.mjs';
 import {currentInstallation} from './uninstall.mjs';
 import {detectTerminals,openTerminal} from './ssh.mjs';
+import {stopSshWorkers} from '../app/ssh-terminal.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
@@ -53,7 +54,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     installation.launch([process.pid,process.ppid,appPid]);
     return {uninstalled:true,cloudFailed};
   }
-  async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await connections.close();staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
+  async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await Promise.all([connections.close(),stopSshWorkers(directory)]);staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
     '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled,loginMode})=>({id,label,state,enabled,...(loginMode==='ssh'?{ssh:true}:{})})),language:store.preferences.language,updating}),

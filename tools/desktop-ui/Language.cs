@@ -111,7 +111,7 @@ namespace CMCP {
             {"登录","Sign-in"},
             {"图标","Icon"},
             {"名称","Name"},
-            {"总体进度（估算）","Overall progress (estimated)"},{"备注","Note"},{"显示","Display"},{"隐藏网址和 IP","Hide web address and IP"},{"未命名设备","Unnamed device"},{"复制 IP","Copy IP"},
+            {"总体进度（估算）","Overall progress (estimated)"},{"备注","Note"},{"显示","Display"},{"隐藏卡片中的网址和IP","Hide web address and IP on cards"},{"未命名设备","Unnamed device"},{"复制 IP","Copy IP"},
             {"当前登录方式","Current sign-in"},
             {"共享网页","Shared web"},
             {"连接","Connection"},

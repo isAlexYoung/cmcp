@@ -361,7 +361,8 @@ namespace CMCP {
             string ssh=SshCommand.FindSsh();
             if(terminal==null||(terminal.Id!="gitbash"&&ssh==null)){Error("未找到 ssh。请在 Windows 设置的“可选功能”中安装 OpenSSH 客户端。");return;}
             try{
-                StartTerminal(SshCommand.Start(terminal,login,ssh,Program.ExecutablePath));
+                var mcp=new SshCommand.McpLaunch{Node=Path.Combine(kit,"runtime","node.exe"),Script=Path.Combine(kit,"ssh-terminal.mjs"),Directory=stateDirectory,Owner=Process.GetCurrentProcess().Id};
+                StartTerminal(SshCommand.Start(terminal,login,ssh,Program.ExecutablePath,mcp));
                 notice=L.Text("已打开终端")+" · "+login.Address;status.Text=notice;
             }catch{Error("无法打开所选终端，请在设置中换一个终端后重试。");}
         }

@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.15.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.15.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.16.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.16.0.0")]
 
 namespace CMCP {
     internal sealed class Target {

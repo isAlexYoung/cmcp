@@ -161,7 +161,9 @@ export async function prepareRelay(url, auth, agent, signal, options={}) {
 export class TerminalLink extends EventEmitter {
   constructor(url, options) {
     super();
-    this.ws = new WebSocket(url, options);
+    // A raw SSH pipe can use the same bounded framing and acknowledgements.
+    // Existing web callers continue to create their authenticated WebSocket.
+    this.ws = options?.transport ?? new WebSocket(url, options);
     this.ready = false;
     this.ended = false;
     this.acks = new Map();
@@ -170,7 +172,7 @@ export class TerminalLink extends EventEmitter {
     this.queuedMessages = 0;
     this.buffer = '';
     this.decoder = new StringDecoder('utf8');
-    this.timer = setTimeout(() => this.fail(Object.assign(new Error('云电脑兼容连接启动超时，请确认已安装 Python 3.9 或更新版本'),{code:'RELAY_START_FAILED'})), 30000);
+    this.timer = setTimeout(() => this.fail(Object.assign(new Error('云电脑兼容连接启动超时，请确认已安装 Python 3.9 或更新版本'),{code:'RELAY_START_FAILED'})), options?.startupTimeout ?? 30000);
     this.ws.on('unexpected-response', (req, res) => this.emit('unexpected-response', req, res));
     this.ws.on('error', error => this.fail(error));
     this.ws.on('close', (code, reason) => this.finish(code, reason));
@@ -205,7 +207,7 @@ export class TerminalLink extends EventEmitter {
           } else if (message.t === 'close') {
             this.close(message.code || 1000, message.reason || 'closed');
           } else if (message.t === 'error') {
-            this.fail(Object.assign(new Error(message.error || '云电脑兼容连接失败'),{code:'RELAY_START_FAILED'}));
+            this.fail(Object.assign(new Error(message.error || '云电脑兼容连接失败'),{code:options?.relayErrorCode ?? 'RELAY_START_FAILED'}));
           } else {
             this.emit('message', Buffer.from(JSON.stringify(message)), false);
           }

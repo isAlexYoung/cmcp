@@ -49,7 +49,33 @@ namespace CMCP {
             try{form.ClientSize=new Size(1320,720);Pump();check(surfaces.All(s=>s.Cleared()),(adding?"add":"edit")+" "+(dark?"dark":"light")+" resize repaints retained input and outer sheet borders");}
             finally{foreach(var surface in surfaces)surface.Dispose();form.CloseEditor();}
         }
+        internal static void HoverIcons(string temp,Action<bool,string> check){
+            string file=Path.Combine(temp,"hover-icon.png");
+            using(var picture=new Bitmap(72,72)){using(var g=Graphics.FromImage(picture))g.Clear(Color.OrangeRed);picture.Save(file,System.Drawing.Imaging.ImageFormat.Png);}
+            string custom=UiPreferences.ImportIcon(file);
+            var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            var move=typeof(TargetCard).GetMethod("OnMouseMove",flags);var style=typeof(Control).GetMethod("GetStyle",flags);
+            using(var form=new Manager(true)){
+                form.Show();Pump();var card=form.Cards["preview-a"];
+                foreach(bool dark in new[]{false,true})foreach(bool image in new[]{false,true}){
+                    form.SetTheme(dark);card.Preference.icon=image?custom:"";card.UpdatePreference(card.Preference);card.TestHover(true);Pump();card.TestHover(true);
+                    int parentPaints=0,iconPaints=0;
+                    InvalidateEventHandler parent=delegate{parentPaints++;},badge=delegate{iconPaints++;};
+                    card.Invalidated+=parent;card.IconNote.Invalidated+=badge;
+                    using(var before=new Bitmap(44,44))using(var after=new Bitmap(44,44)){
+                        card.IconNote.DrawToBitmap(before,new Rectangle(0,0,44,44));
+                        for(int i=0;i<40;i++)move.Invoke(card,new object[]{new MouseEventArgs(MouseButtons.None,0,140+i%30,40+i%15,0)});
+                        card.IconNote.DrawToBitmap(after,new Rectangle(0,0,44,44));
+                        bool same=true;for(int y=0;y<44;y++)for(int x=0;x<44;x++)same&=before.GetPixel(x,y)==after.GetPixel(x,y);
+                        bool buffered=(bool)style.Invoke(card.IconNote,new object[]{ControlStyles.OptimizedDoubleBuffer})&&(bool)style.Invoke(card.IconNote,new object[]{ControlStyles.Opaque});
+                        check(parentPaints==0&&iconPaints==0&&same&&buffered,"moving inside a card keeps its "+(image?"custom":"default")+" icon stable in "+(dark?"dark":"light")+" theme (parent invalidations="+parentPaints+", icon invalidations="+iconPaints+")");
+                    }
+                    card.Invalidated-=parent;card.IconNote.Invalidated-=badge;
+                }
+            }
+        }
         internal static void Run(string temp,Action<bool,string> check){
+            HoverIcons(temp,check);
             string directory=Path.Combine(temp,"dashboard");Directory.CreateDirectory(directory);
             var targets=Manager.Demo().Targets;var prefs=UiPreferences.Load(directory);
             check(!prefs.ReadError&&prefs.Sort(targets)[0].Name=="preview-a","fresh UI preferences preserve existing connection order");

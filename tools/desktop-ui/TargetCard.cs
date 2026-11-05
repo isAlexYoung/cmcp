@@ -4,6 +4,23 @@ using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace CMCP {
+    // Own the complete icon surface: a transparent child has to repaint its parent
+    // background separately and can expose a blank frame during hover redraws.
+    internal sealed class CardIcon : Control {
+        internal Bitmap Picture;
+        Palette colors=Palette.Create(false);
+        internal CardIcon(){
+            Size=new Size(44,44);TabStop=false;Cursor=Cursors.Default;AccessibleRole=AccessibleRole.Graphic;
+            SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Opaque|ControlStyles.ResizeRedraw,true);
+        }
+        internal void Apply(Palette palette,Color surface){colors=palette;BackColor=surface;Invalidate();}
+        protected override void OnPaint(PaintEventArgs e){
+            var g=e.Graphics;g.Clear(BackColor);g.SmoothingMode=SmoothingMode.AntiAlias;
+            PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),12,colors.Subtle,colors.Border);
+            if(Picture!=null)g.DrawImage(Picture,new Rectangle(3,3,38,38));
+            else PaintUi.Icon(g,"monitor",new Rectangle(10,10,24,24),colors.Blue);
+        }
+    }
     internal sealed class TargetCard : Panel {
         internal Target Target;
         internal CardPreference Preference;
@@ -14,7 +31,7 @@ namespace CMCP {
         internal bool SshActive { get { return Preference.loginMode=="ssh"||(Preference.loginMode!="web"&&Ssh!=null&&(Ssh.active||Target.Url.Length==0)); } }
         internal string SshAddress {get{return Ssh==null?"":Ssh.Address;}}
         internal string Address {get{return SshActive?(Ssh==null?"":Ssh.host):Target.Url;}}
-        internal readonly Panel IconNote=new Panel{BackColor=Color.Transparent,Cursor=Cursors.Default,TabStop=false};
+        internal readonly CardIcon IconNote=new CardIcon();
         internal string Caption { get { return Preference.label.Length>0?Preference.label:Preference.hideAddress?L.Text("未命名设备"):Target.Url.Length>0?new Uri(Target.Url).Host:Ssh!=null?Ssh.host:Target.Name; } }
         internal readonly ModernButton LoginSwitch=new ModernButton{Glyph="swap",Neutral=true,AccessibleName="切换登录方式"};
         internal readonly ModernButton Connect=new ModernButton();
@@ -40,7 +57,7 @@ namespace CMCP {
             Target=target;Preference=preference;DoubleBuffered=true;
             SetStyle(ControlStyles.Selectable|ControlStyles.ResizeRedraw,true);TabStop=true;AllowDrop=true;Height=116;Cursor=Cursors.Hand;
             Controls.AddRange(new Control[]{LoginSwitch,Connect,Edit,Copy,Delete,Toggle,StatusText,Details,IconNote});
-            if(preference.icon.Length>0)icon=UiPreferences.DecodeIcon(preference.icon);
+            if(preference.icon.Length>0)icon=UiPreferences.DecodeIcon(preference.icon);IconNote.Picture=icon;
             IconNote.MouseUp+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left){SelectCard();SetExpanded(!Expanded,true);}};
             LoginSwitch.Click+=delegate{if(SwitchRequested!=null)SwitchRequested(this);};
             Connect.Click+=delegate{if(ConnectRequested!=null)ConnectRequested(this);};
@@ -100,14 +117,14 @@ namespace CMCP {
         internal void UpdatePreference(CardPreference preference) {
             Bitmap replacement=preference.icon.Length>0?UiPreferences.DecodeIcon(preference.icon):null;
             var previous=icon;
-            Preference=preference;icon=replacement;
+            Preference=preference;icon=replacement;IconNote.Picture=icon;IconNote.Invalidate();
             if(previous!=null)previous.Dispose();
             RefreshTarget(Target);
         }
 
         internal void Apply(Palette colors) {
             Colors=colors;tips.Apply(colors);BackColor=colors.Page;
-            Color fill=Selected?colors.Selected:colors.Surface;
+            Color fill=Selected?colors.Selected:colors.Surface;IconNote.Apply(colors,fill);
             Details.Apply(colors);Details.BackColor=fill;
             StatusText.BackColor=fill;
             StatusText.ForeColor=Target.State=="connected"?colors.Success:colors.Muted;
@@ -155,6 +172,7 @@ namespace CMCP {
 
         void SetHover(bool value) {
             if(changingHover)return;
+            if(hovered==value&&StatusText.Visible==!value&&LoginSwitch.Visible==value&&Connect.Visible==value&&Edit.Visible==value&&Copy.Visible==value&&Delete.Visible==value)return;
             changingHover=true;SuspendLayout();
             try {
                 hovered=value;
@@ -228,9 +246,6 @@ namespace CMCP {
             base.OnPaint(e);var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
             PaintUi.Box(g,new Rectangle(1,1,Width-3,Height-3),Palette.Radius,Selected?Colors.Selected:Colors.Surface,Selected?Colors.SelectionBorder:Colors.Border);
             PaintUi.Icon(g,"grip",new Rectangle(16,44,22,28),Colors.Muted);
-            PaintUi.Box(g,new Rectangle(51,35,44,44),12,Colors.Subtle,Colors.Border);
-            if(icon!=null)g.DrawImage(icon,new Rectangle(54,38,38,38));
-            else PaintUi.Icon(g,"monitor",new Rectangle(61,45,24,24),Colors.Blue);
             int right=Compact?Width-72:hovered?LoginSwitch.Left-14:StatusText.Left-14;
             string label=Caption;
             using(var f=new Font(Font.FontFamily,Preference.hideAddress?Font.Size*1.18f:Font.Size,FontStyle.Bold))PaintUi.Text(g,label,f,new Rectangle(112,Preference.hideAddress?34:30,Math.Max(20,right-112),Preference.hideAddress?46:30),Colors.Text);
