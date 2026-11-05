@@ -97,7 +97,7 @@ namespace CMCP {
                     Action settleMenu=()=>{for(int i=0;i<200&&field.Animating;i++){Application.DoEvents();Thread.Sleep(5);}};
                     field.TestClick();check(field.IsOpen&&field.Animating&&field.Menu.Region!=null,"opening the dropdown unfolds it");
                     check(field.Menu.Items.Cast<ToolStripItem>().Count(i=>Equals(i.Tag,true))==1,"exactly one language is marked as current");
-                    settleMenu();check(field.IsOpen&&!field.Animating&&field.Menu.Region==null&&field.Menu.Opacity==1,"the dropdown ends fully shown");
+                    settleMenu();check(field.IsOpen&&!field.Animating&&field.Menu.Opacity==1&&field.Menu.Region!=null&&field.Menu.Region.IsVisible(field.Menu.Width/2,field.Menu.Height-2)&&!field.Menu.Region.IsVisible(0,0),"the dropdown ends fully shown with rounded corners");
                     field.TestClick();check(!field.IsOpen&&field.Animating&&field.Menu.Visible,"closing folds it away while still on screen");
                     settleMenu();check(!field.Menu.Visible&&!field.Animating,"the dropdown is gone after folding away");
                     field.TestClick();field.TestClick();field.TestClick();check(field.IsOpen,"a click during the fold reopens it");
@@ -134,10 +134,10 @@ namespace CMCP {
             using(var form=new Manager(true)){
                 form.Show();Application.DoEvents();
                 check(!form.toolbar.Settings.Dot,"no dot shows before a new version is found");
-                form.SimulateUpdate("4.12.0");check(form.toolbar.Settings.Dot,"a new version puts a dot on the settings button");
+                form.SimulateUpdate("9.9.9");check(form.toolbar.Settings.Dot,"a new version puts a dot on the settings button");
                 form.OpenSettings();Application.DoEvents();check(form.Settings.AboutTab.Dot&&!form.Settings.GeneralTab.Dot,"the dot leads to the About category");
                 form.Settings.ShowAbout();Application.DoEvents();var about=form.Settings.Viewport.Controls[0];
-                check(about.Controls.OfType<ModernButton>().Any(b=>b.Text=="立即更新")&&about.Controls.OfType<Label>().Any(l=>l.Text.Contains("4.12.0")),"About offers the update and names the version");
+                check(about.Controls.OfType<ModernButton>().Any(b=>b.Text=="立即更新")&&about.Controls.OfType<Label>().Any(l=>l.Text.Contains("9.9.9")),"About offers the update and names the version");
                 check(NothingOverlaps(about),"the update offer does not cover other rows");
             }
         }

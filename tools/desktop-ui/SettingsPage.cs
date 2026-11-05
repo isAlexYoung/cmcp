@@ -247,8 +247,13 @@ namespace CMCP {
                 Color fill=current?Motion.Mix(colors.Surface,colors.Blue,hot?0.32:0.22):hot?colors.Active:colors.Surface;
                 using(var b=new SolidBrush(fill))e.Graphics.FillRectangle(b,new Rectangle(Point.Empty,e.Item.Size));
             }
+            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e){
+                e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using(var path=PaintUi.Round(new Rectangle(0,0,e.ToolStrip.Width-1,e.ToolStrip.Height-1),MenuRadius))using(var p=new Pen(colors.Border))e.Graphics.DrawPath(p,path);
+            }
         }
         const double MenuMilliseconds=130;
+        const int MenuRadius=8,MenuInset=4;
         readonly System.Diagnostics.Stopwatch menuClock=new System.Diagnostics.Stopwatch();
         FrameClock menuFrames;
         bool closingMenu,finishingMenu;
@@ -287,9 +292,14 @@ namespace CMCP {
         }
         void ApplyMenuLevel(double level){
             menuLevel=level;Menu.Opacity=Math.Max(0.01,level);
-            var old=Menu.Region;Menu.Region=new Region(new Rectangle(0,0,Menu.Width,Math.Max(1,(int)Math.Round(Menu.Height*level))));if(old!=null)old.Dispose();
+            ShapeMenu(Math.Max(1,(int)Math.Round(Menu.Height*level)));
         }
-        void ClearMenuMotion(){var old=Menu.Region;Menu.Region=null;if(old!=null)old.Dispose();Menu.Opacity=1;menuLevel=1;}
+        void ShapeMenu(int visibleHeight){
+            var old=Menu.Region;
+            using(var path=PaintUi.Round(new Rectangle(0,0,Menu.Width,Menu.Height),MenuRadius)){var shape=new Region(path);shape.Intersect(new Rectangle(0,0,Menu.Width,visibleHeight));Menu.Region=shape;}
+            if(old!=null)old.Dispose();
+        }
+        void ClearMenuMotion(){ShapeMenu(Menu.Height);Menu.Opacity=1;menuLevel=1;}
         internal string Arrow{get{return IsOpen?"up":"chevron";}}
         // The menu closes on mouse down, before this field sees the click, so a click on the
         // field while it is open must be remembered or it would open the menu straight again.
@@ -306,12 +316,12 @@ namespace CMCP {
         void Open(){
             if(closingMenu&&Menu.Visible){AnimateMenu(false);return;}
             foreach(ToolStripItem old in Menu.Items.Cast<ToolStripItem>().ToArray())old.Dispose();
-            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Padding=Padding.Empty;Menu.DropShadowEnabled=false;Menu.Renderer=new MenuRenderer(Colors);
+            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Padding=new Padding(1,MenuInset,1,MenuInset);Menu.DropShadowEnabled=false;Menu.Renderer=new MenuRenderer(Colors);
             foreach(var pair in items){
-                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(Width,34)};
+                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(Width-2,34)};
                 item.Click+=delegate{Choose(key);};Menu.Items.Add(item);
             }
-            if(!Motion.Enabled||!IsHandleCreated){ClearMenuMotion();Menu.Show(this,new Point(0,Height+2));return;}
+            if(!Motion.Enabled||!IsHandleCreated){Menu.Show(this,new Point(0,Height+2));ClearMenuMotion();return;}
             // Fully clipped first, so no frame shows the whole menu before it unfolds.
             menuLevel=0;Menu.Show(this,new Point(0,Height+2));ApplyMenuLevel(0);AnimateMenu(false);
         }
