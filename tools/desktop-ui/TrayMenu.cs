@@ -103,7 +103,7 @@ namespace CMCP {
             }
         }
         internal void Sync(IList<TrayTarget> values){
-            open.Text=L.Text("打开主界面");exit.Text=L.Text("退出程序");empty.Text=L.Text("暂无云电脑");
+            open.Text=L.Text("打开主界面");exit.Text=L.Text("退出程序");empty.Text=L.Text("暂无设备");
             foreach(string id in Targets.Keys.Where(id=>!values.Any(v=>v.Name==id)).ToArray()){var item=Targets[id];Menu.Items.Remove(item);Targets.Remove(id);item.Dispose();}
             if(values.Count==0){if(!Menu.Items.Contains(empty))Menu.Items.Insert(2,empty);}
             else Menu.Items.Remove(empty);
@@ -112,8 +112,8 @@ namespace CMCP {
                 if(!Targets.TryGetValue(value.Name,out item)){item=Create(value.Name);Targets.Add(value.Name,item);}
                 int position=i+2;if(Menu.Items.IndexOf(item)!=position){Menu.Items.Remove(item);Menu.Items.Insert(position,item);}
                 string text=value.Label+" · "+L.Text(value.State);item.Text=text.Replace("&","&&");item.ToolTipText=text;
-                var connect=(ToolStripMenuItem)item.DropDownItems[0];connect.Text=L.Text("连接云电脑");connect.Enabled=value.CanConnect;
-                var stop=(ToolStripMenuItem)item.DropDownItems[1];stop.Text=L.Text("断开云电脑");stop.Enabled=value.CanDisconnect;
+                var connect=(ToolStripMenuItem)item.DropDownItems[0];connect.Text=L.Text("连接设备");connect.Enabled=value.CanConnect;
+                var stop=(ToolStripMenuItem)item.DropDownItems[1];stop.Text=L.Text("断开设备");stop.Enabled=value.CanDisconnect;
                 var rename=(ToolStripMenuItem)item.DropDownItems[2];rename.Text=L.Text("重命名");rename.Enabled=value.CanRename;
             }
             ApplySystemTheme();

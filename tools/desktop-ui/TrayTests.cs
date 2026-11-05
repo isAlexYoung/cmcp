@@ -29,7 +29,7 @@ namespace CMCP {
                 check(form.Options.theme=="system"&&form.Preferences.dark==AppSettings.SystemDark(false,false),"main window defaults to the current system app theme");
                 var a=menu.Targets["preview-a"];var b=menu.Targets["preview-b"];
                 check(a.Text=="desktop1.example.com · 已连接"&&b.Text=="desktop2.example.com · 已停止","tray lists every cloud hostname and current connection state");
-                check(a.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"连接云电脑","断开云电脑","重命名"}),"hoverable cloud row provides exactly three target actions");
+                check(a.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"连接设备","断开设备","重命名"}),"hoverable cloud row provides exactly three target actions");
                 check(!a.DropDownItems[0].Enabled&&a.DropDownItems[1].Enabled&&b.DropDownItems[0].Enabled&&!b.DropDownItems[1].Enabled,"tray connect and disconnect availability follows each cloud state");
                 form.HideToTray();b.DropDownItems[0].PerformClick();
                 check(!form.Visible&&form.TrayVisible&&form.Cards["preview-b"].Target.State=="connected"&&form.Cards["preview-a"].Target.State=="connected","tray connects only selected cloud without opening or hiding the resident icon");
@@ -40,7 +40,7 @@ namespace CMCP {
                 form.Cards["preview-b"].Target.State="offline";form.RefreshState();Application.DoEvents();
                 check(menu.Menu.Visible&&b.DropDown.Visible&&Object.ReferenceEquals(b,menu.Targets["preview-b"])&&b.Text.Contains("等待网络恢复"),"live status refresh preserves the open tray menu and cloud submenu");
                 menu.Menu.Close();var next=form.Options.Copy();next.language="en";form.ChangeSettings(next);
-                check(menu.Targets["preview-b"].Text.Contains("Waiting for network")&&b.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"Connect cloud PC","Disconnect cloud PC","Rename"}),"tray captions and actions follow the selected interface language");
+                check(menu.Targets["preview-b"].Text.Contains("Waiting for network")&&b.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"Connect device","Disconnect device","Rename"}),"tray captions and actions follow the selected interface language");
                 form.OpenSettings();b.DropDownItems[2].PerformClick();Application.DoEvents();
                 check(form.Visible&&form.TrayVisible&&form.Settings==null&&form.Editor!=null&&form.Editor.TargetName=="preview-b"&&form.Editor.NameInput.Box.Focused,"tray rename opens the existing edit page and focuses the display name");
                 form.Editor.NameInput.Box.Text="Renamed cloud";form.Editor.Save.PerformClick();Application.DoEvents();
@@ -53,7 +53,7 @@ namespace CMCP {
             }
             L.Set("zh-CN");bool dark=false;string invoked="";
             using(var menu=new TrayMenu(delegate{},delegate{},delegate{},(id,action)=>invoked=id+":"+action,()=>dark)){
-                menu.Sync(new TrayTarget[0]);check(menu.Targets.Count==0&&menu.Menu.Items.OfType<ToolStripMenuItem>().Any(i=>i.Text=="暂无云电脑"&&!i.Enabled),"empty tray has a disabled no-cloud hint and preserves application actions");
+                menu.Sync(new TrayTarget[0]);check(menu.Targets.Count==0&&menu.Menu.Items.OfType<ToolStripMenuItem>().Any(i=>i.Text=="暂无设备"&&!i.Enabled),"empty tray has a disabled no-cloud hint and preserves application actions");
                 var values=Enumerable.Range(0,100).Select(i=>new TrayTarget{Name="id-"+i,Label="Same note",State="已停止",CanConnect=true,CanRename=true}).ToList();menu.Sync(values);
                 check(menu.Targets.Count==100&&menu.Menu.Items.Count==104,"tray includes all one hundred supported clouds without a fixed entry cap");
                 menu.Targets["id-73"].DropDownItems[0].PerformClick();check(invoked=="id-73:connect","duplicate remarks still dispatch using the immutable cloud identity");

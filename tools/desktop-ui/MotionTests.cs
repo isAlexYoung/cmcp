@@ -45,7 +45,7 @@ namespace CMCP {
                     options[1].PerformClick();check(form.Options.theme=="light"&&options[1].Selected&&!options[0].Selected,"choosing an option saves it and moves the selection");
                     options[0].PerformClick();check(form.Options.theme=="system"&&options[0].Selected,"choosing the first option again restores it");
                     check(sheet.Controls.OfType<ToggleSwitch>().Count()==2,"startup and closing behaviour are switches");
-                    var language=sheet.Controls.OfType<DropdownField>().Single();
+                    var language=sheet.Controls.OfType<DropdownField>().First();
                     check(language.Choose("en")&&form.Options.language=="en"&&language.Value=="en","choosing a language saves it");
                     check(language.Choose("zh-CN")&&form.Options.language=="zh-CN"&&!language.Choose("zh-CN"),"choosing the current language does nothing");
                     var inside=language.PointToScreen(new Point(5,5));
@@ -93,7 +93,7 @@ namespace CMCP {
                     for(int i=0;i<200&&toggle.Level!=(wasOn?0:1);i++){Application.DoEvents();Thread.Sleep(5);}
                     check(toggle.Level==(wasOn?0:1),"the switch settles on its new position");
                     toggle.Checked=wasOn;
-                    var field=tabs.Viewport.Controls[0].Controls.OfType<DropdownField>().Single();
+                    var field=tabs.Viewport.Controls[0].Controls.OfType<DropdownField>().First();
                     Action settleMenu=()=>{for(int i=0;i<200&&field.Animating;i++){Application.DoEvents();Thread.Sleep(5);}};
                     field.TestClick();check(field.IsOpen&&field.Animating&&field.Menu.Region!=null,"opening the dropdown unfolds it");
                     check(field.Menu.Items.Cast<ToolStripItem>().Count(i=>Equals(i.Tag,true))==1,"exactly one language is marked as current");

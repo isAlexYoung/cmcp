@@ -10,7 +10,7 @@ namespace CMCP {
     internal sealed class SettingsPage : UserControl {
         sealed class Row { internal Label Title,Description; internal Control Control; }
         sealed class Section { internal Label Heading; internal Control Leading; internal readonly List<Row> Rows=new List<Row>(); }
-        const int ColumnWidth=680,RowHeight=56,RowPadding=16,OptionWidth=122;
+        const int ColumnWidth=680,RowHeight=56,RowPadding=16,OptionWidth=128;
         internal readonly EditorViewport Viewport=new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
         internal readonly ModernButton Back=new ModernButton{Glyph="back",Text="返回",Nav=true,AccessibleName="返回"};
         internal readonly ModernButton GeneralTab=new ModernButton{Glyph="sliders",Text="通用",Nav=true},AboutTab=new ModernButton{Glyph="info",Text="关于",Nav=true};
@@ -106,7 +106,7 @@ namespace CMCP {
             foreach(var update in refresh)update();
             Apply(colors);LayoutRows();top.Invalidate();
         }
-        void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
+        void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.terminal=next.terminal;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
         void Build(){
             refresh.Clear();sections.Clear();
             sheet.Controls.Remove(feedback);sheet.Controls.Remove(updateView);foreach(Control c in sheet.Controls.Cast<Control>().ToArray())c.Dispose();sheet.Controls.Clear();
@@ -127,7 +127,13 @@ namespace CMCP {
             AddRow(appearance,"主题",null,theme);
             var window=AddSection("窗口");
             AddRow(window,"开机自启","登录 Windows 后启动到系统托盘；只恢复原来已启用的连接。",Switch("开机自启",()=>settings.autoStart,(s,on)=>s.autoStart=on));
-            AddRow(window,"关闭时最小化到托盘","开启时保留已连接的云电脑；关闭后，点叉号会退出并断开全部连接。",Switch("关闭时最小化到托盘",()=>settings.closeToTray,(s,on)=>s.closeToTray=on));
+            AddRow(window,"关闭时最小化到托盘","开启时保留已连接的设备；关闭后，点叉号会退出并断开全部连接。",Switch("关闭时最小化到托盘",()=>settings.closeToTray,(s,on)=>s.closeToTray=on));
+            var console=AddSection("终端");
+            var installed=Terminals.Detect();
+            var terminal=new DropdownField(installed.Select(t=>new KeyValuePair<string,string>(t.Id,t.Label)).ToArray()){Font=sheet.Font,Size=new Size(216,36),Colors=colors};
+            terminal.Chosen+=key=>Commit(s=>s.terminal=key);
+            refresh.Add(delegate{var chosen=Terminals.Resolve(settings.terminal,installed);terminal.Value=chosen==null?"":chosen.Id;terminal.AccessibleName=L.Text("SSH 使用的终端");terminal.Invalidate();});
+            AddRow(console,"SSH 使用的终端","点击卡片上的“打开终端”时使用。这里只列出这台电脑已安装的终端。",terminal);
             var shortcuts=AddSection("快捷方式");
             AddRow(shortcuts,"桌面快捷方式","为当前程序创建 CMCP 桌面快捷方式。",Command("创建",delegate{action("shortcut");}));
         }

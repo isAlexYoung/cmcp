@@ -9,14 +9,19 @@ namespace CMCP {
         internal CardPreference Preference;
         internal Palette Colors=Palette.Create(false);
         internal bool Selected, Expanded, BusyConnect, BusyStop;
+        internal SshLogin Ssh;
+        // Only the card's own button changes here; a running web connection is not touched.
+        internal bool SshActive { get { return Ssh!=null&&(Ssh.active||Target.Url.Length==0); } }
+        internal string Caption { get { return Preference.label.Length>0?Preference.label:Target.Url.Length>0?new Uri(Target.Url).Host:Ssh!=null?Ssh.host:Target.Name; } }
+        internal readonly ModernButton LoginSwitch=new ModernButton{Glyph="swap",Neutral=true,AccessibleName="切换登录方式"};
         internal readonly ModernButton Connect=new ModernButton();
-        internal readonly ModernButton Edit=new ModernButton{Glyph="edit",AccessibleName="编辑云电脑"};
-        internal readonly ModernButton Copy=new ModernButton{Glyph="copy",AccessibleName="复制云电脑地址"};
-        internal readonly ModernButton Delete=new ModernButton{Glyph="delete",Destructive=true,AccessibleName="删除云电脑"};
+        internal readonly ModernButton Edit=new ModernButton{Glyph="edit",AccessibleName="编辑设备"};
+        internal readonly ModernButton Copy=new ModernButton{Glyph="copy",AccessibleName="复制设备地址"};
+        internal readonly ModernButton Delete=new ModernButton{Glyph="delete",Destructive=true,AccessibleName="删除设备"};
         internal readonly ModernButton Toggle=new ModernButton{Glyph="chevron",AccessibleName="展开连接详情"};
         internal readonly ConnectionDetails Details=new ConnectionDetails();
         internal readonly Label StatusText=new Label{TextAlign=ContentAlignment.MiddleRight,AutoEllipsis=true};
-        internal event Action<TargetCard> SelectedCard, EditRequested, CopyRequested, DeleteRequested, ConnectRequested, OpenRequested, StopRequested, LogsRequested;
+        internal event Action<TargetCard> SwitchRequested, SelectedCard, EditRequested, CopyRequested, DeleteRequested, ConnectRequested, OpenRequested, StopRequested, LogsRequested;
         internal event Action<TargetCard,int> MoveRequested;
         readonly LocalToolTip tips=new LocalToolTip();
         internal Func<TargetCard,bool,bool> AnimateExpansion;
@@ -31,8 +36,9 @@ namespace CMCP {
         internal TargetCard(Target target,CardPreference preference) {
             Target=target;Preference=preference;DoubleBuffered=true;
             SetStyle(ControlStyles.Selectable|ControlStyles.ResizeRedraw,true);TabStop=true;AllowDrop=true;Height=116;Cursor=Cursors.Hand;
-            Controls.AddRange(new Control[]{Connect,Edit,Copy,Delete,Toggle,StatusText,Details});
+            Controls.AddRange(new Control[]{LoginSwitch,Connect,Edit,Copy,Delete,Toggle,StatusText,Details});
             if(preference.icon.Length>0)icon=UiPreferences.DecodeIcon(preference.icon);
+            LoginSwitch.Click+=delegate{if(SwitchRequested!=null)SwitchRequested(this);};
             Connect.Click+=delegate{if(ConnectRequested!=null)ConnectRequested(this);};
             Edit.Click+=delegate{if(EditRequested!=null)EditRequested(this);};
             Copy.Click+=delegate{if(CopyRequested!=null)CopyRequested(this);};
@@ -42,9 +48,9 @@ namespace CMCP {
             Details.Open.Click+=delegate{if(OpenRequested!=null)OpenRequested(this);};
             Details.Stop.Click+=delegate{if(StopRequested!=null)StopRequested(this);};
             Details.Logs.Click+=delegate{if(LogsRequested!=null)LogsRequested(this);};
-            tips.SetToolTip(Edit,"编辑备注、图标和云电脑地址");
-            tips.SetToolTip(Copy,"复制云电脑地址");
-            tips.SetToolTip(Delete,"删除这一台云电脑，其他连接保持不变");
+            tips.SetToolTip(LoginSwitch,"切换登录方式：共享网页 / SSH");
+            tips.SetToolTip(Edit,"编辑名称、备注、图标和登录方式");
+                        tips.SetToolTip(Delete,"删除这一台设备，其他连接保持不变");
             tips.SetToolTip(Toggle,"展开 / 收起详情");
             tips.SetToolTip(this,"点击卡片展开详情；拖动左侧手柄排序；Alt + ↑ / ↓ 调整顺序");
             foreach(Control child in Controls)WirePointer(child);
@@ -82,9 +88,9 @@ namespace CMCP {
         void SelectCard() { Focus();if(SelectedCard!=null)SelectedCard(this); }
 
         internal void RefreshTarget(Target target) {
-            Target=target;Details.Target=target;
-            AccessibleName=(Preference.label.Length>0?Preference.label:new Uri(target.Url).Host)+"，"+LocalState.Caption(target.State);
-            AccessibleDescription=target.Url+" · "+L.Text(target.Mode)+" · "+L.Message(target.Detail);
+            Target=target;Details.Target=target;Details.Ssh=SshActive?Ssh:null;Details.Note=Preference.note??"";
+            AccessibleName=Caption+"，"+(SshActive?"SSH":LocalState.Caption(target.State));
+            AccessibleDescription=(SshActive?Ssh.Address:target.Url)+" · "+L.Text(target.Mode??"")+" · "+L.Message(target.Detail??"");
             UpdateActions();Invalidate();Details.Invalidate();
         }
 
@@ -102,7 +108,7 @@ namespace CMCP {
             Details.Apply(colors);Details.BackColor=fill;
             StatusText.BackColor=fill;
             StatusText.ForeColor=Target.State=="connected"?colors.Success:colors.Muted;
-            foreach(var button in new[]{Connect,Edit,Copy,Delete,Toggle}){
+            foreach(var button in new[]{LoginSwitch,Connect,Edit,Copy,Delete,Toggle}){
                 button.Colors=colors;button.BackColor=fill;button.Invalidate();
             }
             Invalidate();
@@ -120,9 +126,20 @@ namespace CMCP {
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
             StatusText.Text=BusyStop?"正在停止":(Target.State=="recovering"||Target.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
             StatusText.Text=L.Text(StatusText.Text);StatusText.AccessibleName=StatusText.Text;
-            tips.SetToolTip(Connect,connected?"点击停止此云电脑的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台云电脑");
+            tips.SetToolTip(Connect,connected?"点击停止此设备的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台设备");
             Connect.AccessibleName=L.Text(Connect.Text)+" · "+Target.Url;
             Details.Stop.Text=BusyStop?"正在停止":"停止连接";
+            LoginSwitch.Text=SshActive?"SSH":"网页";LoginSwitch.Enabled=!BusyStop;
+            Details.Open.Text=SshActive?"打开终端":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":"monitor";
+            bool webRunning=Target.Url.Length>0&&(connected||connecting);
+            Details.Stop.Visible=!SshActive||webRunning;Details.Logs.Visible=Target.Url.Length>0;
+            tips.SetToolTip(Copy,SshActive?"复制 SSH 命令（不含密码）":"复制设备地址");Copy.AccessibleName=L.Text(SshActive?"复制 SSH 命令（不含密码）":"复制设备地址");
+            if(SshActive){
+                Connect.Text="打开终端";Connect.Glyph="terminal";Connect.Primary=false;Connect.Neutral=true;Connect.Enabled=true;
+                tips.SetToolTip(Connect,"用设置里选定的终端连接这台设备");Connect.AccessibleName=L.Text(Connect.Text)+" · "+Ssh.Address;
+                if(!webRunning&&!BusyStop){StatusText.Text="SSH";StatusText.AccessibleName="SSH";}
+            }
+            Details.PerformLayout();LoginSwitch.Invalidate();Details.Open.Invalidate();
             Connect.Invalidate();StatusText.Invalidate();
         }
 
@@ -140,7 +157,7 @@ namespace CMCP {
                 hovered=value;
                 // Set both sides on every transition. Never hide status based
                 // on a stale paint flag while the action controls are hidden.
-                foreach(var button in new[]{Connect,Edit,Copy,Delete})button.Visible=value;
+                foreach(var button in new[]{LoginSwitch,Connect,Edit,Copy,Delete})button.Visible=value;
                 StatusText.Visible=!value;
             } finally {ResumeLayout();changingHover=false;}
             Invalidate();
@@ -193,6 +210,7 @@ namespace CMCP {
         protected override void OnLayout(LayoutEventArgs e) {
             base.OnLayout(e);if(Details==null)return;
             int y=Compact?103:38, x=Width-(Compact?22:66)-268;
+            LoginSwitch.Bounds=new Rectangle(x-112,y,104,40);
             Connect.Bounds=new Rectangle(x,y,136,40);
             Edit.Bounds=new Rectangle(x+144,y,36,40);
             Copy.Bounds=new Rectangle(x+188,y,36,40);
@@ -209,10 +227,10 @@ namespace CMCP {
             PaintUi.Box(g,new Rectangle(51,35,44,44),12,Colors.Subtle,Colors.Border);
             if(icon!=null)g.DrawImage(icon,new Rectangle(54,38,38,38));
             else PaintUi.Icon(g,"monitor",new Rectangle(61,45,24,24),Colors.Blue);
-            int right=Compact?Width-72:hovered?Connect.Left-14:StatusText.Left-14;
-            string label=Preference.label.Length>0?Preference.label:new Uri(Target.Url).Host;
+            int right=Compact?Width-72:hovered?LoginSwitch.Left-14:StatusText.Left-14;
+            string label=Caption;
             using(var f=new Font(Font,FontStyle.Bold))PaintUi.Text(g,label,f,new Rectangle(112,30,Math.Max(20,right-112),30),Colors.Text);
-            PaintUi.Text(g,Target.Url,Font,new Rectangle(112,64,Math.Max(20,right-112),28),Colors.Blue);
+            PaintUi.Text(g,SshActive?Ssh.Address:Target.Url,Font,new Rectangle(112,64,Math.Max(20,right-112),28),Colors.Blue);
             if(Expanded)using(var p=new Pen(Colors.Border))g.DrawLine(p,21,HeaderHeight-10,Width-21,HeaderHeight-10);
         }
         protected override void Dispose(bool disposing) {

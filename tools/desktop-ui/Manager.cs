@@ -84,7 +84,7 @@ namespace CMCP {
                 case "recovering": return "连接暂时中断，正在自动重连并重新确认工具链路；未确认结果的操作不会自动重发。";
                 case "replaced": return "其他电脑或进程已接管连接。本机会停止竞争；需要时手动启动连接。";
                 case "stale": return "本地状态超过 30 秒未更新，暂不确认连接有效。此界面不会主动探测 VPS。";
-                case "stopped": return "此云电脑已停止。点击“启动连接”只连接这一台；其他云电脑保持原状。";
+                case "stopped": return "此设备已停止。点击“启动连接”只连接这一台；其他设备保持原状。";
                 default: return "点击连接开始；进度会显示在此处，可随时停止。";
             }
         }
@@ -193,6 +193,10 @@ namespace CMCP {
     internal static class Program {
         internal static string ExecutablePath {get{string canonical=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMCP.exe");return File.Exists(canonical)?canonical:Application.ExecutablePath;}}
         [STAThread] static int Main(string[] args) {
+#if !CMCP_PREVIEW
+            string askpass=Environment.GetEnvironmentVariable(SshAskpass.Variable);
+            if(!String.IsNullOrEmpty(askpass)&&args.Length<=1)return SshAskpass.Run(askpass,args.Length==1?args[0]:"");
+#endif
             Motion.Suppressed=args.Length>0&&args[0]!="--startup"&&args[0]!="--updated"&&args[0]!="--demo";
             if(args.Length==2&&(args[0]=="--self-test"||args[0]=="--test-tooltips"))Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             if(args.Length==2&&args[0]=="--self-test")AppDomain.CurrentDomain.UnhandledException+=delegate(object sender,UnhandledExceptionEventArgs e){try{File.WriteAllText(args[1]+".unhandled.txt",Convert.ToString(e.ExceptionObject),Encoding.UTF8);}catch{}};
@@ -216,7 +220,9 @@ namespace CMCP {
                     if(page=="editor")form.OpenEditor(first.Target.Name);
                     else if(page=="add")form.OpenAdd();
                     else if(page=="settings"||page=="settings-en"||page=="about"){if(page=="settings-en"){var options=form.Options.Copy();options.language="en";form.ChangeSettings(options);}form.OpenSettings();if(page=="about")form.Settings.ShowAbout();}
-                    else if(page=="dropdown"){form.OpenSettings();var field=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().Single();field.TestClick();Application.DoEvents();using(var menu=new Bitmap(field.Menu.Width,field.Menu.Height)){field.Menu.DrawToBitmap(menu,new Rectangle(Point.Empty,menu.Size));menu.Save(Path.GetFullPath(args[1])+".menu.png",System.Drawing.Imaging.ImageFormat.Png);}field.Menu.Close();}
+                    else if(page=="editor-web"||page=="editor-ssh"||page=="editor-key"||page=="add-ssh"){if(page=="add-ssh")form.OpenAdd();else form.OpenEditor("preview-b");if(page=="editor-web")form.Editor.ShowWeb();else form.Editor.ShowSsh();if(page=="editor-key"){form.Editor.MethodField.Choose("key");form.Editor.KeyInput.Box.Text=@"C:\Users\me\.ssh\id_ed25519";}}
+                    else if(page=="card-ssh"||page=="card-ssh-expanded"){var ssh=form.Cards["preview-b"];form.SwitchLogin(ssh);foreach(var card in form.Cards.Values)card.ClearPointer();ssh.TestHover(true);if(page=="card-ssh-expanded")ssh.SetExpanded(true,false);}
+                    else if(page=="dropdown"){form.OpenSettings();var field=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().First();field.TestClick();Application.DoEvents();using(var menu=new Bitmap(field.Menu.Width,field.Menu.Height)){field.Menu.DrawToBitmap(menu,new Rectangle(Point.Empty,menu.Size));menu.Save(Path.GetFullPath(args[1])+".menu.png",System.Drawing.Imaging.ImageFormat.Png);}field.Menu.Close();}
                     else if(page=="update-available"){form.OpenSettings();form.Settings.ShowAbout();form.SimulateUpdate("9.9.9");}
                     else if(page=="main-update"){form.SimulateUpdate("9.9.9");foreach(var card in form.Cards.Values)card.ClearPointer();}
                     else if(page.StartsWith("update")){var update=new UpdateProgress{Stage=page=="update-failed"?"failed":"download",Code="network",Received=14680064,Total=41037076};if(page=="update-expanded")first.SetExpanded(true,false);form.SetUpdateProgress(update);if(page=="update-about"){form.OpenSettings();form.Settings.ShowAbout();form.Settings.SetUpdateProgress(update);}}
@@ -335,6 +341,7 @@ namespace CMCP {
                 TrayTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
                 MotionTests.Run(temp,check);
+                SshTests.Run(temp,check);
                 ControlOrderTests.Run(temp,check);
                 File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 0, skipped = 0, not_executed = new string[] { "real VPS connection", "existing production state", "manual end-user operation" }, nativeFrame = new { darkCaptionSetResult=DashboardTests.DarkCaptionResult, lightCaptionSetResult=DashboardTests.LightCaptionResult, requestedDarkCaptionColor=ColorTranslator.ToWin32(Palette.Create(true).Page), note="0 means Windows accepted the caption color; this is not a pixel-level visual check. Unsupported systems return a nonzero HRESULT or null." }, checks = checks }), Encoding.UTF8); return 0;
             } catch (Exception e) { File.WriteAllText(output, new JavaScriptSerializer().Serialize(new { passed = checks.Count, failed = 1, error = e.ToString(), checks = checks }), Encoding.UTF8); return 1; }

@@ -34,7 +34,9 @@ namespace CMCP {
             }
             internal bool Cleared(){
                 Paint(Rectangle.Intersect(control.ClientRectangle,dirty));
-                Color expected=control is RoundedSheet?((RoundedSheet)control).Colors.Surface:control.BackColor;
+                // Rows and gaps differ in color on the sheet, so what matters there is that the old edge repaints.
+                if(control is SettingsSheet)return control.Width>oldWidth+30&&dirty.Contains(oldWidth-2,control.Height/2);
+                Color expected=control.BackColor;
                 return control.Width>oldWidth+30&&pixels.GetPixel(oldWidth-2,control.Height/2).ToArgb()==expected.ToArgb();
             }
             public void Dispose(){control.Invalidated-=invalidated;pixels.Dispose();}
@@ -43,7 +45,7 @@ namespace CMCP {
         static void TestEditorResize(Manager form,Action<bool,string> check,bool adding,bool dark){
             form.SetTheme(dark);if(adding)form.OpenAdd();else form.OpenEditor("preview-a");
             form.ClientSize=new Size(800,720);Pump();form.Editor.NameInput.Box.Focus();Pump();
-            var surfaces=Descendants(form.Editor).Where(c=>c is EditorInput||c is RoundedSheet).Select(c=>new RetainedSurface(c)).ToArray();
+            var surfaces=Descendants(form.Editor).Where(c=>(c is EditorInput||c is SettingsSheet)&&c.Visible).Select(c=>new RetainedSurface(c)).ToArray();
             try{form.ClientSize=new Size(1320,720);Pump();check(surfaces.All(s=>s.Cleared()),(adding?"add":"edit")+" "+(dark?"dark":"light")+" resize repaints retained input and outer sheet borders");}
             finally{foreach(var surface in surfaces)surface.Dispose();form.CloseEditor();}
         }
@@ -148,7 +150,7 @@ namespace CMCP {
                     host.Controls.Add(page);host.Show();Pump();
                     check(!page.viewport.NativeBarsVisible&&page.LayoutFits,"editor hides both native bars in "+(dark?"dark":"light")+" "+(add?"add":"edit"));
                     page.viewport.Wheel(-360);Pump();check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"hidden editor scrollbar retains wheel scrolling in "+dark+" "+add);
-                    page.viewport.AutoScrollPosition=Point.Empty;page.PasswordInput.Box.Focus();Pump();
+                    page.ShowSsh();Pump();page.viewport.AutoScrollPosition=Point.Empty;page.SshSecretInput.Box.Focus();Pump();
                     check(page.viewport.AutoScrollPosition.Y<0&&!page.viewport.NativeBarsVisible,"keyboard focus still scrolls the password field into view in "+dark+" "+add);
                     host.ClientSize=new Size(1440,850);Pump();host.ClientSize=new Size(700,540);Pump();
                     check(!page.viewport.NativeBarsVisible&&page.LayoutFits&&page.Save.Visible,"editor resize preserves hidden bars and fixed save action in "+dark+" "+add);

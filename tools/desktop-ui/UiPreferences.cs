@@ -13,7 +13,7 @@ namespace CMCP {
     // Presentation only. The connector's names, credentials and switches never
     // enter this file. Corrupt/unknown data is refused, never silently replaced.
     internal sealed class CardPreference {
-        public string name = "", label = "", icon = "";
+        public string name = "", label = "", icon = "", note = "";
     }
     internal sealed class UiPreferences {
         public int schema = 1;
@@ -31,7 +31,7 @@ namespace CMCP {
                 if (data == null || data.schema != 1 || data.cards == null || data.cards.Count > 100) throw new InvalidDataException();
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var c in data.cards) {
-                    if (c == null || String.IsNullOrEmpty(c.name) || c.name.Length > 512 || !seen.Add(c.name) || c.label == null || c.label.Length > 80 || c.label.Any(Char.IsControl) || c.icon == null || c.icon.Length > 32768) throw new InvalidDataException();
+                    if (c == null || String.IsNullOrEmpty(c.name) || c.name.Length > 512 || !seen.Add(c.name) || c.label == null || c.label.Length > 80 || c.label.Any(Char.IsControl) || c.icon == null || c.icon.Length > 32768 || c.note == null || c.note.Length > 200 || c.note.Any(x => Char.IsControl(x) && x != '\r' && x != '\n')) throw new InvalidDataException();
                     if (c.icon.Length > 0) using (var bmp = DecodeIcon(c.icon)) { }
                 }
                 return data;
@@ -60,12 +60,12 @@ namespace CMCP {
                 } finally { if (File.Exists(temporary)) File.Delete(temporary); if (held) mutex.ReleaseMutex(); }
             }
         }
-        internal void Set(string name, string label, string icon, IEnumerable<Target> current) {
+        internal void Set(string name, string label, string icon, IEnumerable<Target> current, string note = null) {
             var valid = new HashSet<string>(current.Select(t => t.Name), StringComparer.Ordinal);
             cards.RemoveAll(c => !valid.Contains(c.name));
             var item = cards.FirstOrDefault(c => c.name == name);
             if (item == null) { item = new CardPreference { name = name }; cards.Add(item); }
-            item.label = label; item.icon = icon;
+            item.label = label; item.icon = icon; if (note != null) item.note = note;
         }
         internal void Move(string from, string before, IEnumerable<Target> current) {
             var ordered = Sort(current).Select(t => Get(t.Name)).ToList();

@@ -31,7 +31,7 @@ namespace CMCP {
                 form.ClientSize=new Size(700,460);form.Show();Application.DoEvents();form.Cards.Values.First().SetExpanded(true,false);form.OpenSettings();Application.DoEvents();check(form.Settings!=null&&form.OwnedForms.Length==0,"settings use a page in the existing window");
                 foreach(bool dark in new[]{false,true}){form.SetTheme(dark);form.Settings.Viewport.Wheel(-120);Application.DoEvents();check(!form.Settings.Viewport.NativeBarsVisible&&form.Settings.Viewport.AutoScrollPosition.Y<0,"settings retain wheel scrolling without native bars in "+dark);}
                 var next=form.Options.Copy();next.language="en";next.closeToTray=true;form.ChangeSettings(next);check(L.Language=="en"&&L.Text("已停止")=="Stopped","language switch translates statuses immediately");
-                form.CloseSettings();form.OpenAdd();Application.DoEvents();check(form.Editor.Controls.Cast<Control>().SelectMany(c=>c.Controls.Cast<Control>()).OfType<Label>().Any(l=>l.Text=="Add cloud PC"),"English applies to embedded add page");form.CloseEditor();
+                form.CloseSettings();form.OpenAdd();Application.DoEvents();check(form.Editor.Controls.Cast<Control>().SelectMany(c=>c.Controls.Cast<Control>()).OfType<Label>().Any(l=>l.Text=="Add device"),"English applies to embedded add page");form.CloseEditor();
                 form.HideToTray();check(!form.Visible&&form.TrayVisible,"hide-to-tray keeps the manager alive in isolated UI");form.RestoreManager();check(form.Visible&&form.TrayVisible,"tray restore shows the same manager instance and retains the resident icon");
                 check(form.TrayItems.First()=="Open main window"&&form.TrayItems.Last()=="Exit application"&&form.TrayCommands.Targets.Count==2,"tray retains restore and full application exit around all cloud PCs");
                 form.Close();check(!form.IsDisposed&&form.TrayVisible,"clicking X actually hides the manager when tray mode is selected");form.RestoreManager();
@@ -107,7 +107,7 @@ namespace CMCP {
                 check(scrolls,"repeated startup toggles retain wheel scrolling in both directions without native bars in theme "+dark);
                 viewport.AutoScrollPosition=Point.Empty;Application.DoEvents();int nativeBefore=-viewport.AutoScrollPosition.Y;NativeWheel(startup,-120);int nativeDown=-viewport.AutoScrollPosition.Y;NativeWheel(startup,120);
                 check(nativeDown>nativeBefore&&-viewport.AutoScrollPosition.Y<nativeDown,"native mouse wheel messages on the focused startup checkbox still reach the viewport in theme "+dark);
-                var language=sheet.Controls.OfType<DropdownField>().Single();language.Choose("en");Application.DoEvents();
+                var language=sheet.Controls.OfType<DropdownField>().First();language.Choose("en");Application.DoEvents();
                 check(L.Language=="en"&&!startup.IsDisposed&&startup.Text=="Start with Windows"&&sheet.Controls.OfType<Label>().Any(label=>label.Text=="Interface language")&&language.Value=="en","language changes translate existing settings controls without replacing the focused page in theme "+dark);
                 var theme=Option(sheet,dark?"浅色":"深色");theme.AccessibilityObject.DoDefaultAction();Application.DoEvents();
                 check(form.Preferences.dark!=dark&&!startup.IsDisposed&&form.Settings==page,"theme changes update the same settings controls in theme "+dark);
