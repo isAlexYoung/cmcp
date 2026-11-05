@@ -253,11 +253,17 @@ namespace CMCP {
         void ConnectCard(TargetCard card){Select(card);if(card.SshActive){OpenTerminal(card);return;}bool active=card.Target.State=="connected"||card.BusyConnect||card.Target.State=="connecting"||card.Target.State=="configuring"||card.Target.State=="waiting-login"||card.Target.State=="recovering"||card.Target.State=="unstable";if(active)StopCard(card);else Launch("connect",card,"");}
         void StopCard(TargetCard card){if(card.SshActive)StopSsh(card);else Launch("stop",card,"");}
         // Stops the background channel of this device only. A terminal window the user opened stays theirs.
-        async void StopSsh(TargetCard card){
+        void StopSsh(TargetCard card){
             Select(card);string name=card.Target.Name;
             if(card.SshState.Length==0||!sshStopping.Add(name))return;
             card.SshStopping=true;card.UpdateActions();
-            bool stopped=false;try{stopped=await Task.Run(()=>StopSshWorker(stateDirectory,name));}catch{}
+            // Back on this window's thread by name: the worker's answer must never touch a control from the pool.
+            Task.Run(()=>{
+                bool stopped=false;try{stopped=StopSshWorker(stateDirectory,name);}catch{}
+                try{BeginInvoke(new Action(()=>SshStopFinished(card,name,stopped)));}catch(InvalidOperationException){}
+            });
+        }
+        void SshStopFinished(TargetCard card,string name,bool stopped){
             if(IsDisposed)return;
             if(stopped){notice="SSH 通道已停止；已打开的终端窗口不受影响。";status.Text=L.Text(notice);}
             else{sshStopping.Remove(name);card.SshStopping=false;Error("无法停止 SSH 通道，请稍后重试。");}

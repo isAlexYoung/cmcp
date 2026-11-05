@@ -224,9 +224,9 @@ namespace CMCP {
                 channels["preview-b"]="ready";form.RefreshState();Pump();
                 check(b.StatusText.Text=="ssh · 已连接"&&b.StatusText.ForeColor.ToArgb()==b.Colors.Success.ToArgb()&&b.Details.Stop.Enabled&&b.Details.Stop.Visible,"a ready SSH channel shows as connected and can be stopped");
                 check(b.Target.State==state&&b.Details.Logs.Left>b.Details.Stop.Right,"the stop button sits where shared web sign-in has it");
-                stopWorks=false;b.Details.Stop.PerformClick();for(int i=0;i<40&&stops.Count==0;i++)Pump();Pump();
+                stopWorks=false;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();
                 check(stops.Count==1&&b.StatusText.Text=="ssh · 已连接"&&b.Details.Stop.Enabled,"a failed stop leaves the channel shown as connected");
-                stopWorks=true;b.Details.Stop.PerformClick();for(int i=0;i<40&&b.SshState.Length>0;i++){Pump();System.Threading.Thread.Sleep(10);}Pump();form.RefreshState();Pump();
+                stopWorks=true;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
                 check(stops.Count==2&&stops.All(id=>id=="preview-b")&&b.StatusText.Text=="ssh · 已停止"&&!b.Details.Stop.Enabled&&b.Target.State==state,"stopping affects only this device's SSH channel, never its web connection");
                 b.Details.Stop.PerformClick();Pump();check(stops.Count==2,"there is nothing to stop once the channel has stopped");
                 b.LoginSwitch.PerformClick();Pump();check(b.StatusText.Text.StartsWith("web · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();

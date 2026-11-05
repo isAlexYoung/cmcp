@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {ManagerState} from '../state.mjs';
 import {createManager} from '../manager.mjs';
-import {runWorker,sshWorkerState,stopSshWorker} from '../../app/ssh-terminal.mjs';
+import {privateDirectory,runWorker,sshWorkerState,stopSshWorker} from '../../app/ssh-terminal.mjs';
 import {VARIABLE,answerPrompt,classify,commandScript,detectTerminals,dialog,openArguments,openTerminal,resolveTerminal,sshOptions,sshProblem,validHost,validUser,writeLaunch} from '../ssh.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -255,6 +255,7 @@ test('invalid persisted sign-in choices are rejected without replacing the file'
   fs.writeFileSync(file,original);assert.throws(()=>new ManagerState(f.directory,f.secrets),/损坏/);
   assert.equal(fs.readFileSync(file,'utf8'),original);
 });
+test('the worker accepts the system temporary folder, which macOS keeps behind a link',()=>{assert.equal(privateDirectory(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-private-'))).startsWith(os.tmpdir()),true);});
 test('a real worker reports its state and stops for this device only',async t=>{
   const f=fixture(t),id='device-a';
   fs.writeFileSync(path.join(f.directory,'ssh-logins.json'),JSON.stringify({logins:[{id,host:'203.0.113.24',port:22,username:'root',method:'password',keyPath:''},{id:'device-b',host:'203.0.113.25',port:22,username:'root',method:'password',keyPath:''}]}));

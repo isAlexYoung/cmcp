@@ -16,7 +16,9 @@ const hash=value=>createHash('sha256').update(value).digest('hex');
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 function safeFile(file) {try{const s=fs.lstatSync(file);if(s.isSymbolicLink()||!s.isFile()||s.nlink!==1||process.getuid&&s.uid!==process.getuid())throw Error('Unsafe SSH state file');}catch(e){if(e.code!=='ENOENT')throw e;}}
 export function privateDirectory(directory) {
-  for(let p=directory;p!==path.dirname(p);p=path.dirname(p)){try{if(fs.lstatSync(p).isSymbolicLink())throw Error('Unsafe SSH state directory');}catch(e){if(e.code!=='ENOENT')throw e;}}
+  // macOS itself makes /var and /tmp links, and the temporary folder lives under /var. Any other link is refused.
+  const systemLink=p=>process.platform==='darwin'&&(p==='/var'||p==='/tmp');
+  for(let p=directory;p!==path.dirname(p);p=path.dirname(p)){try{if(fs.lstatSync(p).isSymbolicLink()&&!systemLink(p))throw Error('Unsafe SSH state directory');}catch(e){if(e.code!=='ENOENT')throw e;}}
   fs.mkdirSync(directory,{recursive:true,mode:0o700});
   const s=fs.statSync(directory);if(!s.isDirectory()||process.getuid&&s.uid!==process.getuid())throw Error('Unsafe SSH state directory');
   if(process.platform!=='win32')fs.chmodSync(directory,0o700);
@@ -144,8 +146,8 @@ export async function ensureSshWorker({directory,id,owner,ssh='ssh',timeout=1800
 
 // Empty while nothing runs. The worker rewrites its record every second.
 export function sshWorkerState(directory,id,now=Date.now()) {
-  const {file}=workerPaths(directory,id);
   try{
+    const file=path.join(directory,'ssh-mcp',hash(path.resolve(directory)+'\0'+id)+'.json');
     safeFile(file);const record=JSON.parse(fs.readFileSync(file,'utf8'));
     return now-record.at>10000||!alive(record.pid)?'':String(record.state||'');
   }catch{return '';}
