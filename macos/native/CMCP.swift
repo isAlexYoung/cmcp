@@ -543,7 +543,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         let keys: [String: (code: UInt16, text: String)] = ["tab": (48, "\t"), "down": (125, "\u{F701}"), "escape": (53, "\u{1B}")]
         func sendMouse(_ type: NSEvent.EventType, _ point: NSPoint) {
             let moving = type == .mouseMoved
-            if let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x, y: web.bounds.height - point.y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: moving ? 0 : 1, pressure: moving ? 0 : 1) { window.sendEvent(event) }
+            if let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x, y: web.bounds.height - point.y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: moving ? 0 : 1, pressure: moving ? 0 : 1) { if moving { web.mouseMoved(with: event) } else { window.sendEvent(event) } }
         }
         func input(_ index: Int) {
             guard index < actions.count else { finishTests(error: nil); return }
