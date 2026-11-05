@@ -31,9 +31,9 @@ test('CLI connector installs beside web, forwards real file operations and recov
     }});
   let client;
   t.after(async()=>{
-    release();controller.abort();await task;if(client&&client.exitCode===null)client.kill();
-    for(const child of children)if(child.exitCode===null)child.kill('SIGKILL');
-    await Promise.all(children.filter(c=>c.exitCode===null).map(c=>once(c,'exit').catch(()=>{})));
+    release();controller.abort();await task;if(client&&client.exitCode===null&&client.signalCode===null)client.kill();
+    for(const child of children)if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');
+    await Promise.all(children.filter(c=>c.exitCode===null&&c.signalCode===null).map(c=>once(c,'exit').catch(()=>{})));
     fs.rmSync(home,{recursive:true,force:true});fs.rmSync(local,{recursive:true,force:true});
   });
   await until(()=>states.includes('ready'));
