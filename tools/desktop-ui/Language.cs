@@ -150,7 +150,7 @@ namespace CMCP {
             {"请选择私钥文件。","Choose a private key file."},
             {"打开终端","Open terminal"},
             {"网页","Web"},
-            {"切换登录方式","Switch sign-in"},
+            {"切换登录方式","Switch sign-in"},{"切换为网页登录","Switch to web sign-in"},{"切换为 SSH 登录","Switch to SSH sign-in"},
             {"切换登录方式：共享网页 / SSH","Switch sign-in: shared web / SSH"},
             {"用设置里选定的终端连接这台设备","Connect in the terminal chosen in Settings"},
             {"复制 SSH 命令（不含密码）","Copy the SSH command (no password)"},

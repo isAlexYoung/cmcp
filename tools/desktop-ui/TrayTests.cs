@@ -7,14 +7,18 @@ using System.Windows.Forms;
 
 namespace CMCP {
     internal static class TrayTests {
+        // A real screen grab, so the rounded corners and shadow Windows draws are in the picture.
         internal static void Capture(string path,bool dark){
-            L.Set("zh-CN");using(var host=new Form{ClientSize=new Size(680,320)})using(var menu=new TrayMenu(delegate{},delegate{},delegate{},delegate{},()=>dark)){
-                host.Show();menu.Sync(new[]{new TrayTarget{Name="A",Label="工作电脑",State="已连接",CanDisconnect=true,CanRename=true},new TrayTarget{Name="B",Label="desktop.example.com",State="已停止",CanConnect=true,CanRename=true}});
-                menu.ShowAt(host.PointToScreen(new Point(310,180)));var item=menu.Targets["A"];item.Select();item.ShowDropDown();Application.DoEvents();
-                Rectangle area=Rectangle.Union(menu.Menu.Bounds,item.DropDown.Bounds);using(var bitmap=new Bitmap(area.Width+8,area.Height+8)){
-                    using(var graphics=Graphics.FromImage(bitmap))graphics.Clear(Palette.Create(dark).Page);
-                    menu.Menu.DrawToBitmap(bitmap,new Rectangle(menu.Menu.Left-area.Left+4,menu.Menu.Top-area.Top+4,menu.Menu.Width,menu.Menu.Height));
-                    item.DropDown.DrawToBitmap(bitmap,new Rectangle(item.DropDown.Left-area.Left+4,item.DropDown.Top-area.Top+4,item.DropDown.Width,item.DropDown.Height));
+            L.Set("zh-CN");
+            using(var host=new Form{FormBorderStyle=FormBorderStyle.None,ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Bounds=new Rectangle(40,40,760,440),BackColor=dark?Color.FromArgb(27,36,51):Color.FromArgb(201,214,232)})
+            using(var menu=new TrayMenu(delegate{},delegate{},delegate{},delegate{},()=>dark)){
+                host.Show();
+                menu.Sync(new[]{new TrayTarget{Name="A",Label="工作电脑",State="已连接",Tone=1,CanDisconnect=true,CanRename=true,CanSwitch=true},new TrayTarget{Name="B",Label="desktop.example.com",State="已停止",CanConnect=true,CanRename=true,CanSwitch=true},new TrayTarget{Name="C",Label="香港 VPS",State="SSH",Tone=2,Ssh=true,CanConnect=true,CanRename=true,CanSwitch=true}});
+                menu.ShowAt(host.PointToScreen(new Point(340,360)));var item=menu.Targets["C"];item.Select();item.ShowDropDown();item.DropDown.Items[0].Select();
+                for(int i=0;i<6;i++){Application.DoEvents();System.Threading.Thread.Sleep(50);}
+                Rectangle area=Rectangle.Inflate(Rectangle.Union(TrayDisplay.Bounds(menu.Menu),TrayDisplay.Bounds(item.DropDown)),24,24);
+                using(var bitmap=new Bitmap(area.Width,area.Height)){
+                    using(var graphics=Graphics.FromImage(bitmap))graphics.CopyFromScreen(area.Location,Point.Empty,area.Size);
                     bitmap.Save(Path.GetFullPath(path),System.Drawing.Imaging.ImageFormat.Png);
                 }
                 menu.Menu.Close();
@@ -29,18 +33,26 @@ namespace CMCP {
                 check(form.Options.theme=="system"&&form.Preferences.dark==AppSettings.SystemDark(false,false),"main window defaults to the current system app theme");
                 var a=menu.Targets["preview-a"];var b=menu.Targets["preview-b"];
                 check(a.Text=="desktop1.example.com · 已连接"&&b.Text=="desktop2.example.com · 已停止","tray lists every cloud hostname and current connection state");
-                check(a.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"连接设备","断开设备","重命名"}),"hoverable cloud row provides exactly three target actions");
+                check(a.DropDownItems.Count==5&&a.DropDownItems.Cast<ToolStripItem>().Take(3).Select(i=>i.Text).SequenceEqual(new[]{"连接设备","断开设备","重命名"})&&a.DropDownItems[3] is ToolStripSeparator&&a.DropDownItems[4].Text==(form.Cards["preview-a"].SshActive?"切换为网页登录":"切换为 SSH 登录"),"hoverable cloud row provides three target actions and a sign-in switch");
                 check(!a.DropDownItems[0].Enabled&&a.DropDownItems[1].Enabled&&b.DropDownItems[0].Enabled&&!b.DropDownItems[1].Enabled,"tray connect and disconnect availability follows each cloud state");
                 form.HideToTray();b.DropDownItems[0].PerformClick();
                 check(!form.Visible&&form.TrayVisible&&form.Cards["preview-b"].Target.State=="connected"&&form.Cards["preview-a"].Target.State=="connected","tray connects only selected cloud without opening or hiding the resident icon");
                 b.DropDownItems[1].PerformClick();check(form.Cards["preview-b"].Target.State=="stopped"&&form.Cards["preview-a"].Target.State=="connected","tray disconnect preserves the other cloud connection");
+                bool wasSsh=form.Cards["preview-b"].SshActive;b.DropDownItems[4].PerformClick();Application.DoEvents();
+                check(form.Cards["preview-b"].SshActive!=wasSsh&&form.Cards["preview-a"].SshActive==(a.DropDownItems[4].Text=="切换为网页登录")&&b.DropDownItems[4].Text==(wasSsh?"切换为 SSH 登录":"切换为网页登录")&&!form.Visible,"tray switch changes only that device's sign-in, relabels itself and keeps the window hidden");
+                b.DropDownItems[4].PerformClick();Application.DoEvents();
+                var icon=(NotifyIcon)typeof(Manager).GetField("tray",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(form);icon.Visible=true;
+                var iconWindow=(NativeWindow)typeof(NotifyIcon).GetField("window",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(icon);
+                PostMessage(iconWindow.Handle,0x800,IntPtr.Zero,new IntPtr(0x202));Application.DoEvents();Application.DoEvents();
+                check(form.Visible&&form.WindowState!=FormWindowState.Minimized&&!menu.Menu.Visible,"a left click on the tray icon opens the main window without the menu");
+                icon.Visible=false;form.HideToTray();
                 var targets=form.Cards.Values.Select(c=>c.Target).ToList();form.Preferences.Set("preview-b","研发 & 测试","",targets);form.Cards["preview-b"].UpdatePreference(form.Preferences.Get("preview-b"));form.RefreshState();
                 check(b.Text=="研发 && 测试 · 已停止"&&b.ToolTipText=="研发 & 测试 · 已停止","tray prefers remarks and escapes menu mnemonic characters");
                 form.RestoreManager();menu.Menu.Show(form,new Point(30,70));b.ShowDropDown();Application.DoEvents();
                 form.Cards["preview-b"].Target.State="offline";form.RefreshState();Application.DoEvents();
                 check(menu.Menu.Visible&&b.DropDown.Visible&&Object.ReferenceEquals(b,menu.Targets["preview-b"])&&b.Text.Contains("等待网络恢复"),"live status refresh preserves the open tray menu and cloud submenu");
                 menu.Menu.Close();var next=form.Options.Copy();next.language="en";form.ChangeSettings(next);
-                check(menu.Targets["preview-b"].Text.Contains("Waiting for network")&&b.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"Connect device","Disconnect device","Rename"}),"tray captions and actions follow the selected interface language");
+                check(menu.Targets["preview-b"].Text.Contains("Waiting for network")&&b.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"Connect device","Disconnect device","Rename","",form.Cards["preview-b"].SshActive?"Switch to web sign-in":"Switch to SSH sign-in"}),"tray captions and actions follow the selected interface language");
                 form.OpenSettings();b.DropDownItems[2].PerformClick();Application.DoEvents();
                 check(form.Visible&&form.TrayVisible&&form.Settings==null&&form.Editor!=null&&form.Editor.TargetName=="preview-b"&&form.Editor.NameInput.Box.Focused,"tray rename opens the existing edit page and focuses the display name");
                 form.Editor.NameInput.Box.Text="Renamed cloud";form.Editor.Save.PerformClick();Application.DoEvents();
@@ -57,8 +69,8 @@ namespace CMCP {
                 var values=Enumerable.Range(0,100).Select(i=>new TrayTarget{Name="id-"+i,Label="Same note",State="已停止",CanConnect=true,CanRename=true}).ToList();menu.Sync(values);
                 check(menu.Targets.Count==100&&menu.Menu.Items.Count==104,"tray includes all one hundred supported clouds without a fixed entry cap");
                 menu.Targets["id-73"].DropDownItems[0].PerformClick();check(invoked=="id-73:connect","duplicate remarks still dispatch using the immutable cloud identity");
-                dark=true;menu.ApplySystemTheme();check(menu.Colors.Dark&&menu.Menu.BackColor==Palette.Create(true).Surface&&menu.Targets["id-73"].DropDown.BackColor==menu.Menu.BackColor,"root and nested tray menus follow dark system colors independently of app theme");
-                dark=false;menu.ApplySystemTheme();check(!menu.Colors.Dark&&menu.Menu.ForeColor==Palette.Create(false).Text,"tray reacts to switching the system back to light colors");
+                dark=true;menu.ApplySystemTheme();check(menu.Colors.Dark&&menu.Menu.BackColor==TrayLook.Create(true).Back&&menu.Targets["id-73"].DropDown.BackColor==menu.Menu.BackColor,"root and nested tray menus follow dark system colors independently of app theme");
+                dark=false;menu.ApplySystemTheme();check(!menu.Colors.Dark&&menu.Menu.ForeColor==TrayLook.Create(false).Text,"tray reacts to switching the system back to light colors");
                 menu.Sync(values.Take(1).ToList());check(menu.Targets.Count==1&&menu.Targets.ContainsKey("id-0")&&menu.Menu.Items.Count==5,"removed cloud rows disappear without leaving stale tray commands");
             }
             string state=Path.Combine(directory,"tray-defaults");Directory.CreateDirectory(state);

@@ -19,6 +19,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     var crashTimes: [Date] = []
     var trayTargets: [[String: Any]] = [], trayRows: [String: NSMenuItem] = [:], trayOrder: [String] = []
     var trayTimer: Timer?, trayRefreshing = false, trayTracking = false, trayUpdating = false
+    var trayMenu: NSMenu!
     var trayPending = Set<String>()
     let bundle = Bundle.main
     var stateDirectory: URL
@@ -45,6 +46,14 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     // from the menu bar or the Dock, the window shows this instead of WebKit's white.
     static let pageColor = NSColor(name: "CMCPPage") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 0x14 / 255.0, green: 0x17 / 255.0, blue: 0x1b / 255.0, alpha: 1) : .white
+    }
+    // Tray state colours: 1 connected, 2 SSH, anything else muted.
+    static func tone(_ tone: Int) -> NSColor { tone == 1 ? .systemGreen : tone == 2 ? .systemBlue : .secondaryLabelColor }
+    static func symbol(_ name: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 13, weight: .regular)); image?.isTemplate = true; return image
+    }
+    static func dot(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in color.setFill(); NSBezierPath(ovalIn: NSRect(x: 4.5, y: 4.5, width: 7, height: 7)).fill(); return true }
     }
     func hideWindow() { window.orderOut(nil); NSApp.setActivationPolicy(.accessory) }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -74,6 +83,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(restoreExistingWindow(_:)), name: NSNotification.Name("com.cmcp.manager.restore"), object: bundle.bundleURL.standardizedFileURL.path)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "desktopcomputer", accessibilityDescription: "CMCP")
+        // A left click opens the main window; a right click or Control-click shows the menu.
+        item.button?.target = self; item.button?.action = #selector(trayClick(_:)); item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         rebuildMenu()
         if !startup { show() }
         do {
@@ -93,12 +104,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         } catch { fail("无法准备运行环境。") }
     }
     func rebuildMenu() {
-        if item.menu == nil {
+        if trayMenu == nil {
             let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false; menu.appearance = nil
             menu.addItem(withTitle: "", action: #selector(show), keyEquivalent: "").target = self
             menu.addItem(.separator()); menu.addItem(.separator())
             menu.addItem(withTitle: "", action: #selector(quit), keyEquivalent: "").target = self
-            item.menu = menu
+            menu.items.first?.image = App.symbol("macwindow"); menu.items.last?.image = App.symbol("power")
+            trayMenu = menu
         }
         updateTrayMenu()
         let main = NSMenu(), appMenu = NSMenu(), top = NSMenuItem()
@@ -115,7 +127,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         let value = names[state] ?? ("连接异常", "Connection error"); return tr(value.0, value.1)
     }
     func updateTrayMenu() {
-        guard let menu = item?.menu else { return }
+        guard let menu = trayMenu else { return }
         menu.items.first?.title = tr("打开主界面", "Open main window"); menu.items.last?.title = tr("退出程序", "Exit application")
         let ids = trayTargets.compactMap { $0["id"] as? String }
         if ids != trayOrder && !trayTracking {
@@ -125,9 +137,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 if trayRows[id] == nil {
                     let row = NSMenuItem(title: "", action: nil, keyEquivalent: ""), sub = NSMenu()
                     sub.autoenablesItems = false; sub.appearance = nil
-                    for selector in [#selector(trayConnect(_:)), #selector(trayDisconnect(_:)), #selector(trayRename(_:))] {
-                        let command = NSMenuItem(title: "", action: selector, keyEquivalent: ""); command.target = self; command.representedObject = id; sub.addItem(command)
+                    for (selector, symbol) in [(#selector(trayConnect(_:)), "play"), (#selector(trayDisconnect(_:)), "stop"), (#selector(trayRename(_:)), "pencil")] {
+                        let command = NSMenuItem(title: "", action: selector, keyEquivalent: ""); command.target = self; command.representedObject = id; command.image = App.symbol(symbol); sub.addItem(command)
                     }
+                    // Switches between the shared web page and SSH, like the switch on the card.
+                    sub.addItem(.separator())
+                    let change = NSMenuItem(title: "", action: #selector(traySwitch(_:)), keyEquivalent: ""); change.target = self; change.representedObject = id; sub.addItem(change)
                     row.submenu = sub; trayRows[id] = row
                 }
                 menu.insertItem(trayRows[id]!, at: index + 2)
@@ -136,16 +151,30 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         }
         if ids.isEmpty && !trayTracking && menu.items.count == 4 { let empty = NSMenuItem(title: "", action: nil, keyEquivalent: ""); empty.identifier = NSUserInterfaceItemIdentifier("empty"); empty.isEnabled = false; menu.insertItem(empty, at: 2) }
         if let empty = menu.items.first(where: { $0.identifier?.rawValue == "empty" }) { empty.title = tr("暂无设备", "No devices") }
-        for target in trayTargets {
-            guard let id = target["id"] as? String, let row = trayRows[id], let sub = row.submenu else { continue }
-            let state = target["state"] as? String ?? "stopped", enabled = target["enabled"] as? Bool == true
+        // Names sit on the left and states line up on the right, like the Windows tray.
+        let font = NSFont.menuFont(ofSize: 14), small = NSFont.menuFont(ofSize: 13)
+        let rows: [(target: [String: Any], id: String, label: String, state: String, tone: Int)] = trayTargets.compactMap { target in
+            guard let id = target["id"] as? String else { return nil }
+            let state = target["state"] as? String ?? "stopped", enabled = target["enabled"] as? Bool == true, ssh = target["ssh"] as? Bool == true
+            return (target, id, target["label"] as? String ?? "CMCP", ssh && !enabled ? "SSH" : trayState(state), ssh && !enabled ? 2 : state == "connected" ? 1 : 0)
+        }
+        let column = max(220, rows.map { ($0.label as NSString).size(withAttributes: [.font: font]).width + ($0.state as NSString).size(withAttributes: [.font: small]).width + 36 }.max() ?? 0)
+        for shown in rows {
+            guard let row = trayRows[shown.id], let sub = row.submenu else { continue }
+            let target = shown.target, id = shown.id, state = target["state"] as? String ?? "stopped", enabled = target["enabled"] as? Bool == true
             let ssh = target["ssh"] as? Bool == true
-            row.title = (target["label"] as? String ?? "CMCP") + " · " + (ssh && !enabled ? "SSH" : trayState(state)); row.toolTip = row.title
+            row.title = shown.label + " · " + shown.state; row.toolTip = row.title
+            let paragraph = NSMutableParagraphStyle(); paragraph.tabStops = [NSTextTab(textAlignment: .right, location: ceil(column))]; paragraph.lineBreakMode = .byTruncatingMiddle
+            let title = NSMutableAttributedString(string: shown.label + "\t", attributes: [.font: font, .paragraphStyle: paragraph])
+            title.append(NSAttributedString(string: shown.state, attributes: [.font: small, .paragraphStyle: paragraph, .foregroundColor: App.tone(shown.tone)]))
+            row.attributedTitle = title; row.image = App.dot(shown.tone == 0 ? .tertiaryLabelColor : App.tone(shown.tone))
             let active = ["connected", "connecting", "configuring", "waiting-login", "recovering", "unstable"].contains(state)
             let blocked = !ready || exitPending || trayUpdating || trayPending.contains(id)
             sub.items[0].title = tr("连接设备", "Connect device"); sub.items[0].isEnabled = !blocked && (ssh || !active)
             sub.items[1].title = tr("断开设备", "Disconnect device"); sub.items[1].isEnabled = !blocked && enabled
             sub.items[2].title = tr("重命名", "Rename"); sub.items[2].isEnabled = !blocked
+            sub.items[4].title = ssh ? tr("切换为网页登录", "Switch to web sign-in") : tr("切换为 SSH 登录", "Switch to SSH sign-in")
+            sub.items[4].image = App.symbol(ssh ? "globe" : "terminal"); sub.items[4].isEnabled = !blocked
         }
     }
     func refreshTray(_ completion: (() -> Void)? = nil) {
@@ -167,14 +196,21 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             self.updateTrayMenu(); completion?()
         }
     }
-    func menuNeedsUpdate(_ menu: NSMenu) { if menu === item.menu && !trayTracking { updateTrayMenu() } }
-    func menuWillOpen(_ menu: NSMenu) { if menu === item.menu { trayTracking = true; refreshTray() } }
-    func menuDidClose(_ menu: NSMenu) { if menu === item.menu { trayTracking = false; updateTrayMenu() } }
+    func menuNeedsUpdate(_ menu: NSMenu) { if menu === trayMenu && !trayTracking { updateTrayMenu() } }
+    func menuWillOpen(_ menu: NSMenu) { if menu === trayMenu { trayTracking = true; refreshTray() } }
+    func menuDidClose(_ menu: NSMenu) { if menu === trayMenu { trayTracking = false; item.menu = nil; updateTrayMenu() } }
+    @objc func trayClick(_ sender: Any?) {
+        guard let event = NSApp.currentEvent, event.type == .rightMouseUp || event.modifierFlags.contains(.control) else { show(); return }
+        // The menu is attached only while it is open, so it keeps the native position under the icon.
+        item.menu = trayMenu; item.button?.performClick(nil); item.menu = nil
+    }
     func trayAction(_ sender: NSMenuItem, route: String) {
         guard let id = sender.representedObject as? String, let row = trayRows[id], let sub = row.submenu else { return }
-        let index = route == "stop" ? 1 : 0; guard sub.items[index].isEnabled else { return }
+        let index = route == "stop" ? 1 : route == "login" ? 4 : 0; guard sub.items[index].isEnabled else { return }
         trayPending.insert(id); updateTrayMenu()
-        request("/api/targets/" + route, ["id": id]) { [weak self] result in
+        var body: [String: Any] = ["id": id]
+        if route == "login" { body["active"] = trayTargets.first { $0["id"] as? String == id }?["ssh"] as? Bool != true }
+        request("/api/targets/" + route, body) { [weak self] result in
             guard let self = self else { return }; self.trayPending.remove(id)
             if case .failure = result { self.show(); self.web.evaluateJavaScript("window.cmcpTrayError()", completionHandler: nil) }
             self.refreshTray()
@@ -185,6 +221,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         trayAction(sender, route: ssh ? "terminal" : "start")
     }
     @objc func trayDisconnect(_ sender: NSMenuItem) { trayAction(sender, route: "stop") }
+    @objc func traySwitch(_ sender: NSMenuItem) { trayAction(sender, route: "login") }
     @objc func trayRename(_ sender: NSMenuItem) {
         guard sender.isEnabled, let id = sender.representedObject as? String, let bytes = try? JSONSerialization.data(withJSONObject: [id]), let args = String(data: bytes, encoding: .utf8) else { return }
         show(); web.evaluateJavaScript("window.cmcpRenameTarget(..." + args + ")", completionHandler: nil)
@@ -453,20 +490,23 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         testResults.append("reopening restores the native window without replacing its backend process")
         guard item.isVisible, trayTargets.count == 2, trayRows.count == 2 else { finishTests(error: "Resident tray cloud list missing"); return }
         testResults.append("resident menu bar icon lists every cloud")
-        guard let nativeMenu = item.menu, let button = item.button, button.window != nil, nativeMenu.delegate === self else { finishTests(error: "Status menu must remain attached to the native menu bar button"); return }
+        guard let nativeMenu = trayMenu, let button = item.button, button.window != nil, nativeMenu.delegate === self, item.menu == nil, button.action == #selector(trayClick(_:)), button.target === self else { finishTests(error: "Status menu must open from the native menu bar button"); return }
         menuNeedsUpdate(nativeMenu)
-        guard item.menu === nativeMenu, !trayTracking else { finishTests(error: "Preparing the tray menu changed its native anchor"); return }
+        guard item.menu == nil, trayMenu === nativeMenu, !trayTracking else { finishTests(error: "Preparing the tray menu changed its native anchor"); return }
         testResults.append("tray menu prepares content while retaining its native status button anchor")
         let unrelated = NSMenu(); menuWillOpen(unrelated); menuDidClose(unrelated)
-        guard item.menu === nativeMenu, !trayTracking else { finishTests(error: "Another menu changed tray tracking"); return }
+        guard item.menu == nil, trayMenu === nativeMenu, !trayTracking else { finishTests(error: "Another menu changed tray tracking"); return }
         testResults.append("unrelated menus cannot change native tray tracking or positioning")
-        guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接设备", "Connect device"), tr("断开设备", "Disconnect device"), tr("重命名", "Rename")] }) else { finishTests(error: "Tray submenu actions missing"); return }
-        testResults.append("native cloud submenus expose connect disconnect and rename")
+        hideWindow(); trayClick(nil)
+        guard window.isVisible, NSApp.activationPolicy() == .regular, item.menu == nil, !trayTracking else { finishTests(error: "A left click on the menu bar icon must open the main window"); return }
+        testResults.append("a left click on the menu bar icon opens the main window without the menu")
+        guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接设备", "Connect device"), tr("断开设备", "Disconnect device"), tr("重命名", "Rename"), "", tr("切换为 SSH 登录", "Switch to SSH sign-in")] && $0.submenu?.items[3].isSeparatorItem == true }) else { finishTests(error: "Tray submenu actions missing"); return }
+        testResults.append("native cloud submenus expose connect disconnect rename and the sign-in switch")
         let savedTargets = trayTargets, firstID = trayTargets[0]["id"] as! String, firstRow = trayRows[trayTargets[0]["id"] as! String]
         trayTargets[0]["label"] = "Tray note"; trayTargets[0]["state"] = "connected"; trayTargets[0]["enabled"] = true; updateTrayMenu()
-        guard trayRows[firstID] === firstRow, firstRow?.title == "Tray note · " + tr("已连接", "Connected"), firstRow?.submenu?.items[0].isEnabled == false, firstRow?.submenu?.items[1].isEnabled == true else { finishTests(error: "Tray status refresh replaced rows or lost the display name"); return }
+        guard trayRows[firstID] === firstRow, firstRow?.toolTip == "Tray note · " + tr("已连接", "Connected"), firstRow?.attributedTitle?.string == "Tray note\t" + tr("已连接", "Connected"), firstRow?.image != nil, firstRow?.submenu?.items[0].isEnabled == false, firstRow?.submenu?.items[1].isEnabled == true else { finishTests(error: "Tray status refresh replaced rows or lost the display name"); return }
         trayTargets = savedTargets; updateTrayMenu(); testResults.append("tray updates remarks and states without replacing native rows")
-        guard item.menu?.appearance == nil, window.appearance == nil else { finishTests(error: "Default appearance must follow the system"); return }
+        guard trayMenu.appearance == nil, window.appearance == nil else { finishTests(error: "Default appearance must follow the system"); return }
         testResults.append("native tray and fresh main window follow system appearance")
         func shade(_ name: NSAppearance.Name) -> [Int] {
             var color = NSColor.clear
@@ -492,7 +532,20 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 self.testResults.append("native WebKit check " + String(index + 1)); next(index + 1)
             }
         }
-        next(0)
+        // The switch saves through the backend, then the refreshed menu offers the way back.
+        func switched(_ ssh: Bool, then done: @escaping () -> Void) {
+            guard let change = firstRow?.submenu?.items[4] else { finishTests(error: "Tray switch missing"); return }
+            traySwitch(change); var waited = 0
+            Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+                let current = self.trayTargets.first { $0["id"] as? String == firstID }?["ssh"] as? Bool == true
+                if current == ssh && self.trayPending.isEmpty && !self.trayRefreshing && change.title == (ssh ? self.tr("切换为网页登录", "Switch to web sign-in") : self.tr("切换为 SSH 登录", "Switch to SSH sign-in")) { timer.invalidate(); done(); return }
+                waited += 1; if waited > 100 { timer.invalidate(); self.finishTests(error: "Tray switch did not change the sign-in method") }
+            }
+        }
+        switched(true) { switched(false) {
+            guard self.window.isVisible, self.item.menu == nil else { self.finishTests(error: "Tray switch changed the window or menu anchor"); return }
+            self.testResults.append("tray switch changes the device between web and SSH sign-in and relabels itself"); next(0)
+        } }
     }
     func saveSnapshot(_ name: String, then done: @escaping () -> Void) {
         web.takeSnapshot(with: nil) { image, error in
