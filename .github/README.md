@@ -67,7 +67,7 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 - **Card-based interface**: custom names and icons, drag to reorder, collapsible details.
 - **Connection recovery**: reconnection, request waiting, result lookup and de-duplication after a dropped connection.
 - **Easy sign-in**: share a browser sign-in, or save the password encrypted and sign in automatically.
-- **SSH sign-in**: open your chosen terminal connected to a VPS with one click, using a password or a key. A device can have SSH, shared web sign-in or both. SSH opens a terminal only; it does not carry the MCP connection.
+- **SSH sign-in**: open your chosen terminal connected to a VPS with one click, using a password or a key. A device can have SSH, shared web sign-in or both. Opening the terminal first starts a background SSH channel for that device, which carries the MCP connection; the terminal you see is a separate SSH session.
 - **Close on disconnect**: Settings → Connections picks the browser for shared web pages and the terminal for SSH, each shown with its own app icon. Disconnecting a device can also close its web page (with Edge, Chrome or Firefox, which then open it in a separate window with its own sign-in) and its terminal window. Both are off by default.
 - **Personalization**: light and dark themes, English and Simplified Chinese.
 - **Desktop integration**: system tray (menu bar on macOS), start at login, desktop shortcut and in-app updates.
