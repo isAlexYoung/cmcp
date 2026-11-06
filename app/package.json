@@ -1,6 +1,6 @@
 {
   "name": "cmcp-win",
-  "version": "4.16.1",
+  "version": "4.17.0",
   "description": "Windows PC MCP bridge for Claude on the cloud computer",
   "private": true,
   "keywords": [],
