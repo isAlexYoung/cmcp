@@ -13,6 +13,11 @@ if ($ManagerMode) {
     . (Join-Path $PSScriptRoot 'manager-events.ps1')
     if (!$TargetName) { Send-ManagerEvent 'error' '必须选择一台云电脑。'; exit 1 }
 }
+# Once this device has stopped, its page window closes too when Settings ask for it.
+function Complete-TargetStop {
+    try { $null = Close-CloudPage $TargetName } catch { Write-ErrorLog '关闭网页窗口' $_ }
+    exit 0
+}
 try {
     Initialize-StateDir
     if ($TargetName) {
@@ -22,9 +27,9 @@ try {
         $deadline = [DateTime]::UtcNow.AddSeconds(12)
         do {
             $status = Get-LinkStatus
-            if (!$status -or !$status.pid -or !(Get-Process -Id ([int]$status.pid) -ErrorAction SilentlyContinue)) { exit 0 }
+            if (!$status -or !$status.pid -or !(Get-Process -Id ([int]$status.pid) -ErrorAction SilentlyContinue)) { Complete-TargetStop }
             $entry = $status.targets.($TargetName)
-            if ($entry -and $entry.state -eq 'stopped' -and $entry.revision -eq $control.revision) { exit 0 }
+            if ($entry -and $entry.state -eq 'stopped' -and $entry.revision -eq $control.revision) { Complete-TargetStop }
             Start-Sleep -Milliseconds 200
         } while ([DateTime]::UtcNow -lt $deadline)
         throw '此云电脑的停止开关已保存，但后台未及时确认。其他连接未被终止；请查看日志。'

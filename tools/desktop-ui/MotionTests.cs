@@ -58,6 +58,7 @@ namespace CMCP {
                     language.Menu.Close(ToolStripDropDownCloseReason.AppClicked);language.NoteClosing(ToolStripDropDownCloseReason.AppClicked,new Point(-5000,-5000));language.TestClick();
                     check(language.IsOpen,"closing by clicking elsewhere does not block the next click on the field");
                     language.Menu.Close(ToolStripDropDownCloseReason.ItemClicked);Application.DoEvents();
+                    page.ShowConnect();check(NothingOverlaps(page.Viewport.Controls[0])&&page.ConnectTab.Selected&&!page.GeneralTab.Selected,"connection page controls do not cover each other");
                     page.ShowAbout();check(NothingOverlaps(page.Viewport.Controls[0]),"about page controls do not cover each other");
                 }
                 form.CloseSettings();

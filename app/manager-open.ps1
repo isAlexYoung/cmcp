@@ -22,7 +22,7 @@ try {
             if (!(Open-SharedCloudBrowser $TargetName)) { Show-Info '请先点击“启动连接”，准备共享网页入口。'; exit 1 }
         } else {
             $safeUrl = Get-NormalizedUrl $target.url
-            Start-Process -FilePath $safeUrl
+            Open-CloudPage $TargetName $safeUrl
         }
     }
 } catch { Show-Error ('打开云电脑失败：' + (Get-ChineseError $_)); exit 1 }

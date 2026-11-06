@@ -21,6 +21,11 @@ namespace CMCP {
             File.WriteAllText(AppSettings.PathFor(state),"{\"schema\":1,\"futureOption\":\"keep\"}");options.language="en";options.closeToTray=true;options.Save(state);
             var loaded=AppSettings.Load(state);check(loaded.language=="en"&&loaded.closeToTray&&File.ReadAllText(AppSettings.PathFor(state)).Contains("futureOption"),"settings persist and preserve future fields without touching credentials");
             File.WriteAllText(AppSettings.PathFor(state),"{");bool rejected=false;try{loaded.Save(state);}catch{rejected=true;}check(rejected&&File.ReadAllText(AppSettings.PathFor(state))=="{","malformed application preferences are preserved");File.Delete(AppSettings.PathFor(state));
+            File.WriteAllText(AppSettings.PathFor(state),"{\"schema\":1,\"browser\":\"netscape\",\"closeWeb\":true,\"closeTerminal\":true}");var picked=AppSettings.Load(state);
+            check(!picked.ReadError&&picked.browser==""&&picked.closeWeb&&picked.closeTerminal,"an unknown browser falls back to the system default and the close choices load");
+            picked.browser="edge";picked.closeWeb=false;picked.Save(state);var reread=AppSettings.Load(state);
+            check(reread.browser=="edge"&&!reread.closeWeb&&reread.closeTerminal&&reread.Copy().browser=="edge","the browser and close choices persist and copy");
+            File.WriteAllText(AppSettings.PathFor(state),"{\"schema\":1,\"closeWeb\":\"yes\"}");check(AppSettings.Load(state).ReadError,"a malformed close choice is refused like other settings");File.Delete(AppSettings.PathFor(state));
             string registry=@"Software\CMCP-SettingsTests-"+Guid.NewGuid().ToString("N");
             try{
                 StartupRegistration.Set(Application.ExecutablePath,true,registry);using(var key=Registry.CurrentUser.OpenSubKey(registry))check(Convert.ToString(key.GetValue(StartupRegistration.Name))=="\""+Application.ExecutablePath+"\" --startup","autostart registration quotes actual executable and uses tray startup flag");

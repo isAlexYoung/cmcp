@@ -271,6 +271,73 @@ function Get-CloudAuthMode([string]$url) {
     return $mode
 }
 
+# The browser chosen in Settings > Connections (tools/desktop-ui/AppSettings.cs finds the same programs).
+function Find-BrowserProgram([string]$id) {
+    $known = @{ edge = @('msedge.exe', 'Microsoft\Edge\Application\msedge.exe'); chrome = @('chrome.exe', 'Google\Chrome\Application\chrome.exe'); firefox = @('firefox.exe', 'Mozilla Firefox\firefox.exe') }
+    if (!$known.ContainsKey($id)) { return $null }
+    foreach ($hive in @('HKCU', 'HKLM')) {
+        try {
+            $path = [string](Get-ItemProperty -LiteralPath ($hive + ':\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\' + $known[$id][0]) -ErrorAction Stop).'(default)'
+            $path = $path.Trim().Trim('"')
+            if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { return $path }
+        } catch { }
+    }
+    foreach ($root in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $env:LOCALAPPDATA)) {
+        if (!$root) { continue }
+        $path = Join-Path $root $known[$id][1]
+        if (Test-Path -LiteralPath $path -PathType Leaf) { return $path }
+    }
+    return $null
+}
+
+function Get-BrowserChoice {
+    try { $settings = Read-JsonFile (Join-Path $script:StateDir 'application-preferences.json') } catch { return $null }
+    if (!$settings -or [string]$settings.browser -notin @('edge', 'chrome', 'firefox')) { return $null }
+    $program = Find-BrowserProgram ([string]$settings.browser)
+    if (!$program) { return $null }
+    return [pscustomobject]@{ Id = [string]$settings.browser; Path = $program; Close = ($settings.closeWeb -eq $true) }
+}
+
+# A page that closes on disconnect gets a profile of its own per device, so its window is a
+# browser process of its own that Close-CloudPage can find by this folder on its command line.
+function Get-CloudPageFolder([string]$name, [string]$browser) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($name))[0..7] | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
+    return Join-Path (Join-Path $script:StateDir 'browser-windows') ($browser + '-' + $hash)
+}
+
+function Open-CloudPage([string]$name, [string]$url) {
+    $browser = Get-BrowserChoice
+    if (!$browser) { Start-Process -FilePath $url; return }
+    if (!$browser.Close) { Start-Process -FilePath $browser.Path -ArgumentList @('"' + $url + '"'); return }
+    $folder = Get-CloudPageFolder $name $browser.Id
+    $null = New-Item -ItemType Directory -Force -Path $folder
+    if ($browser.Id -eq 'firefox') { $arguments = @('-profile', ('"' + $folder + '"'), '-new-window', ('"' + $url + '"')) }
+    else { $arguments = @(('--user-data-dir="' + $folder + '"'), '--no-first-run', '--no-default-browser-check', '--hide-crash-restore-bubble', '--new-window', ('"' + $url + '"')) }
+    Start-Process -FilePath $browser.Path -ArgumentList $arguments
+}
+
+# Closes this device's page windows when Settings ask for it. Returns how many processes ended.
+function Close-CloudPage([string]$name) {
+    $browser = Get-BrowserChoice
+    if (!$browser -or !$browser.Close) { return 0 }
+    $folders = @('edge', 'chrome', 'firefox' | ForEach-Object { Get-CloudPageFolder $name $_ })
+    $owned = {
+        param($line)
+        if (!$line) { return $false }
+        foreach ($folder in $folders) { if ($line.IndexOf($folder, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true } }
+        return $false
+    }
+    $found = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe' OR Name='firefox.exe'" | Where-Object { & $owned $_.CommandLine })
+    if (!$found.Count) { return 0 }
+    # Politely first, like the window's close button, so the browser can save its state.
+    foreach ($item in $found) { try { $process = Get-Process -Id $item.ProcessId -ErrorAction Stop; if ($process.MainWindowHandle -ne [IntPtr]::Zero) { [void]$process.CloseMainWindow() } } catch { } }
+    $deadline = [DateTime]::UtcNow.AddSeconds(4)
+    while ([DateTime]::UtcNow -lt $deadline -and @($found | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }).Count) { Start-Sleep -Milliseconds 200 }
+    foreach ($item in $found) { Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue }
+    return $found.Count
+}
+
 function Open-SharedCloudBrowser([string]$name = '') {
     try { $entries = Read-JsonFile (Join-Path $StateDir 'browser-entries.json') } catch { return $false }
     if (!$entries -or !$entries.pid -or !(Get-Process -Id ([int]$entries.pid) -ErrorAction SilentlyContinue)) { return $false }
@@ -279,7 +346,7 @@ function Open-SharedCloudBrowser([string]$name = '') {
         if ($name -and $entry.name -ne $name) { continue }
         $uri = $null
         if ([Uri]::TryCreate([string]$entry.launchUrl, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -eq 'http' -and $uri.Host -eq '127.0.0.1' -and $uri.AbsolutePath -eq '/__mcp/open' -and $uri.Fragment -match '^#[A-Za-z0-9_-]{43}$') {
-            Start-Process -FilePath $uri.AbsoluteUri
+            Open-CloudPage ([string]$entry.name) $uri.AbsoluteUri
             $opened = $true
         }
     }

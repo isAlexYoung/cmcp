@@ -144,9 +144,11 @@ namespace CMCP {
             options.Add("--");options.Add(login.host);
             return options;
         }
-        internal static string PowerShellScript(SshLogin login,string ssh,string askpass,McpLaunch mcp=null){
+        // sessions: the folder where a terminal that closes on disconnect records its shell (SshSessions).
+        internal static string PowerShellScript(SshLogin login,string ssh,string askpass,McpLaunch mcp=null,string sessions=null){
             var text=new StringBuilder();bool secret=HasSecret(login)||mcp!=null;
             text.Append("$Host.UI.RawUI.WindowTitle="+QuotePowerShell(login.username+"@"+login.host)+"\n");
+            if(sessions!=null)text.Append("$cmcpSession=Join-Path "+QuotePowerShell(sessions)+" ([string]$PID+'.pid');[void](New-Item -ItemType Directory -Force -Path "+QuotePowerShell(sessions)+");Set-Content -LiteralPath $cmcpSession -Value ''\n");
             if(secret){
                 text.Append("$env:SSH_ASKPASS="+QuotePowerShell(askpass)+";$env:SSH_ASKPASS_REQUIRE='force';$env:"+SshAskpass.Variable+"="+QuotePowerShell(login.name)+"\n");
                 string state=Environment.GetEnvironmentVariable("CMCP_STATE_DIR");
@@ -158,13 +160,18 @@ namespace CMCP {
                 text.Append("if($LASTEXITCODE -ne 0){Write-Warning 'MCP 尚未就绪；仍可进入 SSH 终端检查服务器。'}\n");
             }
             text.Append("& "+QuotePowerShell(ssh)+" "+String.Join(" ",Options(login,p=>p).Select(QuotePowerShell))+"\n");
+            if(sessions!=null)text.Append("$cmcpCode=$LASTEXITCODE\n");
             // The shell stays open afterwards; another ssh typed there must not receive this device's password.
             if(secret)text.Append("Remove-Item Env:SSH_ASKPASS,Env:SSH_ASKPASS_REQUIRE,Env:"+SshAskpass.Variable+" -ErrorAction SilentlyContinue\n");
+            // A disconnect ends ssh with code 0 and the window closes. A failed login waits, so its message can be read.
+            if(sessions!=null)text.Append("Remove-Item -LiteralPath $cmcpSession -ErrorAction SilentlyContinue\nif($cmcpCode -ne 0){[void](Read-Host "+QuotePowerShell(L.Text("SSH 已结束，按回车键关闭窗口"))+")}\nexit 0\n");
             return text.ToString();
         }
-        internal static string BashScript(SshLogin login,string askpass,McpLaunch mcp=null){
+        internal static string BashScript(SshLogin login,string askpass,McpLaunch mcp=null,string sessions=null){
             Func<string,string> slashes=p=>p.Replace('\\','/');
             var text=new StringBuilder();bool secret=HasSecret(login)||mcp!=null;
+            // The Windows PID of this bash, which is the parent of the ssh it runs.
+            if(sessions!=null)text.Append("mkdir -p "+QuoteBash(slashes(sessions))+"; cmcp_session="+QuoteBash(slashes(sessions))+"/$(cat /proc/$$/winpid).pid; : > \"$cmcp_session\"; ");
             if(secret){
                 text.Append("export SSH_ASKPASS="+QuoteBash(slashes(askpass))+" SSH_ASKPASS_REQUIRE=force "+SshAskpass.Variable+"="+QuoteBash(login.name)+"; ");
                 string state=Environment.GetEnvironmentVariable("CMCP_STATE_DIR");
@@ -175,21 +182,24 @@ namespace CMCP {
                 text.Append(QuoteBash(slashes(mcp.Node))+" "+String.Join(" ",mcp.Arguments(login,"ssh").Select((v,i)=>QuoteBash(i==0||i==2?slashes(v):v)))+" || printf '%s\\n' 'MCP 尚未就绪；仍可进入 SSH 终端检查服务器。'; ");
             }
             text.Append("ssh "+String.Join(" ",Options(login,slashes).Select(QuoteBash))+"; ");
+            if(sessions!=null)text.Append("cmcp_code=$?; ");
             if(secret)text.Append("unset SSH_ASKPASS SSH_ASKPASS_REQUIRE "+SshAskpass.Variable+"; ");
-            text.Append("exec bash -l");
+            if(sessions!=null)text.Append("rm -f \"$cmcp_session\"; [ $cmcp_code -eq 0 ] || read -r -p "+QuoteBash(L.Text("SSH 已结束，按回车键关闭窗口"))+"; exit 0");
+            else text.Append("exec bash -l");
             return text.ToString();
         }
         internal static string Encoded(string script){return Convert.ToBase64String(Encoding.Unicode.GetBytes(script));}
-        internal static ProcessStartInfo Start(TerminalChoice terminal,SshLogin login,string ssh,string askpass,McpLaunch mcp=null){
+        // With sessions the shell ends with ssh, so the window can close; without, it stays for the user.
+        internal static ProcessStartInfo Start(TerminalChoice terminal,SshLogin login,string ssh,string askpass,McpLaunch mcp=null,string sessions=null){
             string home=Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             // Through the shell, so every terminal gets a window of its own whoever started this program.
             var start=new ProcessStartInfo(terminal.Path){UseShellExecute=true,WorkingDirectory=home};
-            string shell=" -NoLogo -NoProfile",encoded=terminal.Id=="gitbash"?"":" -EncodedCommand "+Encoded(PowerShellScript(login,ssh,askpass,mcp));
+            string shell=" -NoLogo -NoProfile",stay=sessions==null?" -NoExit":"",encoded=terminal.Id=="gitbash"?"":" -EncodedCommand "+Encoded(PowerShellScript(login,ssh,askpass,mcp,sessions));
             switch(terminal.Id){
-                case "wt":start.Arguments="-w 0 new-tab --title \""+login.username+"@"+login.host+"\" -d \""+home+"\" -- \""+Terminals.WindowsPowerShell+"\""+shell+" -NoExit"+encoded;break;
-                case "cmd":start.Arguments="/d /k \"\""+Terminals.WindowsPowerShell+"\""+shell+encoded+"\"";break;
-                case "gitbash":start.Arguments="--cd-to-home -c \""+BashScript(login,askpass,mcp).Replace("\"","\\\"")+"\"";break;
-                default:start.Arguments=shell.TrimStart()+" -NoExit"+encoded;break;
+                case "wt":start.Arguments="-w 0 new-tab --title \""+login.username+"@"+login.host+"\" -d \""+home+"\" -- \""+Terminals.WindowsPowerShell+"\""+shell+stay+encoded;break;
+                case "cmd":start.Arguments=(sessions==null?"/d /k":"/d /c")+" \"\""+Terminals.WindowsPowerShell+"\""+shell+encoded+"\"";break;
+                case "gitbash":start.Arguments="--cd-to-home -c \""+BashScript(login,askpass,mcp,sessions).Replace("\"","\\\"")+"\"";break;
+                default:start.Arguments=shell.TrimStart()+stay+encoded;break;
             }
             return start;
         }

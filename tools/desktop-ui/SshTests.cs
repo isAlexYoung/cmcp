@@ -16,7 +16,7 @@ namespace CMCP {
         internal static void Run(string temp,Action<bool,string> check){
             Validation(check);Storage(temp,check);Answers(check);Commands(check);
             Channel(temp,check);
-            RealScript(temp,check);RealAskpass(temp,check);
+            RealScript(temp,check);RealSessions(temp,check);RealAskpass(temp,check);
             Editor(temp,check);Window(check);RealFiles(temp,check);CardDisplay(check);
         }
         static void Validation(Action<bool,string> check){
@@ -81,12 +81,36 @@ namespace CMCP {
             check(prepared.Contains("SSH_ASKPASS_REQUIRE='force'")&&!prepared.Contains("TESTONLY")&&SshCommand.BashScript(without,@"C:\CMCP.exe",mcp).Contains("ssh-terminal.mjs"),"key, password and Git Bash terminals share MCP preflight without inline secrets");
             var found=Terminals.Detect();
             check(found.Any(t=>t.Id=="powershell")&&found.Any(t=>t.Id=="cmd")&&found.All(t=>File.Exists(t.Path)),"the built-in terminals are always offered and only installed ones are listed");
+            string sessions=@"C:\state\ssh-sessions\abc";
+            string closing=SshCommand.PowerShellScript(withSecret,@"C:\ssh.exe",@"C:\CMCP.exe",null,sessions);
+            check(closing.Contains("$cmcpSession=Join-Path 'C:\\state\\ssh-sessions\\abc' ([string]$PID+'.pid')")&&closing.IndexOf("$cmcpSession=")<closing.IndexOf("& 'C:\\ssh.exe'")&&closing.Contains("Read-Host")&&closing.TrimEnd().EndsWith("exit 0"),"a terminal that closes on disconnect records its shell first and ends after ssh");
+            var wtClose=SshCommand.Start(choice("wt"),withSecret,@"C:\ssh.exe",@"C:\CMCP.exe",null,sessions);
+            var cmdClose=SshCommand.Start(choice("cmd"),withSecret,@"C:\ssh.exe",@"C:\CMCP.exe",null,sessions);
+            var shellClose=SshCommand.Start(choice("pwsh"),withSecret,@"C:\ssh.exe",@"C:\CMCP.exe",null,sessions);
+            check(wt.Arguments.Contains("-NoExit")&&!wtClose.Arguments.Contains("-NoExit")&&cmdClose.Arguments.StartsWith("/d /c ")&&!shellClose.Arguments.Contains("-NoExit")&&Decoded(wtClose.Arguments).Contains("$cmcpSession"),"with closing on, no terminal keeps its shell open after ssh");
+            string bashClose=SshCommand.BashScript(withSecret,@"C:\CMCP.exe",null,sessions);
+            check(bashClose.Contains("/proc/$$/winpid")&&bashClose.Contains("'C:/state/ssh-sessions/abc'")&&bashClose.EndsWith("exit 0")&&!bashClose.Contains("exec bash -l"),"Git Bash records its Windows PID and ends after ssh when closing is on");
             check(Terminals.Resolve("wt",new List<TerminalChoice>{choice("cmd")}).Id=="cmd"&&Terminals.Resolve("cmd",new List<TerminalChoice>{choice("wt"),choice("cmd")}).Id=="cmd","an uninstalled choice falls back and a present choice is kept");
         }
         static Process Launch(string file,string arguments,IDictionary<string,string> variables){
             var start=new ProcessStartInfo(file,arguments){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,StandardOutputEncoding=Encoding.UTF8};
             foreach(var pair in variables)start.EnvironmentVariables[pair.Key]=pair.Value;
             return Process.Start(start);
+        }
+        // A real shell with ping standing in for ssh: closing ends only the child named ssh.exe, with code 0.
+        static void RealSessions(string temp,Action<bool,string> check){
+            string state=Path.Combine(temp,"ssh-sessions-real"),folder=SshSessions.Folder(state,"dev'ice");Directory.CreateDirectory(folder);
+            string fake=Path.Combine(temp,"ssh.exe");File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"PING.EXE"),fake,true);
+            File.WriteAllText(Path.Combine(folder,"999999.pid"),"");
+            using(var shell=Launch(Terminals.WindowsPowerShell,"-NoLogo -NoProfile -Command \"& "+SshCommand.QuotePowerShell(fake)+" -n 60 127.0.0.1 | Out-Null; exit $LASTEXITCODE\"",new Dictionary<string,string>())){
+                shell.StandardInput.Close();
+                File.WriteAllText(Path.Combine(folder,shell.Id+".pid"),"");
+                int closed=0;for(int i=0;i<100&&closed==0;i++){System.Threading.Thread.Sleep(100);closed=SshSessions.Close(state,"dev'ice");}
+                bool ended=shell.WaitForExit(10000);
+                if(!ended)shell.Kill();
+                check(closed==1&&ended&&shell.ExitCode==0,"stopping ends the ssh inside a recorded terminal, which then exits normally");
+            }
+            check(!File.Exists(Path.Combine(folder,"999999.pid"))&&SshSessions.Close(state,"other device")==0,"a record whose shell has gone is removed and other devices are never touched");
         }
         // The real shell with a stand-in for ssh: every value must arrive as one argument, and the variables must be gone afterwards.
         static void RealScript(string temp,Action<bool,string> check){
@@ -229,6 +253,11 @@ namespace CMCP {
                 stopWorks=true;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
                 check(stops.Count==2&&stops.All(id=>id=="preview-b")&&b.StatusText.Text=="ssh · 已停止"&&!b.Details.Stop.Enabled&&b.Target.State==state,"stopping affects only this device's SSH channel, never its web connection");
                 b.Details.Stop.PerformClick();Pump();check(stops.Count==2,"there is nothing to stop once the channel has stopped");
+                var closes=new List<string>();form.CloseSshSessions=(directory,id)=>{closes.Add(id);return 1;};
+                form.Options.closeTerminal=true;channels["preview-b"]="ready";form.RefreshState();Pump();
+                b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
+                check(closes.Count==1&&closes[0]=="preview-b"&&stops.Count==3&&ContainsText(form,"SSH 通道已停止，终端窗口已关闭。"),"with the setting on, stopping SSH also closes this device's terminals");
+                form.Options.closeTerminal=false;
                 b.LoginSwitch.PerformClick();Pump();check(b.StatusText.Text.StartsWith("web · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();
                 a.LoginSwitch.PerformClick();Pump();
                 check(form.Editor==null&&a.SshActive&&a.Ssh==null,"a card without SSH details switches without opening the editor");
@@ -246,10 +275,15 @@ namespace CMCP {
                 check(form.TrayItems.Length>0,"the tray still builds with an SSH-only device");
                 form.TrayAction(only.Target.Name,"connect");Pump();check(only.Target.State=="stopped","connecting from the tray only opens a terminal for an SSH-only device");
                 only.Delete.PerformClick();Pump();check(!form.Cards.ContainsKey(only.Target.Name)&&form.Ssh.Get(only.Target.Name)==null,"deleting an SSH-only device removes its details");
-                form.OpenSettings();Pump();
+                form.OpenSettings();Pump();form.Settings.ShowConnect();Pump();
                 var fields=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().ToArray();
-                check(fields.Length==2&&fields[1].Value==Terminals.Resolve("",Terminals.Detect()).Id,"settings show a terminal dropdown beside the language one");
+                check(fields.Length==2&&fields[0].Value==""&&fields[1].Value==Terminals.Resolve("",Terminals.Detect()).Id,"the connection page shows the browser and terminal dropdowns");
                 fields[1].Choose("cmd");Pump();check(form.Options.terminal=="cmd"&&fields[1].Value=="cmd","the chosen terminal is kept");
+                var switches=form.Settings.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().ToArray();
+                check(switches.Length==2&&!switches[0].Enabled&&!switches[0].Checked&&switches[1].Enabled,"closing the page needs a specific browser, closing the terminal does not");
+                var browsers=Browsers.Detect();
+                if(browsers.Count>0){fields[0].Choose(browsers[0].Id);Pump();check(form.Options.browser==browsers[0].Id&&switches[0].Enabled&&fields[0].Images.ContainsKey(browsers[0].Id),"choosing an installed browser shows its own icon and allows closing its page");}
+                else check(fields[0].Value=="","without another browser only the system default is offered");
                 form.CloseSettings();Pump();form.FinishTransition();
             }
         }

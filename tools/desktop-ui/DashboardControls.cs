@@ -72,6 +72,8 @@ namespace CMCP {
                         g.DrawPolygon(p,outline.ToArray());g.DrawEllipse(p,8.6f,8.6f,6.8f,6.8f);break;}
                     case "profile":using(var path=Round(new Rectangle(2,5,20,15),2))g.DrawPath(p,path);g.DrawEllipse(p,5,8,4,4);g.DrawArc(p,4,14,6,5,180,180);g.DrawLine(p,13,9,19,9);g.DrawLine(p,13,12,19,12);g.DrawLine(p,13,16,17,16);break;
                     case "sliders":g.DrawLine(p,4,7,14,7);g.DrawLine(p,18,7,20,7);g.DrawLine(p,4,17,6,17);g.DrawLine(p,10,17,20,17);g.DrawEllipse(p,14,5,4,4);g.DrawEllipse(p,6,15,4,4);break;
+                    case "link":{var turn=g.Save();g.TranslateTransform(12,12);g.RotateTransform(-45);using(var a=Round(new Rectangle(-10,-4,11,8),4))g.DrawPath(p,a);using(var b=Round(new Rectangle(-1,-4,11,8),4))g.DrawPath(p,b);g.Restore(turn);break;}
+                    case "globe":g.DrawEllipse(p,3,3,18,18);g.DrawLine(p,3,12,21,12);g.DrawEllipse(p,8,3,8,18);break;
                     case "info":g.DrawEllipse(p,3,3,18,18);g.DrawLine(p,12,11,12,16);using(var b=new SolidBrush(color))g.FillEllipse(b,11,7,2,2);break;
                     case "sun":g.DrawEllipse(p,8,8,8,8);for(int i=0;i<8;i++){double a=i*Math.PI/4;g.DrawLine(p,12+(float)Math.Cos(a)*7.5f,12+(float)Math.Sin(a)*7.5f,12+(float)Math.Cos(a)*10,12+(float)Math.Sin(a)*10);}break;
                     case "moon":using(var path=new GraphicsPath()){path.AddArc(3.62f,3.62f,16.76f,16.76f,17.35f,235.3f);path.AddArc(7.32f,1.82f,14.86f,14.86f,225f,-180f);path.CloseFigure();g.DrawPath(p,path);}break;

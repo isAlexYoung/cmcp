@@ -49,6 +49,7 @@ namespace CMCP {
         internal SshStore Ssh;
         internal Func<string,string,string> ReadSshState=SshWorkers.State;
         internal Func<string,string,bool> StopSshWorker=(directory,id)=>SshWorkers.Stop(directory,id);
+        internal Func<string,string,int> CloseSshSessions=SshSessions.Close;
         readonly HashSet<string> sshStopping=new HashSet<string>(StringComparer.Ordinal);
         internal Action<ProcessStartInfo> StartTerminal=info=>{using(Process.Start(info)){}};
         Palette colors;
@@ -252,20 +253,23 @@ namespace CMCP {
         }
         void ConnectCard(TargetCard card){Select(card);if(card.SshActive){OpenTerminal(card);return;}bool active=card.Target.State=="connected"||card.BusyConnect||card.Target.State=="connecting"||card.Target.State=="configuring"||card.Target.State=="waiting-login"||card.Target.State=="recovering"||card.Target.State=="unstable";if(active)StopCard(card);else Launch("connect",card,"");}
         void StopCard(TargetCard card){if(card.SshActive)StopSsh(card);else Launch("stop",card,"");}
-        // Stops the background channel of this device only. A terminal window the user opened stays theirs.
+        // Stops the background channel of this device. Its terminal windows stay unless the
+        // settings ask to close them; then the ssh inside each one ends and the window closes.
         void StopSsh(TargetCard card){
             Select(card);string name=card.Target.Name;
             if(card.SshState.Length==0||!sshStopping.Add(name))return;
             card.SshStopping=true;card.UpdateActions();
+            bool closeTerminals=Options.closeTerminal;
             // Back on this window's thread by name: the worker's answer must never touch a control from the pool.
             Task.Run(()=>{
                 bool stopped=false;try{stopped=StopSshWorker(stateDirectory,name);}catch{}
-                try{BeginInvoke(new Action(()=>SshStopFinished(card,name,stopped)));}catch(InvalidOperationException){}
+                if(closeTerminals)try{CloseSshSessions(stateDirectory,name);}catch{}
+                try{BeginInvoke(new Action(()=>SshStopFinished(card,name,stopped,closeTerminals)));}catch(InvalidOperationException){}
             });
         }
-        void SshStopFinished(TargetCard card,string name,bool stopped){
+        void SshStopFinished(TargetCard card,string name,bool stopped,bool closedTerminals){
             if(IsDisposed)return;
-            if(stopped){notice="SSH 通道已停止；已打开的终端窗口不受影响。";status.Text=L.Text(notice);}
+            if(stopped){notice=closedTerminals?"SSH 通道已停止，终端窗口已关闭。":"SSH 通道已停止；已打开的终端窗口不受影响。";status.Text=L.Text(notice);}
             else{sshStopping.Remove(name);card.SshStopping=false;Error("无法停止 SSH 通道，请稍后重试。");}
             RefreshState();
         }
@@ -383,7 +387,7 @@ namespace CMCP {
             if(terminal==null||(terminal.Id!="gitbash"&&ssh==null)){Error("未找到 ssh。请在 Windows 设置的“可选功能”中安装 OpenSSH 客户端。");return;}
             try{
                 var mcp=new SshCommand.McpLaunch{Node=Path.Combine(kit,"runtime","node.exe"),Script=Path.Combine(kit,"ssh-terminal.mjs"),Directory=stateDirectory,Owner=Process.GetCurrentProcess().Id};
-                StartTerminal(SshCommand.Start(terminal,login,ssh,Program.ExecutablePath,mcp));
+                StartTerminal(SshCommand.Start(terminal,login,ssh,Program.ExecutablePath,mcp,Options.closeTerminal?SshSessions.Folder(stateDirectory,login.name):null));
                 notice=L.Text("已打开终端")+" · "+login.Address;status.Text=notice;
             }catch{Error("无法打开所选终端，请在设置中换一个终端后重试。");}
         }

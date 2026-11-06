@@ -8,12 +8,14 @@ namespace CMCP {
     // Categories on the left, grouped rows in a centered column on the right. All row
     // controls stay direct children of one sheet, so wheel and keyboard handling are shared.
     internal sealed class SettingsPage : UserControl {
-        sealed class Row { internal Label Title,Description; internal Control Control; }
+        sealed class Row { internal Label Title,Description; internal Control Control; internal Func<bool> Dim; }
         sealed class Section { internal Label Heading; internal Control Leading; internal readonly List<Row> Rows=new List<Row>(); }
         const int ColumnWidth=680,RowHeight=56,RowPadding=16,OptionWidth=128;
         internal readonly EditorViewport Viewport=new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
         internal readonly ModernButton Back=new ModernButton{Glyph="back",Text="返回",Nav=true,AccessibleName="返回"};
-        internal readonly ModernButton GeneralTab=new ModernButton{Glyph="sliders",Text="通用",Nav=true},AboutTab=new ModernButton{Glyph="info",Text="关于",Nav=true};
+        internal readonly ModernButton GeneralTab=new ModernButton{Glyph="sliders",Text="通用",Nav=true},ConnectTab=new ModernButton{Glyph="link",Text="连接",Nav=true},AboutTab=new ModernButton{Glyph="info",Text="关于",Nav=true};
+        const int General=0,Connect=1,About=2;
+        static readonly string[] PageTitles={"通用","连接","关于"},PageGlyphs={"sliders","link","info"};
         readonly ResizePanel side=new ResizePanel{Dock=DockStyle.Left,Width=176},top=new ResizePanel{Dock=DockStyle.Top,Height=56};
         readonly Label group=new Label(),version=new Label(),title=new Label{TextAlign=ContentAlignment.MiddleLeft};
         readonly Label feedback=new Label{AutoSize=false};
@@ -25,17 +27,20 @@ namespace CMCP {
         readonly List<Section> sections=new List<Section>();
         readonly string currentVersion=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
         Palette colors;
-        bool isAbout,laying,updateAvailable;
+        int page=General;
+        bool laying,updateAvailable;
         string availableVersion;
         internal string UpdateStatus="检查更新";
         readonly UpdateProgressView updateView=new UpdateProgressView();
         UpdateProgress updateProgress;
         internal Action<Control,int,Action> AnimateContent;
-        internal void ShowAbout(){isAbout=true;Build();}
-        void ShowTab(bool toAbout){
-            if(isAbout==toAbout)return;
-            Action swap=delegate{isAbout=toAbout;Build();};
-            if(AnimateContent!=null)AnimateContent(Viewport,toAbout?1:-1,swap);else swap();
+        internal void ShowAbout(){page=About;Build();}
+        internal void ShowConnect(){page=Connect;Build();}
+        void ShowTab(int to){
+            if(page==to)return;
+            int direction=to>page?1:-1;
+            Action swap=delegate{page=to;Build();};
+            if(AnimateContent!=null)AnimateContent(Viewport,direction,swap);else swap();
         }
         internal event Action BackRequested;
         internal SettingsPage(AppSettings values,Palette palette,Action<AppSettings> changed,Action<string> invoked){
@@ -43,16 +48,16 @@ namespace CMCP {
             side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);version.Font=UiFont.Points(9F);
             title.Font=new Font(UiFont.Points(13F),FontStyle.Bold);
             version.Text="CMCP v"+currentVersion;
-            side.Controls.AddRange(new Control[]{Back,group,GeneralTab,AboutTab,version});top.Controls.Add(title);Viewport.Controls.Add(sheet);
+            side.Controls.AddRange(new Control[]{Back,group,GeneralTab,ConnectTab,AboutTab,version});top.Controls.Add(title);Viewport.Controls.Add(sheet);
             Controls.Add(Viewport);Controls.Add(top);Controls.Add(side);
             title.Bounds=new Rectangle(58,0,420,55);
             top.Paint+=delegate(object sender,PaintEventArgs e){
                 e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                PaintUi.Icon(e.Graphics,isAbout?"info":"sliders",new Rectangle(28,17,22,22),colors.Text);
+                PaintUi.Icon(e.Graphics,PageGlyphs[page],new Rectangle(28,17,22,22),colors.Text);
                 using(var p=new Pen(colors.Border))e.Graphics.DrawLine(p,0,top.Height-1,top.Width,top.Height-1);
             };
             side.Paint+=delegate(object sender,PaintEventArgs e){using(var p=new Pen(colors.Border))e.Graphics.DrawLine(p,side.Width-1,0,side.Width-1,side.Height);};
-            Back.Click+=delegate{if(BackRequested!=null)BackRequested();};GeneralTab.Click+=delegate{ShowTab(false);};AboutTab.Click+=delegate{ShowTab(true);};
+            Back.Click+=delegate{if(BackRequested!=null)BackRequested();};GeneralTab.Click+=delegate{ShowTab(General);};ConnectTab.Click+=delegate{ShowTab(Connect);};AboutTab.Click+=delegate{ShowTab(About);};
             side.SizeChanged+=delegate{LayoutSide();};
             Viewport.SizeChanged+=delegate{PlaceSheet();};
             SizeChanged+=delegate{side.Width=Width<800?150:176;};
@@ -62,8 +67,8 @@ namespace CMCP {
         void LayoutSide(){
             int width=side.Width-20;
             Back.Bounds=new Rectangle(10,14,width,36);group.Bounds=new Rectangle(20,60,width-20,20);
-            GeneralTab.Bounds=new Rectangle(10,84,width,38);AboutTab.Bounds=new Rectangle(10,124,width,38);
-            version.Bounds=new Rectangle(20,Math.Max(170,side.Height-38),width-20,22);
+            GeneralTab.Bounds=new Rectangle(10,84,width,38);ConnectTab.Bounds=new Rectangle(10,124,width,38);AboutTab.Bounds=new Rectangle(10,164,width,38);
+            version.Bounds=new Rectangle(20,Math.Max(210,side.Height-38),width-20,22);
             side.Invalidate();
         }
         void PlaceSheet(){
@@ -102,16 +107,16 @@ namespace CMCP {
             track.Controls.Add(b);refresh.Add(delegate{b.Selected=chosen();b.Invalidate();});
         }
         void RefreshControls(){
-            title.Text=L.Text(isAbout?"关于":"通用");group.Text=L.Text("设置");
+            title.Text=L.Text(PageTitles[page]);group.Text=L.Text("设置");
             foreach(var update in refresh)update();
             Apply(colors);LayoutRows();top.Invalidate();
         }
-        void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.terminal=next.terminal;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
+        void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.terminal=next.terminal;settings.browser=next.browser;settings.closeWeb=next.closeWeb;settings.closeTerminal=next.closeTerminal;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
         void Build(){
             refresh.Clear();sections.Clear();
             sheet.Controls.Remove(feedback);sheet.Controls.Remove(updateView);foreach(Control c in sheet.Controls.Cast<Control>().ToArray())c.Dispose();sheet.Controls.Clear();
-            GeneralTab.Selected=!isAbout;AboutTab.Selected=isAbout;feedback.Text="";
-            if(isAbout)BuildAbout();else BuildGeneral();
+            GeneralTab.Selected=page==General;ConnectTab.Selected=page==Connect;AboutTab.Selected=page==About;feedback.Text="";
+            if(page==About)BuildAbout();else if(page==Connect)BuildConnect();else BuildGeneral();
             sheet.Controls.Add(feedback);
             Viewport.AutoScrollPosition=Point.Empty;PlaceSheet();RefreshControls();
         }
@@ -128,14 +133,36 @@ namespace CMCP {
             var window=AddSection("窗口");
             AddRow(window,"开机自启","登录 Windows 后启动到系统托盘；只恢复原来已启用的连接。",Switch("开机自启",()=>settings.autoStart,(s,on)=>s.autoStart=on));
             AddRow(window,"关闭时最小化到托盘","开启时保留已连接的设备；关闭后，点叉号会退出并断开全部连接。",Switch("关闭时最小化到托盘",()=>settings.closeToTray,(s,on)=>s.closeToTray=on));
-            var console=AddSection("终端");
+            var shortcuts=AddSection("快捷方式");
+            AddRow(shortcuts,"桌面快捷方式","为当前程序创建 CMCP 桌面快捷方式。",Command("创建",delegate{action("shortcut");}));
+        }
+        // What a connection opens, and whether stopping it closes that window again.
+        void BuildConnect(){
+            var web=AddSection("共享网页");
+            var browsers=Browsers.Detect();
+            var choices=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("","系统默认浏览器")};
+            choices.AddRange(browsers.Select(b=>new KeyValuePair<string,string>(b.Id,b.Label)));
+            var browser=new DropdownField(choices.ToArray()){Font=sheet.Font,Size=new Size(216,36),Colors=colors};
+            // Each browser shows its own program icon; the default shows the program Windows uses now.
+            var preset=Browsers.IconOf(Browsers.DefaultProgram(),20);if(preset!=null)browser.Images[""]=preset;
+            foreach(var b in browsers){var image=Browsers.IconOf(b.Path,20);if(image!=null)browser.Images[b.Id]=image;}
+            Func<BrowserChoice> chosen=()=>browsers.FirstOrDefault(b=>b.Id==settings.browser);
+            browser.Chosen+=key=>Commit(s=>s.browser=key);
+            refresh.Add(delegate{browser.Value=chosen()==null?"":chosen().Id;browser.AccessibleName=L.Text("浏览器");browser.Invalidate();});
+            AddRow(web,"浏览器","打开共享网页时使用的浏览器。这里只列出这台电脑已安装的浏览器。",browser);
+            // A page in the system default browser is a tab of the user's own window, which CMCP cannot close.
+            var closeWeb=Switch("断开连接后关闭网页",()=>settings.closeWeb&&chosen()!=null,(s,on)=>s.closeWeb=on);
+            refresh.Add(delegate{closeWeb.Enabled=chosen()!=null;});
+            AddRow(web,()=>L.Text("断开连接后关闭网页"),()=>chosen()==null?L.Text("系统默认浏览器打开的网页 CMCP 无法关闭。请先在上面选择具体的浏览器。")
+                :String.Format(L.Text("网页在 CMCP 单独打开的 {0} 窗口中显示，断开连接时关闭这个窗口。这个窗口的登录状态与平时的浏览器分开，第一次需要登录一次。"),chosen().Label),closeWeb);
+            web.Rows[web.Rows.Count-1].Dim=()=>chosen()==null;
+            var console=AddSection("SSH");
             var installed=Terminals.Detect();
             var terminal=new DropdownField(installed.Select(t=>new KeyValuePair<string,string>(t.Id,t.Label)).ToArray()){Font=sheet.Font,Size=new Size(216,36),Colors=colors};
             terminal.Chosen+=key=>Commit(s=>s.terminal=key);
-            refresh.Add(delegate{var chosen=Terminals.Resolve(settings.terminal,installed);terminal.Value=chosen==null?"":chosen.Id;terminal.AccessibleName=L.Text("SSH 使用的终端");terminal.Invalidate();});
-            AddRow(console,"SSH 使用的终端","点击卡片上的“打开终端”时使用。这里只列出这台电脑已安装的终端。",terminal);
-            var shortcuts=AddSection("快捷方式");
-            AddRow(shortcuts,"桌面快捷方式","为当前程序创建 CMCP 桌面快捷方式。",Command("创建",delegate{action("shortcut");}));
+            refresh.Add(delegate{var current=Terminals.Resolve(settings.terminal,installed);terminal.Value=current==null?"":current.Id;terminal.AccessibleName=L.Text("终端");terminal.Invalidate();});
+            AddRow(console,"终端","SSH 登录时使用的终端。这里只列出这台电脑已安装的终端。",terminal);
+            AddRow(console,"断开连接后关闭终端","断开连接时结束这台设备的 SSH 会话，终端窗口或标签页随之关闭。只对之后打开的终端生效。",Switch("断开连接后关闭终端",()=>settings.closeTerminal,(s,on)=>s.closeTerminal=on));
         }
         void BuildAbout(){
             var updates=AddSection("更新");
@@ -194,12 +221,12 @@ namespace CMCP {
         internal void Apply(Palette palette){
             colors=palette;BackColor=top.BackColor=Viewport.BackColor=sheet.BackColor=colors.Page;sheet.Colors=colors;title.ForeColor=colors.Text;title.BackColor=colors.Page;
             side.BackColor=group.BackColor=version.BackColor=colors.Side;group.ForeColor=version.ForeColor=colors.Muted;
-            foreach(var b in new[]{Back,GeneralTab,AboutTab}){b.Colors=colors;b.BackColor=colors.Side;b.Invalidate();}
+            foreach(var b in new[]{Back,GeneralTab,ConnectTab,AboutTab}){b.Colors=colors;b.BackColor=colors.Side;b.Invalidate();}
             feedback.BackColor=colors.Page;
             foreach(var section in sections){
                 section.Heading.BackColor=colors.Page;section.Heading.ForeColor=colors.Text;
                 foreach(var row in section.Rows){
-                    row.Title.BackColor=colors.Surface;row.Title.ForeColor=colors.Text;
+                    row.Title.BackColor=colors.Surface;row.Title.ForeColor=row.Dim!=null&&row.Dim()?colors.Muted:colors.Text;
                     if(row.Description!=null){row.Description.BackColor=colors.Surface;row.Description.ForeColor=colors.Muted;}
                     ApplyControl(row.Control);
                 }
@@ -270,6 +297,9 @@ namespace CMCP {
         bool hover,dismissedByThisClick;
         internal Palette Colors=Palette.Create(false);
         internal string Value;
+        // Optional per-choice pictures, owned by this field.
+        internal readonly Dictionary<string,Image> Images=new Dictionary<string,Image>();
+        const int ImageSize=20;
         internal event Action<string> Chosen;
         internal DropdownField(KeyValuePair<string,string>[] choices){
             items=choices;TabStop=true;Cursor=Cursors.Hand;AccessibleRole=AccessibleRole.ComboBox;
@@ -321,10 +351,13 @@ namespace CMCP {
         }
         void Open(){
             if(closingMenu&&Menu.Visible){AnimateMenu(false);return;}
-            foreach(ToolStripItem old in Menu.Items.Cast<ToolStripItem>().ToArray())old.Dispose();
+            // The pictures belong to this field, so the old rows let go of them first.
+            foreach(ToolStripItem old in Menu.Items.Cast<ToolStripItem>().ToArray()){old.Image=null;old.Dispose();}
             Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Padding=new Padding(1,MenuInset,1,MenuInset);Menu.DropShadowEnabled=false;Menu.Renderer=new MenuRenderer(Colors);
+            Menu.ShowImageMargin=Images.Count>0;Menu.ImageScalingSize=new Size(ImageSize,ImageSize);
             foreach(var pair in items){
-                string key=pair.Key;var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(Width-2,34)};
+                string key=pair.Key;Image image;Images.TryGetValue(key,out image);
+                var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(Width-2,34),Image=image,ImageScaling=ToolStripItemImageScaling.None};
                 item.Click+=delegate{Choose(key);};Menu.Items.Add(item);
             }
             if(!Motion.Enabled||!IsHandleCreated){Menu.Show(this,new Point(0,Height+2));ClearMenuMotion();return;}
@@ -348,10 +381,12 @@ namespace CMCP {
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
             PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),8,hover?Colors.Subtle:Colors.Surface,Focused&&ShowFocusCues?Colors.SelectionBorder:Colors.Border);
             string text=items.Where(i=>i.Key==Value).Select(i=>L.Text(i.Value)).FirstOrDefault()??"";
-            PaintUi.Text(g,text,Font,new Rectangle(12,0,Width-40,Height),Colors.Text);
+            Image picture;int left=12;
+            if(Value!=null&&Images.TryGetValue(Value,out picture)){g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(picture,new Rectangle(12,(Height-ImageSize)/2,ImageSize,ImageSize));left=12+ImageSize+8;}
+            PaintUi.Text(g,text,Font,new Rectangle(left,0,Width-left-28,Height),Colors.Text);
             PaintUi.Icon(g,Arrow,new Rectangle(Width-28,(Height-16)/2,16,16),Colors.Muted);
         }
-        protected override void Dispose(bool disposing){if(disposing){if(menuFrames!=null){menuFrames.Stop();menuFrames=null;}Menu.Dispose();}base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing){if(menuFrames!=null){menuFrames.Stop();menuFrames=null;}Menu.Dispose();foreach(var image in Images.Values)image.Dispose();Images.Clear();}base.Dispose(disposing);}
     }
     // Still a CheckBox, so keyboard use, accessibility and wheel handling stay as they were.
     // Its row shows the label, so only the switch itself is painted.
@@ -364,6 +399,7 @@ namespace CMCP {
         readonly System.Diagnostics.Stopwatch clock=new System.Diagnostics.Stopwatch();
         double from;
         internal ToggleSwitch(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);Cursor=Cursors.Hand;motion.Tick+=delegate{Advance();};}
+        protected override void OnEnabledChanged(EventArgs e){base.OnEnabledChanged(e);Cursor=Enabled?Cursors.Hand:Cursors.Default;Invalidate();}
         protected override void OnCheckedChanged(EventArgs e){
             base.OnCheckedChanged(e);
             if(!Motion.Enabled||!IsHandleCreated||!Visible){motion.Stop();Level=Checked?1:0;Invalidate();return;}
@@ -378,7 +414,8 @@ namespace CMCP {
         protected override void OnPaint(PaintEventArgs e){
             var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
-            int left=Width-TrackWidth-2,top=(Height-TrackHeight)/2;var fill=Motion.Mix(Colors.Track,Colors.Blue,Level);
+            // Unavailable: a faint track that no longer looks clickable.
+            int left=Width-TrackWidth-2,top=(Height-TrackHeight)/2;var fill=Enabled?Motion.Mix(Colors.Track,Colors.Blue,Level):Motion.Mix(Colors.Track,Colors.Surface,0.55);
             PaintUi.Box(g,new Rectangle(left,top,TrackWidth,TrackHeight),TrackHeight/2,fill,fill);
             int inset=(TrackHeight-Thumb)/2,x=left+inset+(int)Math.Round((TrackWidth-Thumb-2*inset)*Level);
             using(var b=new SolidBrush(Color.White))g.FillEllipse(b,x,top+inset,Thumb,Thumb);
