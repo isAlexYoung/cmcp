@@ -115,7 +115,7 @@ test('the connection settings save, and stopping closes what the settings ask fo
     launchTerminal:async(login,directory,chosen,options)=>{launches.push(options);return 'terminal';}});t.after(()=>m.close());
   const call=async(route,body={})=>{const res=await fetch(m.origin+'/api/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:JSON.stringify(body)});return {status:res.status,body:await res.json()};};
   const snapshot=await (await fetch(m.origin+'/api/state',{headers:{'x-cmcp-token':m.token}})).json();
-  assert.deepEqual(snapshot.browsers,[{id:'chrome',label:'Google Chrome',path:'/Applications/Google Chrome.app'}]);
+  assert.deepEqual(snapshot.browsers,[{id:'chrome',label:'Google Chrome'}]);
   assert.equal((await call('settings',{closeWeb:'yes'})).status,400);
   assert.equal((await call('settings',{browser:'chrome',closeWeb:true,closeTerminal:true})).status,200);
   assert.equal(new ManagerState(f.directory,f.secrets).preferences.closeTerminal,true);

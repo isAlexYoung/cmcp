@@ -324,17 +324,20 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             reply(id, NSWorkspace.shared.open(url))
         case "icons":
             // Each browser's own Finder icon for the settings dropdown; "default" is the app that opens web links now.
+            // The page names browsers only by id, so no local path ever reaches it.
+            let bundles = ["safari": "com.apple.Safari", "chrome": "com.google.Chrome", "edge": "com.microsoft.edgemac", "firefox": "org.mozilla.firefox"]
             var icons: [String: String] = [:]
-            for path in (value["paths"] as? [String] ?? []).prefix(8) {
-                var file = path
-                if path == "default" { guard let link = URL(string: "https://example.com"), let app = NSWorkspace.shared.urlForApplication(toOpen: link) else { continue }; file = app.path }
-                guard file.hasSuffix(".app"), FileManager.default.fileExists(atPath: file),
+            for name in (value["ids"] as? [String] ?? []).prefix(8) {
+                let app: URL?
+                if name == "default" { app = URL(string: "https://example.com").flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) } }
+                else { app = bundles[name].flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) } }
+                guard let file = app?.path,
                       let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 40, pixelsHigh: 40, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
                 NSGraphicsContext.saveGraphicsState()
                 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
                 NSWorkspace.shared.icon(forFile: file).draw(in: NSRect(x: 0, y: 0, width: 40, height: 40))
                 NSGraphicsContext.restoreGraphicsState()
-                if let png = bitmap.representation(using: .png, properties: [:]) { icons[path] = "data:image/png;base64," + png.base64EncodedString() }
+                if let png = bitmap.representation(using: .png, properties: [:]) { icons[name] = "data:image/png;base64," + png.base64EncodedString() }
             }
             reply(id, icons)
         case "copy":

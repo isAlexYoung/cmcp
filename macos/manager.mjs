@@ -35,7 +35,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false;
   const devices=()=>{const view=store.view(states);return {...view,targets:view.targets.map(t=>t.ssh?{...t,sshState:channelState(directory,t.id)}:t)};};
-  const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label})),browsers:browsers().map(({id,label,path})=>({id,label,path}))});
+  const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label})),browsers:browsers().map(({id,label})=>({id,label}))});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
