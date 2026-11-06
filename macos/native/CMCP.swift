@@ -41,6 +41,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     static func launchedAtLogin(_ event: NSAppleEventDescriptor?) -> Bool {
         event?.eventID == 0x6F617070 /* oapp */ && event?.paramDescriptor(forKeyword: 0x70726F70 /* prop */)?.enumCodeValue == 0x6C676974 /* lgit */
     }
+    // The page colour of style.css. Until WebKit paints, on first load or when the window comes back
+    // from the menu bar or the Dock, the window shows this instead of WebKit's white.
+    static let pageColor = NSColor(name: "CMCPPage") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 0x14 / 255.0, green: 0x17 / 255.0, blue: 0x1b / 255.0, alpha: 1) : .white
+    }
     func hideWindow() { window.orderOut(nil); NSApp.setActivationPolicy(.accessory) }
     func applicationDidFinishLaunching(_ notification: Notification) {
         if App.launchedAtLogin(NSAppleEventManager.shared().currentAppleEvent) { startup = true }
@@ -62,10 +67,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         configuration.userContentController.add(self, name: "cmcp")
         if testing { configuration.userContentController.addUserScript(WKUserScript(source: "window.CMCP_TEST=true", injectionTime: .atDocumentStart, forMainFrameOnly: true)) }
         web = WKWebView(frame: .zero, configuration: configuration)
-        web.navigationDelegate = self
+        web.navigationDelegate = self; web.setValue(false, forKey: "drawsBackground")
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "CMCP"; window.minSize = NSSize(width: 660, height: 500); window.center(); window.delegate = self
-        window.contentView = web; window.isReleasedWhenClosed = false
+        window.contentView = web; window.isReleasedWhenClosed = false; window.backgroundColor = App.pageColor
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(restoreExistingWindow(_:)), name: NSNotification.Name("com.cmcp.manager.restore"), object: bundle.bundleURL.standardizedFileURL.path)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "desktopcomputer", accessibilityDescription: "CMCP")
@@ -463,6 +468,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         trayTargets = savedTargets; updateTrayMenu(); testResults.append("tray updates remarks and states without replacing native rows")
         guard item.menu?.appearance == nil, window.appearance == nil else { finishTests(error: "Default appearance must follow the system"); return }
         testResults.append("native tray and fresh main window follow system appearance")
+        func shade(_ name: NSAppearance.Name) -> [Int] {
+            var color = NSColor.clear
+            NSAppearance(named: name)?.performAsCurrentDrawingAppearance { color = self.window.backgroundColor.usingColorSpace(.sRGB) ?? .clear }
+            return [color.redComponent, color.greenComponent, color.blueComponent].map { Int(($0 * 255).rounded()) }
+        }
+        guard web.value(forKey: "drawsBackground") as? Bool == false, shade(.darkAqua) == [0x14, 0x17, 0x1b], shade(.aqua) == [255, 255, 255] else {
+            finishTests(error: "The window behind the page must show the page colour, not WebKit's white: \(shade(.darkAqua)) \(shade(.aqua))"); return
+        }
+        testResults.append("unpainted moments show the page colour of the current theme instead of white")
         window.setContentSize(NSSize(width: 700, height: 580))
         let checks = ["document.querySelector('.card-head').click(); document.querySelector('.card').classList.contains('expanded')", "document.querySelector('.card-head').click(); !document.querySelector('.card').classList.contains('expanded')", "document.querySelectorAll('.card.selected').length === 1", "getComputedStyle(document.documentElement,'::-webkit-scrollbar').display === 'none'", "document.body.scrollWidth <= window.innerWidth", "document.querySelector('header h1').textContent === 'CMCP'", "document.querySelectorAll('.card').length === 2", "document.querySelectorAll('.state-label').length === 2", "window.cmcpTest.showSettings('dark','en'); document.documentElement.dataset.theme === 'dark'", "document.querySelector('header h2').textContent === 'General'", "window.cmcpTest.showEditor(); document.querySelectorAll('input[type=password]').length === 1", "document.querySelectorAll('header').length === 1"] + ["window.cmcpTest.showUpdate(); document.querySelector('.settings-side button').click(); !document.querySelector('.update-banner') && !document.querySelector('.update-ring').hidden && document.querySelector('.update-ring').getAttribute('aria-valuetext').includes('37%')", "window.cmcpTest.showUpdateFailed(); !document.querySelector('.update-ring').hidden && document.querySelector('.update-ring').classList.contains('failed')", "window.cmcpTest.showAbout(); document.querySelectorAll('button.uninstall').length === 1"]
         let trayChecks = ["window.cmcpTest.renameFirst() && document.activeElement === document.querySelector('input[type=text]')", "document.activeElement.selectionStart === 0 && document.activeElement.selectionEnd === document.activeElement.value.length"]

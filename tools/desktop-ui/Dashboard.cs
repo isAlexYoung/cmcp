@@ -225,7 +225,15 @@ namespace CMCP {
             Enabled=true;timer.Start();RestoreManager();Error("部分后台进程未能结束，请稍后重试退出；详情已记录到 user\\error.log。");
         }
         internal void RestoreManager(){EnsureTray();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
-        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(ManagerSignal.ExitMessage!=0&&message.Msg==ManagerSignal.ExitMessage){ExitApplication();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));base.WndProc(ref message);if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window,IntPtr rectangle,IntPtr region,uint flags);
+        // A minimized window has no client area. Laying every card out for that and back again on
+        // restore, with memory Windows trimmed meanwhile, left the window black until it repainted.
+        // So layout waits while minimized, and the restored window paints before anything else runs.
+        internal bool LayoutHeld;
+        void HoldLayout(){if(!LayoutHeld&&IsIconic(Handle)){LayoutHeld=true;SuspendLayout();}}
+        void ReleaseLayout(){if(LayoutHeld&&!IsIconic(Handle)){LayoutHeld=false;ResumeLayout(true);RedrawWindow(Handle,IntPtr.Zero,IntPtr.Zero,0x185);}}
+        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(ManagerSignal.ExitMessage!=0&&message.Msg==ManagerSignal.ExitMessage){ExitApplication();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));if(message.Msg==0x47)HoldLayout();base.WndProc(ref message);if(message.Msg==0x47)ReleaseLayout();if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
         protected override void Dispose(bool disposing){if(disposing){TrayVisible=false;if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(TrayCommands!=null){TrayCommands.Dispose();TrayCommands=null;}}base.Dispose(disposing);}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
         void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}

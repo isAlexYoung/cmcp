@@ -143,6 +143,16 @@ namespace CMCP {
             check(independent,"notification activation never shows its temporary menu and the popup uses an independent invisible owner");
             check(preserved&&TrayDisplay.Context==original,"tray activation preserves main window visibility layout and original DPI awareness: "+failures+" context="+TrayDisplay.Context+" original="+original);
             check(submenu,"native cloud submenus stay adjacent across mixed display scaling and main window states");
+            // Cards laid out for a minimized window's empty client area had to be rebuilt before the
+            // restored window could paint, and it showed black meanwhile.
+            using(var form=new Manager(true)){
+                form.Show();Application.DoEvents();
+                var card=form.Cards.Values.First();int width=card.Width;
+                form.WindowState=FormWindowState.Minimized;Application.DoEvents();
+                bool held=form.LayoutHeld&&card.Width==width;
+                form.RestoreManager();Application.DoEvents();
+                check(held&&!form.LayoutHeld&&form.LayoutFits(),"minimizing keeps the card layout and restoring resumes it");
+            }
         }
     }
 }

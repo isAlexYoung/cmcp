@@ -45,7 +45,7 @@ jobs:
       - name: Real AppKit and WebKit interface checks
         run: |
           "$RUNNER_TEMP/cmcp-built/CMCP.app/Contents/MacOS/CMCP" --self-test "$PWD/test-results/native"
-          python3 -c "import json; r=json.load(open('test-results/native/native-ui.json')); assert r['failed']==0 and r['passed']==25, r"
+          python3 -c "import json; r=json.load(open('test-results/native/native-ui.json')); assert r['failed']==0 and r['passed']==26, r"
       - name: Archive platform packages
         run: python3 tools/package-macos.py "$RUNNER_TEMP/cmcp-built/CMCP.app" "$RUNNER_TEMP/cmcp-packages"
       - name: Install from the disk image, then update, roll back and uninstall
