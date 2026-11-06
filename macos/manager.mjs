@@ -16,12 +16,13 @@ import {managedTargetFactory} from '../app/managed-target.mjs';
 import {staticAssets} from '../app/static-assets.mjs';
 import {checkFailed,checkRelease,downloadUpdate} from './updates.mjs';
 import {currentInstallation} from './uninstall.mjs';
-import {detectTerminals,openTerminal} from './ssh.mjs';
+import {closeSessions,detectTerminals,openTerminal} from './ssh.mjs';
+import {closePages,detectBrowsers,openPage} from './browsers.mjs';
 import {stopSshWorker,sshWorkerState,stopSshWorkers} from '../app/ssh-terminal.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker}={}){
+export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
   const dispatcher=injected||await createDispatcher({roots:store.config.roots});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
@@ -34,7 +35,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false;
   const devices=()=>{const view=store.view(states);return {...view,targets:view.targets.map(t=>t.ssh?{...t,sshState:channelState(directory,t.id)}:t)};};
-  const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label}))});
+  const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label})),browsers:browsers().map(({id,label,path})=>({id,label,path}))});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
@@ -61,13 +62,15 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled,loginMode})=>({id,label,state,enabled,...(loginMode==='ssh'?{ssh:true}:{})})),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
     '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();return {started:true};}),
-    '/api/targets/stop':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};}),
+    // The page window closes after the stop is saved; that never holds up the reply.
+    '/api/targets/stop':async input=>{const result=await store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};});closeBrowserPages(store.preferences,directory,input.id).catch(()=>{});return result;},
     '/api/targets/delete':input=>store.serial(async()=>{await store.remove(input.id);connections.tick();return {deleted:true};}),
     '/api/targets/order':input=>store.serial(()=>{store.reorder(input.ids);return {saved:true};}),
-    '/api/targets/open':async input=>({url:await entry(input.id)}),
-    '/api/targets/ssh-stop':async input=>{if(!store.sshFor(input.id))throw Error('连接不存在');await stopChannel(directory,input.id);return {stopped:true};},
+    // opened:false leaves the page to the system default browser, which the native host opens.
+    '/api/targets/open':async input=>{const url=await entry(input.id);let opened=false;try{opened=await openBrowserPage(store.preferences,directory,input.id,url);}catch{}return {url,opened};},
+    '/api/targets/ssh-stop':async input=>{if(!store.sshFor(input.id))throw Error('连接不存在');const close=store.preferences.closeTerminal===true;if(close)await closeTerminals(directory,input.id).catch(()=>0);await stopChannel(directory,input.id);return {stopped:true,closedTerminals:close};},
     '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.active);return {saved:true};}),
-    '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error(store.targets.some(t=>t.id===input.id)?'还没有填写 SSH 信息，请编辑设备后再连接。':'连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal)};},
+    '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error(store.targets.some(t=>t.id===input.id)?'还没有填写 SSH 信息，请编辑设备后再连接。':'连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal,{closeTerminal:store.preferences.closeTerminal===true})};},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates=checkFailed(updates);}return updates;},
     '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}})};}catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},

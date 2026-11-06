@@ -322,6 +322,21 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             guard let text = value["url"] as? String, let url = URL(string: text), ["https", "http"].contains(url.scheme), url.user == nil, url.password == nil,
                   url.scheme == "https" || url.host == "127.0.0.1" else { reply(id, error: "Invalid URL"); return }
             reply(id, NSWorkspace.shared.open(url))
+        case "icons":
+            // Each browser's own Finder icon for the settings dropdown; "default" is the app that opens web links now.
+            var icons: [String: String] = [:]
+            for path in (value["paths"] as? [String] ?? []).prefix(8) {
+                var file = path
+                if path == "default" { guard let link = URL(string: "https://example.com"), let app = NSWorkspace.shared.urlForApplication(toOpen: link) else { continue }; file = app.path }
+                guard file.hasSuffix(".app"), FileManager.default.fileExists(atPath: file),
+                      let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 40, pixelsHigh: 40, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+                NSWorkspace.shared.icon(forFile: file).draw(in: NSRect(x: 0, y: 0, width: 40, height: 40))
+                NSGraphicsContext.restoreGraphicsState()
+                if let png = bitmap.representation(using: .png, properties: [:]) { icons[path] = "data:image/png;base64," + png.base64EncodedString() }
+            }
+            reply(id, icons)
         case "copy":
             guard let text = value["text"] as? String, text.count < 8192 else { reply(id, error: "Invalid text"); return }
             NSPasteboard.general.clearContents(); reply(id, NSPasteboard.general.setString(text, forType: .string))

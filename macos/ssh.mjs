@@ -4,8 +4,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {atomicWrite,privateDir,safeFile,KIT,runFile} from './platform.mjs';
+import {listProcesses} from './browsers.mjs';
 
 export const VARIABLE='CMCP_SSH_ASKPASS';
 // Each value reaches a command line, so nothing may look like an option or a separator.
@@ -46,14 +47,21 @@ export function sshOptions(login){
   options.push('--',login.host);
   return options;
 }
+// Where a terminal that closes on disconnect records the PID of its script.
+export const sessionsFolder=(directory,id)=>path.join(directory,'ssh-sessions',createHash('sha256').update(String(id)).digest('hex').slice(0,16));
 // The shell stays open afterwards; another ssh typed there must not receive this device's password.
-export function commandScript(login,{askpass,state,ssh='/usr/bin/ssh',mcp}={}){
+// With sessions the script ends with ssh instead, so the window can close. A record that
+// closeSessions removed means a disconnect; a failed login otherwise waits for Enter.
+export function commandScript(login,{askpass,state,ssh='/usr/bin/ssh',mcp,sessions,ended='SSH 已结束，按回车键关闭窗口'}={}){
   const secret=!!login.credentialId||!!mcp,lines=['#!/bin/sh','rm -f "$0"',`printf '\\033]0;%s\\007' ${quote(login.username+'@'+login.host)}`];
+  if(sessions)lines.push(`cmcp_session=${quote(sessions)}/$$.pid`,': > "$cmcp_session"');
   if(secret)lines.push(`export SSH_ASKPASS=${quote(askpass)} SSH_ASKPASS_REQUIRE=force ${VARIABLE}=${quote(login.id)} CMCP_STATE_DIR=${quote(state)}`);
   if(mcp)lines.push([mcp.node,mcp.script,'--state',state,'--id',login.id,'--owner',String(mcp.owner),'--ssh',ssh].map(quote).join(' ')+" || printf '%s\\n' 'MCP 尚未就绪；仍可进入 SSH 终端检查服务器。'");
   lines.push([ssh,...sshOptions(login)].map(quote).join(' '));
+  if(sessions)lines.push('cmcp_code=$?');
   if(secret)lines.push(`unset SSH_ASKPASS SSH_ASKPASS_REQUIRE ${VARIABLE}`);
-  lines.push('exec "${SHELL:-/bin/zsh}" -l','');
+  if(sessions)lines.push(`if [ -e "$cmcp_session" ]; then rm -f "$cmcp_session"; [ "$cmcp_code" -eq 0 ] || { printf '\\n%s ' ${quote(ended)}; read cmcp_line; }; fi`,'exit 0','');
+  else lines.push('exec "${SHELL:-/bin/zsh}" -l','');
   return lines.join('\n');
 }
 export function openArguments(terminal,script){
@@ -66,7 +74,7 @@ export function openArguments(terminal,script){
 }
 function clearOld(folder,now=Date.now()){try{for(const name of fs.readdirSync(folder)){const file=path.join(folder,name);if(name.endsWith('.command')&&now-fs.statSync(file).mtimeMs>3600000)fs.unlinkSync(file);}}catch{}}
 // The script deletes itself when it starts. A small wrapper is needed because ssh runs SSH_ASKPASS with no arguments of its own.
-export function writeLaunch(login,directory,{node=process.execPath,kit=KIT,owner=process.pid,prepareMcp=true}={}){
+export function writeLaunch(login,directory,{node=process.execPath,kit=KIT,owner=process.pid,prepareMcp=true,closeTerminal=false}={}){
   const folder=privateDir(path.join(directory,'ssh-run'));clearOld(folder);
   let askpass;
   if(login.credentialId||prepareMcp){
@@ -76,15 +84,33 @@ export function writeLaunch(login,directory,{node=process.execPath,kit=KIT,owner
   }
   const script=path.join(folder,randomUUID()+'.command');
   const mcp=prepareMcp?{node,script:path.join(kit,'../app/ssh-terminal.mjs'),owner}:undefined;
-  atomicWrite(script,commandScript(login,{askpass,state:directory,mcp}),0o700);fs.chmodSync(script,0o700);
+  const sessions=closeTerminal?privateDir(sessionsFolder(directory,login.id)):undefined;
+  const ended=readLanguage(directory)==='en'?'SSH ended. Press Enter to close this window':'SSH 已结束，按回车键关闭窗口';
+  atomicWrite(script,commandScript(login,{askpass,state:directory,mcp,sessions,ended}),0o700);fs.chmodSync(script,0o700);
   return script;
 }
-export async function openTerminal(login,directory,chosen,{found=detectTerminals(),run=runFile}={}){
+export async function openTerminal(login,directory,chosen,{found=detectTerminals(),run=runFile,closeTerminal=false}={}){
   const terminal=resolveTerminal(chosen,found);if(!terminal)throw Error('无法打开所选终端，请在设置中换一个终端后重试。');
-  const script=writeLaunch(login,directory);
+  const script=writeLaunch(login,directory,{closeTerminal});
   try{await run('/usr/bin/open',openArguments(terminal,script));}
   catch{try{fs.unlinkSync(script);}catch{}throw Error('无法打开所选终端，请在设置中换一个终端后重试。');}
   return terminal.id;
+}
+// Ends the ssh of every recorded terminal of this device and returns how many ended. The record
+// goes first, so the script knows it was a disconnect and closes without waiting for a key.
+export async function closeSessions(directory,id,{list=listProcesses,kill=(pid,signal)=>process.kill(pid,signal)}={}){
+  const folder=sessionsFolder(directory,id),scripts=path.join(directory,'ssh-run');let names;
+  try{names=fs.readdirSync(folder).filter(name=>/^\d+\.pid$/.test(name));}catch{return 0;}
+  if(!names.length)return 0;
+  const processes=await list();let closed=0;
+  for(const name of names){
+    const pid=Number(name.slice(0,-4)),shell=processes.find(item=>item.pid===pid);
+    try{fs.unlinkSync(path.join(folder,name));}catch{}
+    // A PID a later program took over is not this terminal: the script runs from ssh-run.
+    if(!shell||!shell.command.includes(scripts))continue;
+    for(const child of processes.filter(item=>item.ppid===pid&&path.basename(item.command.split(' ')[0])==='ssh')){try{kill(child.pid,'SIGTERM');closed++;}catch{}}
+  }
+  return closed;
 }
 // The saved secret only answers the exact prompt for this device. Anything else goes to the user.
 export function classify(prompt,login){
