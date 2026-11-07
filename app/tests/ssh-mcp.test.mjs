@@ -60,11 +60,13 @@ test('raw SSH pipe sends bootstrap through stdin and maps authentication failure
   assert.equal(errors[0].code,'SSH_AUTH');assert.ok(!errors[0].message.includes('PLACEHOLDER'));
 });
 
-test('only root on a VPS with the shared Claude session hands the connector to the terminal user',{skip:process.platform==='win32'},()=>{
-  // Any other account, or a VPS without the session service, runs the bootstrap command itself.
-  assert.equal(execFileSync('sh',['-c',sharedSessionHandoff,'sh','printf','%s','direct']).toString(),'direct');
+test('only root on a VPS with the shared Claude session hands the connector to the terminal user',()=>{
   assert.match(sharedSessionHandoff,/^if \[ "\$\(id -u\)" = 0 \] && \[ -e \/etc\/systemd\/system\/wd-claude-session\.service \]; then exec \/usr\/sbin\/runuser -u wdterm -g wdguest -- env -i HOME=\/home\/wdguest /);
   assert.ok(sharedSessionHandoff.includes(' CMCP_SHARED_SESSION=1 "$@"; fi; exec "$@"'));
+  // The remote side is a POSIX shell; Windows runners have none to run it with.
+  if(process.platform==='win32')return;
+  // Any other account, or a VPS without the session service, runs the bootstrap command itself.
+  assert.equal(execFileSync('sh',['-c',sharedSessionHandoff,'sh','printf','%s','direct']).toString(),'direct');
   // The quoted command survives a POSIX shell intact, bootstrap source included.
   const source="print('it''s', \"$HOME\" \\n)";
   assert.equal(execFileSync('sh',['-c',remoteCommand(source).replace(' sh python3 -I -B -u -c ',' sh printf %s ')]).toString(),source);
