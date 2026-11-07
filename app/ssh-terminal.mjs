@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
-import {startSshMcp,sshArguments} from './ssh-mcp.mjs';
+import {startSshMcp,sshArguments,validRunAs} from './ssh-mcp.mjs';
 import {createSshDispatcher} from './ssh-local-tools.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -35,9 +35,10 @@ export function readSshLogin(directory,id) {
   const data=JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
   const login=data.logins?.find(item=>(item.id??item.name)===id);
   if(!login)throw Error('没有找到这台设备的 SSH 配置');
-  sshArguments(login);return login;
+  sshArguments(login);if(login.cloudcliUser&&!validRunAs(login.cloudcliUser))throw Error('Invalid SSH profile');return login;
 }
-export const profileRevision=login=>hash(JSON.stringify([login.host,login.port,login.username,login.method,login.keyPath,login.secret,login.credentialId]));
+// The CloudCLI account only joins when set, so devices without it keep their revision.
+export const profileRevision=login=>hash(JSON.stringify([login.host,login.port,login.username,login.method,login.keyPath,login.secret,login.credentialId,...login.cloudcliUser?[login.cloudcliUser]:[]]));
 function writeState(file,state) {
   safeFile(file);const temporary=file+'.'+randomBytes(8).toString('hex')+'.tmp';
   try{
@@ -119,7 +120,7 @@ export async function runWorker({directory,id,owner,ssh='ssh',createDispatcher=c
   }
 }
 
-export async function ensureSshWorker({directory,id,owner,ssh='ssh',timeout=180000,launch=spawn,progress=message=>process.stdout.write(message+'\n')}) {
+export async function ensureSshWorker({directory,id,owner,ssh='ssh',timeout=180000,launch=spawn,env=process.env,progress=message=>process.stdout.write(message+'\n')}) {
   const paths=workerPaths(directory,id),revision=profileRevision(readSshLogin(directory,id));
   let state;try{state=await queryWorker(paths);}catch{}
   if(state&&(state.revision!==revision||state.owner!==owner||state.state==='failed')){
@@ -127,7 +128,7 @@ export async function ensureSshWorker({directory,id,owner,ssh='ssh',timeout=1800
     if(state)throw Error('上一次 SSH 通道仍在停止，请稍后重试');
   }
   if(!state){
-    const child=launch(process.execPath,[fileURLToPath(import.meta.url),'--worker','--state',directory,'--id',id,'--owner',String(owner),'--ssh',ssh],{env:{...process.env,CMCP_STATE_DIR:directory},detached:true,windowsHide:true,stdio:'ignore'});
+    const child=launch(process.execPath,[fileURLToPath(import.meta.url),'--worker','--state',directory,'--id',id,'--owner',String(owner),'--ssh',ssh],{env:{...env,CMCP_STATE_DIR:directory},detached:true,windowsHide:true,stdio:'ignore'});
     child.on('error',()=>{});child.unref();
   }
   const start=Date.now();let previous='';
@@ -151,6 +152,14 @@ export function sshWorkerState(directory,id,now=Date.now()) {
     safeFile(file);const record=JSON.parse(fs.readFileSync(file,'utf8'));
     return now-record.at>10000||!alive(record.pid)?'':String(record.state||'');
   }catch{return '';}
+}
+// The same record with its last message, for windows that show more than the phase.
+export function sshWorkerRecord(directory,id,now=Date.now()) {
+  try{
+    const file=path.join(directory,'ssh-mcp',hash(path.resolve(directory)+'\0'+id)+'.json');
+    safeFile(file);const record=JSON.parse(fs.readFileSync(file,'utf8'));
+    return now-record.at>10000||!alive(record.pid)?{state:'',message:''}:{state:String(record.state||''),message:String(record.message||'')};
+  }catch{return {state:'',message:''};}
 }
 // Only this device's background channel; a terminal window the user opened stays theirs.
 export async function stopSshWorker(directory,id) {

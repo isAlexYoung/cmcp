@@ -36,6 +36,11 @@ namespace CMCP {
         // The background SSH channel: empty while nothing runs, otherwise its reported phase.
         internal string SshState="";
         internal bool SshStopping;
+        // What the backend or the setup action found this device's CloudCLI to be (CloudCliKinds).
+        internal string CloudKind="";
+        internal bool SelfHostedCloud {get{return CloudActive&&CloudKind==CloudCliKinds.SelfHosted;}}
+        internal bool SetupOffered {get{return CloudActive&&!SshActive&&CloudKind!=CloudCliKinds.WebDesktop&&(Ssh!=null||CloudKind==CloudCliKinds.SelfHosted);}}
+        internal bool SetupRunning;
         // Only the card's own button changes here; a running web connection is not touched.
         internal bool SshActive { get { return Preference.loginMode=="ssh"||(Preference.loginMode!="web"&&Preference.loginMode!="cloudcli"&&Ssh!=null&&(Ssh.active||Target.Url.Length==0)); } }
         internal string SshAddress {get{return Ssh==null?"":Ssh.Address;}}
@@ -53,7 +58,7 @@ namespace CMCP {
         internal readonly ModernButton Toggle=new ModernButton{Glyph="chevron",AccessibleName="展开连接详情"};
         internal readonly ConnectionDetails Details=new ConnectionDetails();
         internal readonly Label StatusText=new Label{TextAlign=ContentAlignment.MiddleRight,AutoEllipsis=true};
-        internal event Action<TargetCard> SwitchRequested, SelectedCard, EditRequested, CopyRequested, DeleteRequested, ConnectRequested, OpenRequested, StopRequested, LogsRequested;
+        internal event Action<TargetCard> SwitchRequested, SelectedCard, EditRequested, CopyRequested, DeleteRequested, ConnectRequested, OpenRequested, StopRequested, LogsRequested, SetupRequested;
         internal event Action<TargetCard,int> MoveRequested;
         readonly LocalToolTip tips=new LocalToolTip();
         internal Func<TargetCard,bool,bool> AnimateExpansion;
@@ -83,6 +88,8 @@ namespace CMCP {
             Details.Open.Click+=delegate{if(OpenRequested!=null)OpenRequested(this);};
             Details.Stop.Click+=delegate{if(StopRequested!=null)StopRequested(this);};
             Details.Logs.Click+=delegate{if(LogsRequested!=null)LogsRequested(this);};
+            Details.Setup.Click+=delegate{if(SetupRequested!=null)SetupRequested(this);};
+            tips.SetToolTip(Details.Setup,"通过 SSH 检查 VPS，只补上缺少的 Claude CLI 和 MCP 条目");
             tips.SetToolTip(LoginSwitch,"切换登录方式：网页桌面 / CloudCLI / SSH");
             tips.SetToolTip(Edit,"编辑名称、备注、图标和登录方式");
                         tips.SetToolTip(Delete,"删除这一台设备，其他连接保持不变");
@@ -167,6 +174,8 @@ namespace CMCP {
             LoginSwitch.Text=SshActive?"SSH":CloudActive?"CloudCLI":"网页桌面";LoginSwitch.Enabled=!BusyStop;
             Details.Open.Text=SshActive?"打开终端":CloudActive?"打开 CloudCLI":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":CloudActive?"web":"monitor";
             Details.Stop.Visible=true;Details.Logs.Visible=Connection.Url.Length>0;
+            bool setup=SetupOffered;if(Details.SetupShown!=setup){Details.SetupShown=setup;if(Expanded){Height=FinalHeight;PerformLayout();}}Details.Setup.Enabled=!SetupRunning&&!BusyStop;
+            Details.Channel=SelfHostedCloud?(Ssh==null?"需要 SSH 信息":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):null;
             tips.SetToolTip(Copy,SshActive?"复制 IP":"复制设备地址");Copy.AccessibleName=L.Text(SshActive?"复制 IP":"复制设备地址");
             if(SshActive){
                 Connect.Text="打开终端";Connect.Glyph="terminal";Connect.Primary=false;Connect.Neutral=true;Connect.Enabled=true;

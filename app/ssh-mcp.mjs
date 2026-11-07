@@ -31,7 +31,14 @@ export function sshArguments(login, {background=false}={}) {
 // that Claude can read from inside the terminal sandbox.
 export const sharedSessionHandoff='if [ "$(id -u)" = 0 ] && [ -e /etc/systemd/system/wd-claude-session.service ]; then '
   +'exec /usr/sbin/runuser -u wdterm -g wdguest -- env -i HOME=/home/wdguest PATH=/usr/bin:/bin LANG=C.UTF-8 CMCP_SHARED_SESSION=1 "$@"; fi; exec "$@"';
-export const remoteCommand=bootstrap=>'sh -c '+quote(sharedSessionHandoff)+' sh python3 -I -B -u -c '+quote(bootstrap);
+// A self-hosted CloudCLI that runs as another account than root's SSH login: the setup action
+// saved that account (cloudcliUser), and root hands the connector to it the same way, so the
+// MCP entry lands in the Claude config that CloudCLI reads. Without root nothing is handed over.
+export const validRunAs=value=>typeof value==='string'&&/^[a-z_][a-z0-9_-]{0,31}$/.test(value)&&value!=='root';
+export const runAsHandoff=user=>{if(!validRunAs(user))throw Error('Invalid CloudCLI account');
+  return 'if [ "$(id -u)" = 0 ]; then cmcp_home=$(getent passwd '+user+' | cut -d: -f6); [ -n "$cmcp_home" ] || { echo "CloudCLI account missing" >&2; exit 70; }; '
+    +'exec /usr/sbin/runuser -u '+user+' -- env -i HOME="$cmcp_home" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 "$@"; fi; exec "$@"';};
+export const remoteCommand=(bootstrap,runAs)=>'sh -c '+quote(runAs?runAsHandoff(runAs):sharedSessionHandoff)+' sh python3 -I -B -u -c '+quote(bootstrap);
 
 export function bootstrapPayload(key, catalog,platform=process.platform) {
   return {name:sshConnectorName(key), catalog,
@@ -51,7 +58,7 @@ export class SshPipe extends EventEmitter {
     super();this.readyState=1;this.bufferedAmount=0;
     const bootstrap=fs.readFileSync(new URL('./ssh-bootstrap.py',import.meta.url),'utf8');
     // No credentials or user paths enter the remote shell command.
-    this.child=spawnProcess(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+    this.child=spawnProcess(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap,login.cloudcliUser||undefined)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
     let stderr='';
     this.child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString()).slice(-16384);});
     this.child.stdout.on('data',chunk=>this.emit('message',chunk,true));

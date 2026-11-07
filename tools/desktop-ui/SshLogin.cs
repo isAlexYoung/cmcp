@@ -22,7 +22,12 @@ namespace CMCP {
         public int webPort=3000,cloudcliPort=3001;
         public string webSecret="",cloudcliSecret="";
         public bool active;
+        // Saved by "初始化／修复 CloudCLI 连接": the account a self-hosted CloudCLI runs as, when root
+        // hands the SSH channel to it, and whether CMCP starts that channel by itself (null: by kind).
+        public string cloudcliUser="";
+        public bool? sshAutoStart;
         internal bool UsesKey{get{return method=="key";}}
+        internal static bool ValidAccount(string value){return value!=null&&(value.Length==0||value!="root"&&Regex.IsMatch(value,@"\A[a-z_][a-z0-9_-]{0,31}\z"));}
         internal string Address{get{return username+"@"+host+":"+port;}}
         internal string CopyCommand{get{return "ssh -p "+port+(UsesKey?" -i \""+keyPath+"\"":"")+" "+username+"@"+host;}}
         internal SshLogin Copy(){return (SshLogin)MemberwiseClone();}
@@ -69,6 +74,8 @@ namespace CMCP {
                 var seen=new HashSet<string>(StringComparer.Ordinal);
                 foreach(var login in data.logins){
                     if(login==null||String.IsNullOrEmpty(login.name)||login.name.Length>512||!seen.Add(login.name)||login.secret==null||login.secret.Length>8192||login.keyPath==null)throw new InvalidDataException();
+                    if(login.cloudcliUser==null)login.cloudcliUser="";
+                    if(!SshLogin.ValidAccount(login.cloudcliUser))throw new InvalidDataException();
                     if(login.webPort<1||login.webPort>65535||login.cloudcliPort<1||login.cloudcliPort>65535||login.webPort==login.cloudcliPort||login.webSecret==null||login.cloudcliSecret==null||login.webSecret.Length>16384||login.cloudcliSecret.Length>16384)throw new InvalidDataException();
                     if(SshLogin.Problem(login.host,Convert.ToString(login.port),login.username,login.method,login.keyPath).Length>0)throw new InvalidDataException();
                 }
