@@ -6,7 +6,7 @@ import path from 'node:path';
 import {ManagerState} from '../state.mjs';
 import {cloudcliName} from '../../app/cloudcli.mjs';
 
-function fixture(t){const directory=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-cloudcli-')),values=new Map(),calls=[];t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));const secrets=async(op,id,value)=>{calls.push(op);if(op==='set')values.set(id,value);if(op==='get')return values.get(id);if(op==='delete')values.delete(id);};return {directory,values,calls,secrets,state:new ManagerState(directory,secrets)};}
+function fixture(t){const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-cloudcli-'))),values=new Map(),calls=[];t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));const secrets=async(op,id,value)=>{calls.push(op);if(op==='set')values.set(id,value);if(op==='get')return values.get(id);if(op==='delete')values.delete(id);};return {directory,values,calls,secrets,state:new ManagerState(directory,secrets)};}
 const cloud=(changes={})=>({url:'https://desktop-claude.example.com',password:'',autoLogin:false,...changes});
 const device=(changes={})=>({url:'',password:'',autoLogin:false,label:'Cloud work',icon:'',note:'',ssh:null,cloudcli:cloud(),...changes});
 

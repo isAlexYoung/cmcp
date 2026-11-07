@@ -102,8 +102,9 @@ namespace CMCP {
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","soft recovery stop action cancels only B instead of starting another connection");
                 b.TestHover(true);b.Connect.PerformClick();check(b.Target.State=="connected"&&a.Target.State=="connected","card connect dispatch addresses B only in isolated interactive demo");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","card disconnect leaves A intact in isolated interactive demo");
-                a.SetExpanded(true,false);Pump();check(a.Details.Visible&&a.Height>a.Width/20&&b.Top>=a.Bottom,"accordion expands inside card and shifts following card");
-                a.Toggle.PerformClick();a.SetExpanded(false,false);Pump();check(!a.Details.Visible&&a.Height==116,"accordion collapse restores enlarged 116px header height");
+                int collapsedHeight=a.Height;
+                a.SetExpanded(true,false);Pump();check(a.Details.Visible&&a.Height>collapsedHeight&&b.Top>=a.Bottom,"accordion expands inside card and shifts following card");
+                a.Toggle.PerformClick();a.SetExpanded(false,false);Pump();check(!a.Details.Visible&&a.Height==collapsedHeight,"accordion collapse restores the header height at the current window size and display scale");
                 a.SetExpanded(true,false);form.RefreshState();Pump();check(Object.ReferenceEquals(a,form.Cards["preview-a"])&&a.Expanded,"status polling preserves card instance and expanded state");
                 a.TestHover(false);check(!a.Edit.Visible&&!a.Copy.Visible&&!a.Delete.Visible,"secondary card actions hide outside hover");a.TestHover(true);check(a.Edit.Visible&&a.Copy.Visible&&a.Delete.Visible,"secondary card actions reveal on hover");
                 form.MoveCard("preview-b","preview-a");check(form.list.Moving,"sorting starts a real position transition");form.list.FinishMotion();Pump();check(b.Top<a.Top,"reorder moves existing controls without reconnecting targets");

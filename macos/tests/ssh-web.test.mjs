@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {ManagerState} from '../state.mjs';
 const ssh=()=>({host:'example.test',port:22,username:'user',method:'password',keyPath:'',secret:'SSH-SECRET',webTunnel:true,webPort:3000,webAutoLogin:true,webPassword:'WEB-SECRET',cloudcliTunnel:true,cloudcliPort:3001,cloudcliAutoLogin:true,cloudcliPassword:'CLOUD-SECRET'});
-function fixture(t){const directory=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-ssh-web-')),values=new Map();t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));const secrets=async(op,id,v)=>{if(op==='set')values.set(id,v);if(op==='get')return values.get(id);if(op==='delete')values.delete(id);};return {directory,values,state:new ManagerState(directory,secrets),secrets};}
+function fixture(t){const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-ssh-web-'))),values=new Map();t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));const secrets=async(op,id,v)=>{if(op==='set')values.set(id,v);if(op==='get')return values.get(id);if(op==='delete')values.delete(id);};return {directory,values,state:new ManagerState(directory,secrets),secrets};}
 const input=(value)=>({url:'',password:'',autoLogin:false,label:'Tunnel device',icon:'',cloudcli:null,ssh:ssh(),...value});
 test('SSH web routes persist independently, switch without connecting and expose no secrets',async t=>{
   const f=fixture(t),s=f.state,id=await s.save(input(),()=>assert.fail('save must not connect'));
