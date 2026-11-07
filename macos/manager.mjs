@@ -22,7 +22,7 @@ import {stopSshWorker,sshWorkerState,stopSshWorkers} from '../app/ssh-terminal.m
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions}={}){
+export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
   const dispatcher=injected||await createDispatcher({roots:store.config.roots});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
@@ -33,7 +33,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
-  let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false;
+  let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false,checking=null,preparedUpdate=null;
   const devices=()=>{const view=store.view(states);return {...view,targets:view.targets.map(t=>t.ssh?{...t,sshState:channelState(directory,t.id)}:t)};};
   const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label})),browsers:browsers().map(({id,label})=>({id,label}))});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
@@ -72,8 +72,20 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.active);return {saved:true};}),
     '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error(store.targets.some(t=>t.id===input.id)?'还没有填写 SSH 信息，请编辑设备后再连接。':'连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal,{closeTerminal:store.preferences.closeTerminal===true})};},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
-    '/api/update/check':async()=>{if(updating)return updates;try{const release=await checkRelease(version,arch,await proxy('https://api.github.com'));updates={state:release?'available':'latest',version:release?.version||null};}catch{updates=checkFailed(updates);}return updates;},
-    '/api/update/download':async()=>{if(updating)throw Error('更新正在进行');updating=true;try{return {directory:await downloadUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}})};}catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},
+    '/api/update/check':async()=>{
+      if(updating)return updates;if(checking)return checking;
+      checking=(async()=>{try{
+        const release=await checkUpdate(version,arch,await proxy('https://api.github.com'));
+        if(release&&preparedUpdate?.version===release.version)updates={state:'ready',phase:'ready',version:release.version,received:1,total:1};
+        else{preparedUpdate=null;updates={state:release?'available':'latest',version:release?.version||null};}
+      }catch{updates=checkFailed(updates);}return updates;})();
+      try{return await checking;}finally{checking=null;}
+    },
+    '/api/update/download':async()=>{if(updating||checking)throw Error('更新正在进行');updating=true;try{
+      preparedUpdate=await prepareUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}});
+      updates={state:'ready',phase:'ready',version:preparedUpdate.version,received:1,total:1};return {directory:preparedUpdate};
+    }catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},
+    '/api/update/prepared':async()=>{if(updating||checking||updates.state!=='ready'||!preparedUpdate)throw Error('请先下载并校验更新');return {directory:preparedUpdate};},
   };
   const server=http.createServer(async(req,res)=>{
     try{

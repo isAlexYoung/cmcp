@@ -28,7 +28,7 @@ namespace CMCP {
         readonly string currentVersion=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
         Palette colors;
         int page=General;
-        bool laying,updateAvailable;
+        bool laying,updateAvailable,updateReady,updateBusy,updateChecking;
         string availableVersion;
         internal string UpdateStatus="检查更新";
         readonly UpdateProgressView updateView=new UpdateProgressView();
@@ -167,10 +167,13 @@ namespace CMCP {
         void BuildAbout(){
             var updates=AddSection("更新");
             sheet.Controls.Add(updateView);updateView.Set(updateProgress);updates.Leading=updateView;
-            var run=Command("检查更新",delegate{action(updateAvailable?"update":"check");},true);
-            refresh.Add(delegate{run.Text=updateAvailable?"立即更新":"检查更新";run.Enabled=updateProgress==null||!updateProgress.Visible||updateProgress.Stage=="failed";run.Invalidate();});
+            var run=Command("下载更新",delegate{action("update");},true);
+            refresh.Add(delegate{run.Text=L.Text(updateReady?"安装更新":"下载更新");run.Enabled=updateAvailable&&!updateBusy;run.Invalidate();});
             AddRow(updates,()=>updateAvailable?L.Text("发现新版本")+" "+availableVersion:"CMCP "+currentVersion,
-                ()=>updateAvailable?L.Text("当前版本")+" "+currentVersion+"  ·  "+L.Text("更新时会短暂断开连接。"):"Windows x64"+(UpdateStatus=="检查更新"?"":"  ·  "+L.Text(UpdateStatus)),run);
+                ()=>updateAvailable?L.Text("当前版本")+" "+currentVersion+"  ·  "+L.Text(updateReady?"更新已下载并校验，可稍后安装。":"下载并校验后，由你确认是否安装。"):"Windows x64"+(UpdateStatus=="检查更新"?"":"  ·  "+L.Text(UpdateStatus)),run);
+            var check=Command("检查更新",delegate{action("check");});
+            refresh.Add(delegate{check.Text=L.Text(updateChecking?"正在检查…":"检查更新");check.Enabled=!updateBusy;check.Invalidate();});
+            AddRow(updates,()=>L.Text("检查更新"),()=>L.Text(UpdateStatus=="检查失败，请重试"?UpdateStatus:"重新获取最新版本，包括已发现更新之后发布的版本。"),check);
             AddRow(updates,"发布页","查看每个版本的更新内容。",Command("打开",delegate{action("releases");}));
             var folders=AddSection("本机文件夹");
             AddRow(folders,"程序文件夹",null,Command("打开",delegate{action("program");}));
@@ -215,7 +218,7 @@ namespace CMCP {
             }finally{laying=false;}
         }
         internal void SetFeedback(string message,bool error){feedback.Text=L.Message(message);feedback.ForeColor=error?colors.Danger:colors.Success;if(error)Viewport.ScrollControlIntoView(feedback);}
-        internal void SetUpdateAvailable(bool available,string newVersion){if(updateAvailable==available&&availableVersion==newVersion)return;updateAvailable=available;availableVersion=newVersion;AboutTab.Dot=available;AboutTab.Invalidate();RefreshControls();}
+        internal void SetUpdateAvailable(bool available,string newVersion,bool prepared=false,bool busy=false,bool checking=false){if(updateAvailable==available&&availableVersion==newVersion&&updateReady==prepared&&updateBusy==busy&&updateChecking==checking)return;updateAvailable=available;availableVersion=newVersion;updateReady=prepared;updateBusy=busy;updateChecking=checking;AboutTab.Dot=available;AboutTab.Invalidate();RefreshControls();}
         internal void SetUpdateStatus(string value){UpdateStatus=value;RefreshControls();}
         internal void SetUpdateProgress(UpdateProgress value){updateProgress=value;updateView.Set(value);updateView.Apply(colors);RefreshControls();}
         internal void Apply(Palette palette){

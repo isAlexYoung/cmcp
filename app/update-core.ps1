@@ -24,6 +24,7 @@ function Receive-CmcpFile([string]$Url,[string]$Destination,[long]$Limit,[script
     for ($redirect=0; $redirect -le 5; $redirect++) {
         if ($uri.Scheme -cne 'https' -or !$uri.IsDefaultPort -or $uri.UserInfo -or $uri.Host -notin @('api.github.com','github.com','release-assets.githubusercontent.com','objects.githubusercontent.com')) { throw 'Untrusted download host' }
         $request = [Net.HttpWebRequest]::Create($uri); $request.AllowAutoRedirect=$false; $request.UserAgent='CMCP-updater/4.1';$request.Timeout=45000;$request.ReadWriteTimeout=45000
+        $request.Headers['Cache-Control']='no-cache'
         # Same network policy as the existing connector: explicit proxy, then Windows proxy.
         $proxyValue = $env:HTTPS_PROXY; if (!$proxyValue) { $proxyValue=$env:ALL_PROXY }
         if ($proxyValue) { $proxyUri=[uri]$proxyValue; if ($proxyUri.Scheme -notin @('http','https')) { throw 'Unsupported proxy scheme' };$request.Proxy=New-Object Net.WebProxy($proxyUri) }

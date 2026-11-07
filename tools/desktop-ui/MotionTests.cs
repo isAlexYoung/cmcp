@@ -141,7 +141,7 @@ namespace CMCP {
                 form.SimulateUpdate("9.9.9");check(form.toolbar.Settings.Dot,"a new version puts a dot on the settings button");
                 form.OpenSettings();Application.DoEvents();check(form.Settings.AboutTab.Dot&&!form.Settings.GeneralTab.Dot,"the dot leads to the About category");
                 form.Settings.ShowAbout();Application.DoEvents();var about=form.Settings.Viewport.Controls[0];
-                check(about.Controls.OfType<ModernButton>().Any(b=>b.Text=="立即更新")&&about.Controls.OfType<Label>().Any(l=>l.Text.Contains("9.9.9")),"About offers the update and names the version");
+                check(about.Controls.OfType<ModernButton>().Any(b=>b.Text=="下载更新")&&about.Controls.OfType<ModernButton>().Any(b=>b.Text=="检查更新"&&b.Enabled)&&about.Controls.OfType<Label>().Any(l=>l.Text.Contains("9.9.9")),"About offers the update and keeps a separate enabled check button");
                 check(NothingOverlaps(about),"the update offer does not cover other rows");
             }
         }

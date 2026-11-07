@@ -37,7 +37,7 @@ export function receive(url,{proxy='',limit=2*1024*1024,onProgress=()=>{}}={},re
   }).finally(()=>agent?.destroy());
 }
 // A network failure says nothing about a version already found, and its notice should stay.
-export function checkFailed(updates){return updates.version?{state:'available',version:updates.version}:{state:'error',version:null};}
+export function checkFailed(updates){return updates.state==='ready'?{...updates,checkError:true}:updates.version?{state:'available',version:updates.version,checkError:true}:{state:'error',version:null};}
 export async function checkRelease(current,arch,proxy='',fetch=receive){return selectRelease(JSON.parse((await fetch('https://api.github.com/repos/isAlexYoung/cmcp/releases/latest',{proxy})).toString('utf8')),current,arch);}
 export async function downloadUpdate({current,arch,proxy,directory,fetch=receive,onProgress=()=>{}}){
   let stage='release';const progress=(next,received=0,total=0)=>{stage=next;onProgress({phase:next,received,total});};
@@ -53,7 +53,7 @@ export async function downloadUpdate({current,arch,proxy,directory,fetch=receive
   if(bytes.length!==release.zip.size||digest!==match[1]||(release.zip.digest&&release.zip.digest!=='sha256:'+digest))throw Error('更新包校验失败');
   const folder=path.join(privateDir(directory),'update-'+randomUUID());fs.mkdirSync(folder,{mode:0o700});
   fs.writeFileSync(path.join(folder,release.name),bytes,{flag:'wx',mode:0o600});
-  progress('restart',bytes.length,release.zip.size);
+  progress('ready',bytes.length,release.zip.size);
   return {folder,zip:path.join(folder,release.name),version:release.version,sha256:digest};
   }catch(error){throw Object.assign(Error('更新未完成，请查看更新进度中的提示。'),{code:error.code==='ETIMEDOUT'?'timeout':stage==='download'?'network':stage==='verify'||stage==='checksum'?'checksum':stage==='release'?'release':'prepare',phase:stage});}
 }

@@ -42,20 +42,39 @@ namespace CMCP {
         readonly Action<string> report;
         readonly Action<UpdateProgress> progress;
         readonly Action exit;
+        readonly Func<string,bool> confirmInstall;
         DateTime checkedAt=DateTime.MinValue;
         Process child;
-        bool busy,disposed;
+        bool busy,disposed,confirming;
+        string preparedTransaction,preparedVersion;
         internal string Status="检查更新",AvailableVersion;
         internal bool Available;
         internal void SimulateAvailable(string version){Available=true;AvailableVersion=version;Notify("有可用更新");}
         internal UpdateProgress Progress;
         internal bool Installing {get{return busy&&installing;}}
+        internal bool Busy {get{return busy||confirming;}}
+        internal bool Checking {get{return busy&&!installing;}}
+        internal bool Prepared {get{return preparedTransaction!=null;}}
         bool installing;
-        internal UpdateController(string install,string data,bool test,Action<string> notify,Action close,Action<UpdateProgress> changed=null){root=install;state=data;isolated=test;report=notify;exit=close;progress=changed;}
+        internal UpdateController(string install,string data,bool test,Action<string> notify,Action close,Action<UpdateProgress> changed=null,Func<string,bool> confirm=null){root=install;state=data;isolated=test;report=notify;exit=close;progress=changed;confirmInstall=confirm;}
         void Notify(string value){Status=value;report(value);}
         void ShowProgress(UpdateProgress value){Progress=value;if(progress!=null)progress(value);if(value!=null)Notify(value.Title);}
-        internal void Check(bool force){if(busy||disposed)return;if(isolated){Notify("已是最新版");return;}if(!force&&DateTime.UtcNow-checkedAt<TimeSpan.FromMinutes(15)){report(Status);return;}Run("check");}
-        internal void Install(){if(busy||disposed)return;if(isolated){Notify("Preview: updates are disabled.");return;}if(File.Exists(Path.Combine(root,".git"))||Directory.Exists(Path.Combine(root,".git"))){Notify("源码目录不会自动覆盖，请从发布页下载便携包。");return;}Run("prepare");}
+        internal void Check(bool force){if(Busy||disposed)return;if(isolated){Notify("已是最新版");return;}if(!force&&DateTime.UtcNow-checkedAt<TimeSpan.FromMinutes(15)){report(Status);return;}Run("check");}
+        internal void Install(){if(Busy||disposed)return;if(isolated){Notify("Preview: updates are disabled.");return;}if(Prepared){ConfirmPrepared();return;}if(File.Exists(Path.Combine(root,".git"))||Directory.Exists(Path.Combine(root,".git"))){Notify("源码目录不会自动覆盖，请从发布页下载便携包。");return;}Run("prepare");}
+        void ForgetPrepared(){preparedTransaction=null;preparedVersion=null;}
+        void ConfirmPrepared(){
+            if(!Prepared||disposed)return;
+            bool approved=false;confirming=true;
+            try{approved=confirmInstall!=null&&confirmInstall(preparedVersion);}finally{confirming=false;}
+            if(!approved||disposed){Notify("更新已下载并校验，可稍后安装。");return;}
+            try{
+                string transaction=preparedTransaction,path=PortableState.TransactionPath(root,transaction),helper=Path.Combine(path,"update-apply.ps1");
+                if(!File.Exists(helper))throw new IOException();
+                string command="& "+Actions.Quote(helper)+" -Transaction "+Actions.Quote(transaction);
+                Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=path}).Dispose();
+                ShowProgress(new UpdateProgress{Stage="restart",Received=1,Total=1});exit();
+            }catch{ForgetPrepared();ShowProgress(new UpdateProgress{Stage="failed"});}
+        }
         void Run(string action){busy=true;installing=action=="prepare";if(installing)ShowProgress(new UpdateProgress{Stage="installed"});else Notify("正在检查更新…");
             var worker=new BackgroundWorker{WorkerReportsProgress=true};
             worker.ProgressChanged+=delegate(object sender,ProgressChangedEventArgs e){if(!disposed)ShowProgress((UpdateProgress)e.UserState);};
@@ -82,14 +101,12 @@ namespace CMCP {
                 var data=(Dictionary<string,object>)e.Result;string result=Convert.ToString(LocalState.Get(data,"status"));
                 if(result=="failed"){if(action=="check")Notify("检查失败，请重试");else ShowProgress(new UpdateProgress{Stage="failed",Code=Convert.ToString(LocalState.Get(data,"code"))});return;}
                 checkedAt=DateTime.UtcNow;
-                if(result=="current"){Available=false;AvailableVersion=null;ShowProgress(null);Notify("已是最新版");return;}if(result=="available"){string offered=Convert.ToString(LocalState.Get(data,"version"));Available=true;AvailableVersion=System.Text.RegularExpressions.Regex.IsMatch(offered??"",@"^\d+\.\d+\.\d+$")?offered:"";Notify("有可用更新");return;}
+                if(result=="current"){ForgetPrepared();Available=false;AvailableVersion=null;ShowProgress(null);Notify("已是最新版");return;}if(result=="available"){string offered=Convert.ToString(LocalState.Get(data,"version"));Available=true;AvailableVersion=System.Text.RegularExpressions.Regex.IsMatch(offered??"",@"^\d+\.\d+\.\d+$")?offered:"";if(preparedVersion!=AvailableVersion){ForgetPrepared();ShowProgress(null);}Notify(Prepared?"更新已下载并校验，可稍后安装。":"有可用更新");return;}
                 if(result!="prepared"){ShowProgress(new UpdateProgress{Stage="failed"});return;}
                 try{
-                    string transaction=Convert.ToString(LocalState.Get(data,"transaction"));Guid id;if(!Guid.TryParseExact(transaction,"N",out id))throw new IOException();
-                    string path=PortableState.TransactionPath(root,transaction),helper=Path.Combine(path,"update-apply.ps1");
-                    string command="& "+Actions.Quote(helper)+" -Transaction "+Actions.Quote(transaction);
-                    Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),"-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(command))){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=path}).Dispose();
-                    ShowProgress(new UpdateProgress{Stage="restart",Received=1,Total=1});exit();
+                    string transaction=Convert.ToString(LocalState.Get(data,"transaction")),version=Convert.ToString(LocalState.Get(data,"version"));Guid id;if(!Guid.TryParseExact(transaction,"N",out id)||!System.Text.RegularExpressions.Regex.IsMatch(version??"",@"^\d+\.\d+\.\d+$"))throw new IOException();
+                    preparedTransaction=transaction;preparedVersion=version;Available=true;AvailableVersion=version;
+                    ShowProgress(new UpdateProgress{Stage="ready",Received=1,Total=1});ConfirmPrepared();
                 }catch{ShowProgress(new UpdateProgress{Stage="failed"});}
             };worker.RunWorkerAsync();
         }

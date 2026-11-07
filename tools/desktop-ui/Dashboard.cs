@@ -83,7 +83,8 @@ namespace CMCP {
             content.Controls.Add(list);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
             toolbar.Add.Click+=delegate{OpenAdd();};
             toolbar.Settings.Click+=delegate{OpenSettings();};
-            updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();},SetUpdateProgress);
+            updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();},SetUpdateProgress,
+                version=>MessageBox.Show(this,String.Format(L.Text("CMCP {0} 已下载并通过校验。\r\n\r\n现在安装并重启吗？安装时会短暂断开全部连接；选择“否”可稍后安装。"),version),"CMCP",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)==DialogResult.Yes);
             updateCheck.Tick+=delegate{updateCheck.Interval=6*60*60*1000;updates.Check(false);};if(!isolated)updateCheck.Start();
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
@@ -135,7 +136,7 @@ namespace CMCP {
             Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
             foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
         }
-        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.AnimateContent=TurnPart;Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});updates.Check(false);}
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.AnimateContent=TurnPart;Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion,updates.Prepared,updates.Busy,updates.Checking);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});updates.Check(false);}
         internal void CloseSettings(){if(Settings==null)return;Turn(-1,delegate{var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;});}
         internal SnapshotOverlay Transition;
         internal Control.ControlCollection ContentControls{get{return content.Controls;}}
@@ -178,7 +179,7 @@ namespace CMCP {
             else if(name=="program")OpenLocal(root);else if(name=="logs")OpenLocal(stateDirectory);else if(name=="releases")Process.Start(new ProcessStartInfo(UpdateController.ReleaseUrl){UseShellExecute=true});
         }catch{if(Settings!=null)Settings.SetFeedback("操作未完成，请查看本机日志；其他连接不受影响。",true);}}
         void RunUpdate(){if(BackendStarting||ExitPending)return;updateNotice=true;if(children.Count>0){SetUpdateStatus("请先完成或取消正在处理的卡片操作。");return;}updates.Install();}
-        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.SetUpdateDot(updates.Available);if(Settings!=null){Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion);Settings.SetUpdateStatus(message);}else if(updateNotice&&(updates.Progress==null||!updates.Progress.Visible)){notice=message;status.Text=L.Text(message);}}
+        void SetUpdateStatus(string message){if(IsDisposed)return;toolbar.SetUpdateDot(updates.Available);if(Settings!=null){Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion,updates.Prepared,updates.Busy,updates.Checking);Settings.SetUpdateStatus(message);}else if(updateNotice&&(updates.Progress==null||!updates.Progress.Visible)){notice=message;status.Text=L.Text(message);}}
         internal void SetUpdateProgress(UpdateProgress value){
             if(IsDisposed)return;
             UpdateView.Set(value);UpdateView.Apply(colors);

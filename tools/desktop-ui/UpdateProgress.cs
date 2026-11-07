@@ -13,13 +13,14 @@ namespace CMCP {
         // Stage ranges estimate overall work; Detail always retains the measured stage counters.
         internal int OverallPercent {get{
             int start=0,end=5;
-            switch(Stage){case "release":start=5;end=10;break;case "download":start=10;end=80;break;case "checksum":start=80;end=85;break;case "extract":start=85;end=95;break;case "verify":start=95;end=99;break;case "restart":return 100;case "failed":return -1;}
+            switch(Stage){case "release":start=5;end=10;break;case "download":start=10;end=80;break;case "checksum":start=80;end=85;break;case "extract":start=85;end=95;break;case "verify":start=95;end=99;break;case "ready":case "restart":return 100;case "failed":return -1;}
             return start+(int)((end-start)*Math.Max(0,Percent)/100d);
         }}
-        static readonly Dictionary<string,string> Stages=new Dictionary<string,string>{{"installed","正在检查当前安装"},{"release","正在获取更新信息"},{"download","正在下载更新"},{"checksum","正在校验下载文件"},{"extract","正在解压更新"},{"verify","正在校验安装包"},{"restart","更新已准备，正在重新启动…"},{"failed","更新未完成"}};
+        static readonly Dictionary<string,string> Stages=new Dictionary<string,string>{{"installed","正在检查当前安装"},{"release","正在获取更新信息"},{"download","正在下载更新"},{"checksum","正在校验下载文件"},{"extract","正在解压更新"},{"verify","正在校验安装包"},{"ready","更新已下载并校验，等待安装确认"},{"restart","更新已准备，正在重新启动…"},{"failed","更新未完成"}};
         internal string Title {get{string value;return L.Text(Stages.TryGetValue(Stage??"",out value)?value:"正在准备更新");}}
         internal string Detail {get{
             if(Stage=="failed")return L.Text(Failure(Code));
+            if(Stage=="ready")return L.Text("当前版本仍在运行；点击“安装更新”后确认安装。");
             if(Total>0)return Unit=="files"?Received+" / "+Total+" "+L.Text("个文件")+" · "+Percent+"%":String.Format(System.Globalization.CultureInfo.InvariantCulture,"{0:0.0} / {1:0.0} MB · {2}%",Received/1048576d,Total/1048576d,Percent);
             return L.Text(Stage=="restart"?"程序重启后完成更新，原安装会保留备份。":"请稍候；验证完成前不会替换当前安装。");
         }}

@@ -27,7 +27,7 @@ test('download verifies checksum and asset digest before staging a file',async t
   const update=await downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch});assert.equal(fs.readFileSync(update.zip,'utf8'),'zip');
   r.assets[0].digest='sha256:'+'0'.repeat(64);await assert.rejects(downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch}));
 });
-test('download reports phase and byte progress before verification and restart',async t=>{
+test('download reports phase and byte progress before verification and installation approval',async t=>{
   const d=directory(t),r=release(),bytes=Buffer.from('zip'),events=[];
   const fetch=async(url,options)=>{
     if(url.endsWith('/latest'))return Buffer.from(JSON.stringify(r));
@@ -35,7 +35,7 @@ test('download reports phase and byte progress before verification and restart',
     options.onProgress(0,3);options.onProgress(1,3);options.onProgress(3,3);return bytes;
   };
   await downloadUpdate({current:'4.1.1',arch:'arm64',directory:d,fetch,onProgress:value=>events.push(value)});
-  assert.equal(events[0].phase,'release');assert.equal(events.at(-1).phase,'restart');
+  assert.equal(events[0].phase,'release');assert.equal(events.at(-1).phase,'ready');assert.ok(!events.some(e=>e.phase==='restart'));
   assert.deepEqual(events.filter(v=>v.phase==='download').map(v=>v.received),[0,0,1,3]);
   assert.ok(events.findIndex(v=>v.phase==='verify')>events.findIndex(v=>v.received===3));
 });

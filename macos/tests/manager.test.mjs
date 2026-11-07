@@ -10,6 +10,38 @@ import {RequestRecovery} from '../../app/request-recovery.mjs';
 
 function fixture(t){const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-manager-')));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));const values=new Map(),calls=[];const secrets=async(op,id,password)=>{calls.push({op,id});if(op==='set')values.set(id,password);if(op==='delete')values.delete(id);if(op==='get')return values.get(id);};return {directory,secrets,values,calls};}
 const input=(url='https://first.invalid')=>({url,label:'Mac',password:'',autoLogin:false,icon:''});
+
+test('update checks refresh old offers and prepared downloads never restart the manager',async t=>{
+  const f=fixture(t);let offered='4.17.3',downloads=0;
+  const m=await createManager({...f,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}},
+    checkUpdate:async()=>({version:offered}),prepareUpdate:async({onProgress})=>{downloads++;onProgress({phase:'verify',received:3,total:3});return {folder:f.directory,zip:'verified.zip',version:offered,sha256:'a'.repeat(64)};}});
+  t.after(()=>m.close());
+  const call=async route=>{const r=await fetch(m.origin+'/api/update/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:'{}'});return {status:r.status,data:await r.json()};};
+  assert.equal((await call('check')).data.version,'4.17.3');
+  offered='4.17.4';assert.equal((await call('check')).data.version,'4.17.4');
+  assert.equal((await call('prepared')).status,400,'an unverified offer cannot be installed');
+  const result=await call('download');assert.equal(result.data.directory.version,'4.17.4');
+  assert.equal(m.snapshot().updates.state,'ready');assert.equal((await call('prepared')).data.directory.version,'4.17.4');
+  assert.equal((await fetch(m.origin+'/api/state',{headers:{'x-cmcp-token':m.token}})).status,200,'download leaves the backend running');
+  assert.equal((await call('check')).data.state,'ready');assert.equal(downloads,1,'checking the same version does not re-download');
+  offered='4.17.5';assert.equal((await call('check')).data.version,'4.17.5');
+  assert.equal((await call('prepared')).status,400,'a superseded package cannot be obtained as the current install candidate');
+  await call('download');assert.equal((await call('prepared')).data.directory.version,'4.17.5');assert.equal(downloads,2);
+});
+
+test('concurrent update checks share one request and a failure keeps the verified package',async t=>{
+  const f=fixture(t);let release,checks=0,fail=false;
+  const m=await createManager({...f,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}},
+    checkUpdate:async()=>{checks++;if(fail)throw Error('offline');return await new Promise(resolve=>{release=resolve;});},
+    prepareUpdate:async()=>({version:'4.17.4',folder:f.directory,zip:'verified.zip',sha256:'a'.repeat(64)})});
+  t.after(()=>m.close());
+  const call=async route=>{const r=await fetch(m.origin+'/api/update/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:'{}'});return {status:r.status,data:await r.json()};};
+  const first=call('check'),second=call('check');
+  const limit=Date.now()+3000;while(!release){if(Date.now()>limit)throw Error('check did not start');await new Promise(r=>setTimeout(r,5));}
+  assert.equal((await call('download')).status,400,'a download cannot race a running check');
+  release({version:'4.17.4'});assert.equal((await first).data.version,'4.17.4');assert.equal((await second).data.version,'4.17.4');assert.equal(checks,1);
+  await call('download');fail=true;const checked=await call('check');assert.equal(checked.data.state,'ready');assert.equal(checked.data.checkError,true);assert.equal((await call('prepared')).status,200);
+});
 test('chunked transfer sessions can exceed 256 requests without duplicate execution',async()=>{
   const cache=new RequestRecovery({limit:16384});let executed=0;
   for(let i=0;i<1024;i++){const id=i.toString(16).padStart(32,'0');const result=await cache.handle(id,{chunk:i},'execute',async()=>{executed++;return {offset:i};});assert.equal(result.recovery.state,'done');}

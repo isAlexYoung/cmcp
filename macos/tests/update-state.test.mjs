@@ -26,12 +26,12 @@ test('unknown or invalid stage counters never invent measured completion',()=>{
 
 test('an available version is offered with its number',()=>{
   const view=updateView({state:'available',version:'4.12.0'});
-  assert.deepEqual([view.offered,view.version,view.button,view.busy,view.status],[true,'4.12.0','立即更新',false,'']);
+  assert.deepEqual([view.offered,view.version,view.button,view.busy,view.status],[true,'4.12.0','下载更新',false,'']);
 });
 
 test('nothing is offered before a check or once up to date',()=>{
   for(const updates of [undefined,{state:'unchecked',version:null},{state:'latest',version:null},{state:'error',version:null}]){
-    const view=updateView(updates);assert.equal(view.offered,false);assert.equal(view.button,'检查更新');
+    const view=updateView(updates);assert.equal(view.offered,false);assert.equal(view.button,'下载更新');
   }
   assert.equal(updateView({state:'latest',version:null}).status,'已是最新版');
   assert.equal(updateView({state:'error',version:null}).status,'检查失败，请重试');
@@ -41,12 +41,12 @@ test('the version stays offered through an update and after it fails',()=>{
   const running=updateView({state:'updating',version:'4.12.0',phase:'download'});
   assert.deepEqual([running.offered,running.busy],[true,true]);
   const failed=updateView({state:'failed',version:'4.12.0',code:'network'});
-  assert.deepEqual([failed.offered,failed.busy,failed.button],[true,false,'立即更新']);
+  assert.deepEqual([failed.offered,failed.busy,failed.button],[true,false,'下载更新']);
 });
 
-test('a failure without a known version offers another check, not an update',()=>{
+test('a failure without a known version cannot enable a download',()=>{
   const view=updateView({state:'failed',code:'prepare'});
-  assert.deepEqual([view.offered,view.button,view.busy],[false,'检查更新',false]);
+  assert.deepEqual([view.offered,view.button,view.busy],[false,'下载更新',false]);
 });
 
 test('checking blocks the button and says so',()=>{
@@ -55,10 +55,20 @@ test('checking blocks the button and says so',()=>{
 });
 
 test('a failed check does not take back a version already found',()=>{
-  assert.deepEqual(checkFailed({state:'available',version:'4.12.0'}),{state:'available',version:'4.12.0'});
-  assert.deepEqual(checkFailed({state:'failed',version:'4.12.0',code:'network'}),{state:'available',version:'4.12.0'});
+  assert.deepEqual(checkFailed({state:'available',version:'4.12.0'}),{state:'available',version:'4.12.0',checkError:true});
+  assert.deepEqual(checkFailed({state:'failed',version:'4.12.0',code:'network'}),{state:'available',version:'4.12.0',checkError:true});
   assert.deepEqual(checkFailed({state:'latest',version:null}),{state:'error',version:null});
   assert.deepEqual(checkFailed({state:'unchecked',version:null}),{state:'error',version:null});
+});
+
+test('a verified update stays ready to install while another check can run',()=>{
+  const ready={state:'ready',phase:'ready',version:'4.17.4',received:1,total:1};
+  assert.deepEqual([updateView(ready).offered,updateView(ready).prepared,updateView(ready).button,updateView(ready).busy],[true,true,'安装更新',false]);
+  assert.equal(updateRing(ready).percent,100);
+  assert.equal(updateView(ready,true).busy,true);
+  assert.equal(updateView(ready,false,true).busy,true);
+  assert.equal(updateView(checkFailed(ready)).prepared,true);
+  assert.equal(updateView(checkFailed(ready)).status,'检查失败，请重试');
 });
 
 test('checks run shortly after start and then every six hours',()=>{

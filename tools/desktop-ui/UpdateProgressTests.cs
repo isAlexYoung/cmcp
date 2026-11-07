@@ -10,6 +10,7 @@ namespace CMCP {
     internal static class UpdateProgressTests {
         internal static void Run(string directory,Action<bool,string> check){
             RepaintTests(directory,check);
+            ConfirmationTests(directory,check);
             var packet=new Dictionary<string,object>{{"type","progress"},{"stage","download"},{"received",30},{"total",100},{"unit","bytes"},{"message","DO-NOT-DISPLAY"}};
             var value=UpdateProgress.Read(packet);check(value.Percent==30&&!value.Detail.Contains("DO-NOT-DISPLAY"),"update progress shows measured bytes and ignores untrusted message text");
             packet["received"]=101;bool rejected=false;try{UpdateProgress.Read(packet);}catch(InvalidDataException){rejected=true;}check(rejected,"invalid progress counters cannot overflow or report a false completion");
@@ -39,6 +40,45 @@ namespace CMCP {
                 check(!controller.Installing&&!exited&&controller.Progress!=null&&controller.Progress.Stage=="failed"&&controller.Progress.Code=="checksum","structured failures preserve their reason and never launch an update helper");
             }
             }finally{SynchronizationContext.SetSynchronizationContext(previousContext);}
+            }
+        }
+        static void WaitUpdate(UpdateController controller){
+            DateTime until=DateTime.UtcNow.AddSeconds(15);
+            while(controller.Busy&&DateTime.UtcNow<until){Application.DoEvents();Thread.Sleep(10);}
+            Application.DoEvents();if(controller.Busy)throw new TimeoutException("Update fixture did not finish");
+        }
+        static void ConfirmationTests(string directory,Action<bool,string> check){
+            string root=Path.Combine(directory,"update-confirmation","install"),state=Path.Combine(root,"state"),transaction=Guid.NewGuid().ToString("N"),marker=Path.Combine(state,"installed.txt");
+            Directory.CreateDirectory(Path.Combine(root,"app"));Directory.CreateDirectory(state);
+            File.WriteAllText(Path.Combine(state,"offered.txt"),"4.17.3");
+            string script="param($Action,$InstallRoot,$StateDirectory,$ManagerPid)\n$version=[IO.File]::ReadAllText((Join-Path $StateDirectory 'offered.txt'));if($Action -eq 'check'){[Console]::WriteLine((@{status='available';version=$version}|ConvertTo-Json -Compress))}else{[Console]::WriteLine((@{status='prepared';transaction='"+transaction+"';version=$version}|ConvertTo-Json -Compress))}";
+            File.WriteAllText(Path.Combine(root,"app","update.ps1"),script);
+            string prepared=PortableState.TransactionPath(root,transaction);Directory.CreateDirectory(prepared);
+            File.WriteAllText(Path.Combine(prepared,"update-apply.ps1"),"param($Transaction)\n[IO.File]::WriteAllText("+Actions.Quote(marker)+",$Transaction)");
+            using(var owner=new Form()){
+                owner.Show();Application.DoEvents();var context=SynchronizationContext.Current;SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+                try{
+                    int confirmations=0,exits=0;bool approve=false;string asked=null;
+                    using(var c=new UpdateController(root,state,false,delegate{},()=>exits++,confirm:version=>{confirmations++;asked=version;return approve;})){
+                        c.Check(true);WaitUpdate(c);check(c.AvailableVersion=="4.17.3","manual update check finds the initial offer");
+                        File.WriteAllText(Path.Combine(state,"offered.txt"),"4.17.4");c.Check(true);WaitUpdate(c);
+                        check(c.AvailableVersion=="4.17.4","a manual check refreshes an existing offer without restarting CMCP");
+                        c.Install();WaitUpdate(c);
+                        check(confirmations==1&&asked=="4.17.4"&&c.Prepared&&c.Progress.Stage=="ready"&&exits==0&&!File.Exists(marker),"verified downloads wait for approval and declining keeps the manager running");
+                        c.Check(true);WaitUpdate(c);check(c.Prepared&&confirmations==1,"checking the same release retains the verified package without another install prompt");
+                        File.WriteAllText(Path.Combine(state,"offered.txt"),"4.17.5");c.Check(true);WaitUpdate(c);
+                        check(c.AvailableVersion=="4.17.5"&&!c.Prepared&&exits==0,"a newer release invalidates an older ready-to-install offer");
+                        c.Install();WaitUpdate(c);approve=true;c.Install();
+                        DateTime until=DateTime.UtcNow.AddSeconds(8);while(!File.Exists(marker)&&DateTime.UtcNow<until){Application.DoEvents();Thread.Sleep(10);}
+                        check(confirmations==3&&asked=="4.17.5"&&exits==1&&File.Exists(marker)&&File.ReadAllText(marker)==transaction,"only explicit approval starts the helper for the pinned verified transaction");
+                    }
+                    using(var page=new SettingsPage(new AppSettings(),Palette.Create(false),delegate{},delegate{})){
+                        owner.Controls.Add(page);page.ShowAbout();page.SetUpdateAvailable(true,"4.17.4");Application.DoEvents();var controls=page.Viewport.Controls[0].Controls.OfType<ModernButton>().ToArray();
+                        check(controls.Any(b=>b.Text==L.Text("检查更新")&&b.Enabled)&&controls.Any(b=>b.Text==L.Text("下载更新")&&b.Enabled),"About always has a separate check button while a release is available");
+                        page.SetUpdateAvailable(true,"4.17.4",true);Application.DoEvents();check(controls.Any(b=>b.Text==L.Text("安装更新")&&b.Enabled)&&controls.Any(b=>b.Text==L.Text("检查更新")&&b.Enabled),"deferring installation retains both Install update and Check for updates");
+                        owner.Controls.Remove(page);
+                    }
+                }finally{SynchronizationContext.SetSynchronizationContext(context);}
             }
         }
         static void RepaintTests(string directory,Action<bool,string> check){

@@ -32,7 +32,7 @@ try{
     $request=[ordered]@{schema=1;installRoot=$InstallRoot;staged=$stage;backup=$backup;version=$release.version;oldVersion=$current;managerPid=$ManagerPid;managerStart=$manager.StartTime.ToUniversalTime().Ticks.ToString();token=[guid]::NewGuid().ToString('N');zipHash=$hash}
     foreach($name in @('update-core.ps1','update-apply.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $transaction $name)}
     [IO.File]::WriteAllText((Join-Path $transaction 'request.json'),($request|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
-    [Console]::WriteLine((@{status='prepared';transaction=$id}|ConvertTo-Json -Compress))
+    [Console]::WriteLine((@{status='prepared';transaction=$id;version=$release.version}|ConvertTo-Json -Compress))
 }catch{
     $code=Get-CmcpUpdateFailureCode $_ $phase
     if($transaction -and (Test-Path -LiteralPath $transaction)){
