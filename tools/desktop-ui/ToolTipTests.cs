@@ -26,7 +26,7 @@ namespace CMCP {
             try{
                 using(var form=new Manager(true)){
                     form.ClientSize=new Size(882,505);form.Show();form.Activate();
-                    var bar=form.Controls.OfType<DashboardToolbar>().Single();var card=form.Cards.Values.First();var button=card.LoginSwitch;
+                    var bar=form.Controls.OfType<DashboardToolbar>().Single();var card=form.Cards.Values.First();var button=card.Edit;
                     var toolbarTips=(LocalToolTip)typeof(DashboardToolbar).GetField("tips",fields).GetValue(bar);
                     var toolbarSource=(Dictionary<Control,string>)typeof(LocalToolTip).GetField("source",fields).GetValue(toolbarTips);
                     check(!toolbarSource.ContainsKey(bar.Settings)&&!toolbarSource.ContainsKey(bar.Add),"settings and add-device buttons no longer carry hover explanations");
@@ -46,7 +46,7 @@ namespace CMCP {
                     form.SetTheme(true);Application.DoEvents();
                     check(!visible.Visible||visible.BackColor==Palette.Create(true).Subtle,"theme changes never leave a tooltip using the old colors");
                     if(!visible.Visible){button.Focus();Cursor.Position=button.PointToScreen(new Point(button.Width/2,button.Height/2));Application.DoEvents();Enter(button);Until(()=>Window(tips).Visible);visible=Window(tips);}
-                    L.Set("en");Application.DoEvents();check(visible.Visible&&visible.AccessibleName=="Switch sign-in: shared web / SSH","visible tooltip text follows language changes");
+                    L.Set("en");Application.DoEvents();check(visible.Visible&&visible.AccessibleName==L.Text("编辑名称、备注、图标和登录方式")&&visible.AccessibleName!="编辑名称、备注、图标和登录方式","visible tooltip text follows language changes");
                     tips.SetToolTip(button,"设置",true);Application.DoEvents();check(visible.AccessibleName=="设置","user-written notes stay literal when the interface language changes");
                     int shortHeight=visible.Height;
                     tips.SetToolTip(button,"A long tooltip keeps Chinese 中文 and English text readable, wraps inside the display, and never truncates important information. "+new string('W',100));Application.DoEvents();
