@@ -56,9 +56,10 @@ test('uninstall route stops connections, deletes saved passwords, reports cloud 
   const launched=[],removed=[];
   const {m,deleted}=await managerFixture(t,{check(){},launch:pids=>launched.push(pids)},async value=>{removed.push(value.url);if(value.url.includes('second'))throw Error('unreachable');});
   await m.store.save(target('https://first.invalid','secret'),async()=>true);await m.store.save(target('https://second.invalid'),async()=>true);m.store.setEnabled(null,true);
+  await m.store.save({...target(''),cloudcli:{url:'https://cli.invalid',password:'cli-secret',autoLogin:true}},()=>assert.fail('CloudCLI save cannot log in'));m.store.setEnabled(null,true);
   assert.equal((await post(m,'wrong')).status,403);assert.equal(launched.length,0);
   const response=await post(m);assert.equal(response.status,200);assert.deepEqual(await response.json(),{uninstalled:true,cloudFailed:1});
-  assert.deepEqual(removed.sort(),['https://first.invalid','https://second.invalid']);assert.equal(deleted.length,1);
+  assert.deepEqual(removed.sort(),['https://cli.invalid','https://first.invalid','https://second.invalid']);assert.equal(deleted.length,2);
   assert.deepEqual(launched,[[process.pid,process.ppid,12345]]);assert.ok([...m.store.controlMap().values()].every(value=>!value.enabled));
 });
 test('uninstall changes nothing when the application cannot be removed',async t=>{

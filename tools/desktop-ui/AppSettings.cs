@@ -9,12 +9,12 @@ using Microsoft.Win32;
 
 namespace CMCP {
     internal sealed class AppSettings {
-        public string language="zh-CN",theme="system",terminal="",browser="";
-        public bool autoStart,closeToTray=true,closeWeb,closeTerminal;
+        public string language="zh-CN",theme="system",terminal="",browser="",cloudcliBrowser="";
+        public bool autoStart,closeToTray=true,closeWeb,closeCloudcli,closeTerminal;
         internal bool ReadError;
         Dictionary<string,object> extra=new Dictionary<string,object>();
         internal static string PathFor(string state){return Path.Combine(state,"application-preferences.json");}
-        internal AppSettings Copy(){return new AppSettings{language=language,theme=theme,terminal=terminal,browser=browser,autoStart=autoStart,closeToTray=closeToTray,closeWeb=closeWeb,closeTerminal=closeTerminal,ReadError=ReadError,extra=new Dictionary<string,object>(extra)};}
+        internal AppSettings Copy(){return new AppSettings{language=language,theme=theme,terminal=terminal,browser=browser,cloudcliBrowser=cloudcliBrowser,closeCloudcli=closeCloudcli,autoStart=autoStart,closeToTray=closeToTray,closeWeb=closeWeb,closeTerminal=closeTerminal,ReadError=ReadError,extra=new Dictionary<string,object>(extra)};}
         internal static AppSettings Load(string state,bool defaultStartup=false){
             var result=new AppSettings{autoStart=defaultStartup};string file=PathFor(state);
             try{
@@ -29,6 +29,8 @@ namespace CMCP {
                 // A browser that is not offered any more falls back to the system default.
                 if(data.TryGetValue("browser",out value)){if(!(value is string))throw new IOException();result.browser=Browsers.Ids.Contains((string)value)?(string)value:"";}
                 if(data.TryGetValue("closeWeb",out value)){if(!(value is bool))throw new IOException();result.closeWeb=(bool)value;}
+                if(data.TryGetValue("cloudcliBrowser",out value)){if(!(value is string))throw new IOException();result.cloudcliBrowser=Browsers.Ids.Contains((string)value)?(string)value:"";}
+                if(data.TryGetValue("closeCloudcli",out value)){if(!(value is bool))throw new IOException();result.closeCloudcli=(bool)value;}
                 if(data.TryGetValue("closeTerminal",out value)){if(!(value is bool))throw new IOException();result.closeTerminal=(bool)value;}
                 if(data.TryGetValue("closeToTray",out value)&&!(value is bool))throw new IOException();
                 // Both old choices kept connections alive. Migrate them to tray;
@@ -43,7 +45,7 @@ namespace CMCP {
             using(var mutex=new Mutex(false,"Local\\CMCP-AppSettings-"+DesktopKey(state))){bool owned=false;try{
                 try{owned=mutex.WaitOne(5000);}catch(AbandonedMutexException){owned=true;}if(!owned)throw new IOException("设置正在保存。");
                 var current=Load(state);if(current.ReadError)throw new IOException("设置文件损坏，未覆盖原文件。");
-                var data=current.extra;data["schema"]=1;data["language"]=language;data["theme"]=theme;data["terminal"]=terminal;data["browser"]=browser;data["closeWeb"]=closeWeb;data["closeTerminal"]=closeTerminal;data["autoStart"]=autoStart;data["closeToTray"]=closeToTray;data["closeAction"]=closeToTray?"tray":"exit";
+                var data=current.extra;data["schema"]=1;data["language"]=language;data["theme"]=theme;data["terminal"]=terminal;data["browser"]=browser;data["cloudcliBrowser"]=cloudcliBrowser;data["closeCloudcli"]=closeCloudcli;data["closeWeb"]=closeWeb;data["closeTerminal"]=closeTerminal;data["autoStart"]=autoStart;data["closeToTray"]=closeToTray;data["closeAction"]=closeToTray?"tray":"exit";
                 string json=new JavaScriptSerializer().Serialize(data);if(Encoding.UTF8.GetByteCount(json)>32768)throw new IOException("设置文件过大。");
                 File.WriteAllText(temp,json,new UTF8Encoding(false));
                 if(File.Exists(file))File.Replace(temp,file,null);else File.Move(temp,file);

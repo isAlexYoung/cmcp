@@ -7,11 +7,11 @@ if ($ManagerMode) {
     if (!$TargetName) { Send-ManagerEvent 'error' '必须选择一台云电脑。'; exit 1 }
 }
 try {
-    $target = @(Get-CloudTargets | Where-Object { $_.name -eq $TargetName }) | Select-Object -First 1
+    $target = @(Get-ConnectionTargets | Where-Object { $_.name -eq $TargetName }) | Select-Object -First 1
     if (!$target) { Show-Info '请先添加并选择一台云电脑。'; exit 1 }
-    if ($target.authMode -eq 'shared-browser') {
+    if ($target.authMode -in @('shared-browser','cloudcli')) {
         if (!(Open-SharedCloudBrowser $TargetName)) {
-            Show-Info '共享网页入口尚未就绪。请先点击“启动连接”，等待后台准备完成后再打开。'
+            Show-Info '网页桌面入口尚未就绪。请先点击“启动连接”，等待后台准备完成后再打开。'
             exit 1
         }
     } else {
@@ -19,7 +19,7 @@ try {
         # older saved entry cannot open the exclusive desktop outside its gate.
         $mode = Get-CloudAuthMode $target.url
         if ($mode -eq 'shared-browser') {
-            if (!(Open-SharedCloudBrowser $TargetName)) { Show-Info '请先点击“启动连接”，准备共享网页入口。'; exit 1 }
+            if (!(Open-SharedCloudBrowser $TargetName)) { Show-Info '请先点击“启动连接”，准备网页桌面入口。'; exit 1 }
         } else {
             $safeUrl = Get-NormalizedUrl $target.url
             Open-CloudPage $TargetName $safeUrl

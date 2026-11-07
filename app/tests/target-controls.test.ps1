@@ -116,7 +116,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $fixtureApp 'stop.ps1'),$stopSource,[Text.UTF8Encoding]::new($true))
     $fixtureCommon = '$script:StateDir = Split-Path $PSScriptRoot -Parent; $script:StopFlag = Join-Path $StateDir "stopped.flag"; $script:StatusFile = Join-Path $StateDir "link-status.json"; $script:TargetsFile = Join-Path $StateDir "cloudpc-targets.json"' + "`r`n" +
         'function Initialize-StateDir {}; function Assert-TargetControlSupport {}; function Unregister-AutoStart { throw "GLOBAL stop reached" }; function Stop-LinkService { throw "GLOBAL stop reached" }; function Get-LinkStatus { return $null }' + "`r`n" +
-        'function Get-CloudTargets { return @([pscustomobject]@{name="A"},[pscustomobject]@{name="B"}) }; function Read-JsonFile($path) { if(Test-Path -LiteralPath $path){[IO.File]::ReadAllText($path) | ConvertFrom-Json} }' + "`r`n" +
+        'function Get-ConnectionTargets { Get-CloudTargets }; function Get-CloudTargets { return @([pscustomobject]@{name="A"},[pscustomobject]@{name="B"}) }; function Read-JsonFile($path) { if(Test-Path -LiteralPath $path){[IO.File]::ReadAllText($path) | ConvertFrom-Json} }' + "`r`n" +
         '. "' + (Join-Path (Split-Path $PSScriptRoot -Parent) 'target-controls.ps1') + '"'
     [IO.File]::WriteAllText((Join-Path $fixtureApp 'common.ps1'),$fixtureCommon,[Text.UTF8Encoding]::new($true))
     [IO.File]::WriteAllText((Join-Path $fixtureApp 'ui.ps1'),'function Show-Error { param($s) throw $s }; function Write-ErrorLog {}',[Text.UTF8Encoding]::new($true))

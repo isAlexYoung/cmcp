@@ -4,17 +4,19 @@ import {createSharedSessionGateway} from './shared-session-gateway.mjs';
 import {Cloud} from './cloud-connector.mjs';
 import {supportsDirectBrowser,createDirectBrowser} from './direct-browser.mjs';
 import {connectionDetail} from './connection-transport.mjs';
+import {discoverCloudcli} from './cloudcli.mjs';
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
 export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log, deviceName, recoveryOptions, healthOptions,
-  passwordFor, session = false, onReplaced, install = (t, auth, agent, signal, preparation) => new Cloud(t.url, auth, agent, signal,preparation).install()}) {
+  openTunnel, passwordFor, session = false, onReplaced, install = (t, auth, agent, signal, preparation) => new Cloud(t.url, auth, agent, signal,preparation).install()}) {
   return async (t, {signal, current, status}) => {
     const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null,connected:false,connectionEpoch:0};
     const preparationCache={};
     // Soft probe failures must not revoke setup leases or discard confirmed config.
     let unstable=false,confirmed;
     const publish=(name,state,message)=>{
+      const issue=record.tunnel?.getIssue();if(issue){status.set(name,issue.state,issue.message);return;}
       confirmed={name,state,message};
       const soft=unstable&&['connected','configuring'].includes(state);
       status.set(name,soft?'unstable':state,soft?'连接短暂波动，正在探测恢复':message);
@@ -27,23 +29,32 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
       stopping = (async () => {
         await record.link?.stop();
         await record.gateway?.close();
+        await record.tunnel?.close();
         record.agent?.destroy();
+        record.cloudcliAgent?.destroy();
       })();
       return stopping;
     };
     signal.addEventListener('abort', record.stop, {once:true});
     try {
       signal.throwIfAborted();
+      if(t.tunnel){if(!openTunnel)throw Error('SSH tunnel is unavailable');record.tunnel=await openTunnel(t,signal);t={...t,url:record.tunnel[t.tunnel.app]};record.url=t.url;}
       publish(t.name, 'connecting', '正在检查登录协议（不会提交密码）');
-      const proxy = await proxyFor(t.url, signal);
+      const proxy = record.tunnel?'':await proxyFor(t.url, signal);
       signal.throwIfAborted();
       record.agent = agentFor(t.url, proxy);
-      const shared = t.authMode === 'shared-browser' || await requiresSharedSession(t.url, record.agent, signal);
+      const cloudcli=t.authMode==='cloudcli';
+      if(cloudcli){
+        const discovered=await discoverCloudcli(t.url,record.agent,signal);
+        record.cloudcliAgent=record.agent;record.url=record.tunnel?.web||discovered.desktopOrigin;
+        record.agent=agentFor(record.url,record.tunnel?'':await proxyFor(record.url,signal));
+      }
+      const shared = cloudcli || t.authMode === 'shared-browser' || await requiresSharedSession(t.url, record.agent, signal);
       signal.throwIfAborted();
       if (!current()) throw Error('Target stopped');
       if (shared) {
-        const gateway = await supportsDirectBrowser(t.url,record.agent,signal) ? createDirectBrowser : createSharedSessionGateway;
-        record.gateway = await gateway({name:t.name, baseUrl:t.url, agent:record.agent, diagnostic:message => log(`[${t.name}] ${message}`),
+        const gateway = cloudcli || await supportsDirectBrowser(t.url,record.agent,signal) ? createDirectBrowser : createSharedSessionGateway;
+        record.gateway = await gateway({name:t.name, baseUrl:t.url, agent:cloudcli?record.cloudcliAgent:record.agent,...(cloudcli?{launchPath:'/__webdesktop/cmcp'}:{}), diagnostic:message => log(`[${t.name}] ${message}`),
           autoPassword:t.autoLogin===true ? async signal=>{if(!current()||signal.aborted)throw Error('Target stopped');const password=await passwordFor(t.name,signal);if(!current()||signal.aborted)throw Error('Target stopped');return password;} : undefined});
         if (!current()) { await record.gateway.close(); throw Error('Target stopped'); }
       }
@@ -57,7 +68,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
         const sameSession = () => current() && epoch===record.connectionEpoch && (!shared || used === record.gateway.getSessionId());
         publish(t.name, 'configuring', '正在配置此云电脑的 Claude MCP');
         try {
-          const changed = await install(t, record.auth, record.agent, signal,{cache:preparationCache});
+          const changed = await install(cloudcli?{...t,url:record.url}:t, record.auth, record.agent, signal,{cache:preparationCache});
           if (sameSession()&&record.connected) {
             record.installed = used;
             publish(t.name, 'connected', changed ? '共享会话已连接；MCP 配置已更新，请重启云端 Claude' : '共享会话已连接，Claude MCP 配置已确认');
@@ -76,18 +87,19 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
         forward:msg => { if (!current()) throw Error('Target stopped'); return forward(msg); },
         onConnected:async auth => { if (current()) { record.auth = auth;record.connected=true;record.retryAt=0;await record.setup(); }return {statusHandled:true}; },
         target:() => current() ? {
-          url:t.url, stamp:t.stamp, authMode:shared ? 'shared-browser' : 'legacy',
+          url:record.url, stamp:t.stamp, authMode:shared ? 'shared-browser' : 'legacy',
           getSessionId:() => record.gateway?.getSessionId(),
           getSessionAuth:() => record.gateway?.getSessionAuth(),
-          getLoginIssue:() => record.gateway?.getLoginIssue(),
+          getLoginIssue:() => record.tunnel?.getIssue()||record.gateway?.getLoginIssue(),
           invalidateSession:id => record.gateway?.invalidateSession(id),
-          password:() => passwordFor(t.name), proxy:() => proxyFor(t.url, signal),
+          password:() => passwordFor(t.name), proxy:() => record.tunnel?'':proxyFor(record.url, signal),
         } : null,
       });
       return record;
     } catch (error) {
       // close() may already have run while a gateway was still being created.
-      record.agent?.destroy(); await record.gateway?.close();
+      record.agent?.destroy();record.cloudcliAgent?.destroy(); await record.gateway?.close();
+        await record.tunnel?.close();
       await record.stop(); throw error;
     }
   };

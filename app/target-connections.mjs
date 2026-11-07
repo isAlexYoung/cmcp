@@ -6,7 +6,7 @@ export function readTargetControls(file) {
   try {
     if (fs.statSync(file).size > 256 * 1024) throw Error('Control file too large');
     const data = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-    if (data?.schema !== 1 || !Array.isArray(data.targets) || data.targets.length > 100) throw Error('Invalid controls');
+    if (data?.schema !== 1 || !Array.isArray(data.targets) || data.targets.length > 400) throw Error('Invalid controls');
     const controls = new Map();
     for (const t of data.targets) {
       if (typeof t?.name !== 'string' || !t.name || t.name.length > 512 || typeof t.enabled !== 'boolean' || typeof t.revision !== 'string' || !t.revision || controls.has(t.name)) throw Error('Invalid target control');
@@ -26,7 +26,7 @@ export function createTargetConnections({readTargets, readControls, create, stat
   const signature = (t, revision) => JSON.stringify([t.url, t.stamp, t.authMode, t.autoLogin===true, revision]);
   const snapshot = () => {
     const controls = readControls(), desired = new Map();
-    for (const t of readTargets().slice(0, 100)) {
+    for (const t of readTargets().slice(0, 400)) {
       if (!t?.name || !t?.url || desired.has(t.name)) continue;
       const revision = targetRevision(t, controls);
       if (revision !== null) desired.set(t.name, {target:t, revision, signature:signature(t, revision)});
@@ -56,7 +56,7 @@ export function createTargetConnections({readTargets, readControls, create, stat
         else if (!old.retiring) old.value?.setup?.();
         continue;
       }
-      if (slots.size >= 100) continue;
+      if (slots.size >= 400) continue;
       const slot = {name, signature:d.signature, controller:new AbortController(), value:null};
       slots.set(name, slot);
       const current = () => !closed && !slot.controller.signal.aborted && slots.get(name) === slot && snapshot().get(name)?.signature === slot.signature;
@@ -65,10 +65,11 @@ export function createTargetConnections({readTargets, readControls, create, stat
         if (!current()) { await value.stop(); return; }
         slot.value = value;
         onChange();
-      }).catch(() => {
+      }).catch(error => {
         if (current()) {
-          slot.failed = true; slot.retryAt = Date.now() + retryMs;
-          guardedStatus.set(name, 'offline', '无法连接此云电脑；其他连接不受影响，稍后重试');
+          slot.failed = true; slot.retryAt = ['SSH_AUTH','SSH_HOST_KEY','SSH_START'].includes(error.code)?Infinity:Date.now() + retryMs;
+          const sshError={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:'SSH 主机指纹校验失败，请核对服务器指纹。',SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'}[error.code];
+          guardedStatus.set(name, sshError?'error':'offline', sshError||(error.code==='CLOUDCLI_PROTOCOL_REQUIRED'?'CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。':'无法连接此云电脑；其他连接不受影响，稍后重试'));
         }
       });
     }

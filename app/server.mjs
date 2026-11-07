@@ -1,3 +1,5 @@
+import {readTunnelTargets,acquireWebTunnel} from './ssh-web.mjs';
+import {readSshLogin} from './ssh-terminal.mjs';
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
@@ -17,6 +19,7 @@ import net from 'node:net';
 import os from 'node:os';
 import { StatusBoard, machineId } from './link-client.mjs';
 import { managedTargetFactory } from './managed-target.mjs';
+import {readCloudcliLogins,cloudcliTargets} from './cloudcli.mjs';
 import {staticAssets} from './static-assets.mjs';
 import { createTargetConnections, readTargetControls } from './target-connections.mjs';
 
@@ -185,7 +188,7 @@ function writeBrowserEntries() {
   } catch { log('cannot save browser entries; will retry'); }
 }
 const dialogs = new Map();
-const readTargets = () => { try { const list = readJson(targetsFile); return Array.isArray(list) ? list : [list]; } catch { return []; } };
+const readTargets = () => {let targets=[];try{const list=readJson(targetsFile);targets=Array.isArray(list)?list:[list];}catch{}try{return [...targets,...cloudcliTargets(readCloudcliLogins(stateDir)),...readTunnelTargets(stateDir)];}catch{return targets;}};
 
 const powershellExe = process.env.CLOUDPC_POWERSHELL || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 
@@ -243,7 +246,7 @@ function startLinks() {
   connections = createTargetConnections({readTargets,
     readControls:() => readTargetControls(path.join(stateDir, 'target-controls.json')),
     status, onChange:writeBrowserEntries,
-    create:managedTargetFactory({proxyFor, machine:machineId(stateDir), version:bridgeVersion,
+    create:managedTargetFactory({openTunnel:async(t,signal)=>acquireWebTunnel({directory:stateDir,id:t.tunnel.id,login:readSshLogin(stateDir,t.tunnel.id),signal,env:{...process.env,CMCP_STATE_DIR:stateDir,CMCP_SSH_ASKPASS:t.tunnel.id,SSH_ASKPASS:path.resolve(here,"../CMCP.exe"),SSH_ASKPASS_REQUIRE:"force",DISPLAY:"cmcp"}}),proxyFor, machine:machineId(stateDir), version:bridgeVersion,
       forward, askPassword, notify, log, session:sessionMode, onReplaced:sessionMode ? () => stop(4) : undefined,
       passwordFor:async (name,signal) => {
         const r = await powershell('get-password.ps1', ['-Name', name], {capture:true, timeoutMs:45000,signal});

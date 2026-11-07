@@ -108,7 +108,7 @@ namespace CMCP {
                     var a=form.Cards.Values.First();var b=form.Cards.Values.Skip(1).First();
                     string previousAddress=b.Address;form.SwitchLogin(b);
                     check(form.Transition!=null&&b.Address!=previousAddress,"switching sign-in uses the existing fade transition with the final address already applied");Settle(form);
-                    check(form.Transition==null&&b.SshActive,"the sign-in transition finishes on the selected SSH mode");form.SwitchLogin(b);Settle(form);
+                    check(form.Transition==null&&b.CloudActive,"the sign-in transition finishes on the selected CloudCLI mode");form.SwitchLogin(b);Settle(form);form.SwitchLogin(b);Settle(form);
                     form.OpenEditor(a.Target.Name);check(form.Editor!=null&&form.Transition!=null,"opening the editor plays a transition");Settle(form);
                     check(Deepest(form)==form&&!form.Editor.NameInput.Box.Focused,"opening the editor leaves its fields unfocused through the transition");
                     form.CloseEditor();Settle(form);check(form.Editor==null&&!Overlaid(form),"closing the editor removes its overlay");

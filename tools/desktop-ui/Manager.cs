@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.17.4.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.17.4.0")]
+[assembly: System.Reflection.AssemblyVersion("4.18.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.18.0.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -73,8 +73,8 @@ namespace CMCP {
         internal static string Detail(string state) {
             switch (state) {
                 case "connected": return "后台已报告连接成功。可在云端 Claude 使用本机工具；新增配置后需完全退出并重新打开 Claude。";
-                case "waiting-login": return "点击“打开云电脑”，在共享网页入口输入桌面密码。MCP 将共用这次登录。";
-                case "password": return "保存的密码不正确或无法读取，已停止自动尝试。请停止此连接后编辑密码，或在共享网页手动登录。";
+                case "waiting-login": return "点击“打开云电脑”，在网页桌面入口输入桌面密码。MCP 将共用这次登录。";
+                case "password": return "保存的密码不正确或无法读取，已停止自动尝试。请停止此连接后编辑密码，或在网页桌面手动登录。";
                 case "locked": return "登录暂时锁定，已停止自动尝试。请等待云电脑解除限制后再手动登录。";
                 case "expired": return "访问已过期，已停止自动尝试。请先更新云电脑的访问权限或密码。";
                 case "configuring": return "正在通过现有流程检查云端 Claude 配置，请等待。";
@@ -89,6 +89,8 @@ namespace CMCP {
             }
         }
         internal static string PreparationDetail(string state, string message) {
+            if(state=="error"&&new[]{"SSH 认证失败，请检查密码或密钥。","SSH 主机指纹校验失败，请核对服务器指纹。","无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。"}.Contains(message))return message;
+            if(state=="offline"&&message=="CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。")return message;
             if (state != "connecting" && state != "recovering") return null;
             // Only fixed local stage text is displayed, never arbitrary backend
             // errors, URLs, paths, cookies or credential-bearing values.
@@ -110,7 +112,7 @@ namespace CMCP {
                 try {
                     var data = Obj(Read(Path.Combine(directory, "target-controls.json")));
                     var entries = Get(data, "targets") as object[];
-                    if (Convert.ToString(Get(data, "schema")) != "1" || entries == null || entries.Length > 100) throw new InvalidDataException();
+                    if (Convert.ToString(Get(data, "schema")) != "1" || entries == null || entries.Length > 400) throw new InvalidDataException();
                     foreach (var item in entries) {
                         var entry = Obj(item); string name = Text(Get(entry, "name"));
                         if (name.Length == 0 || name.Length > 512 || !(Get(entry, "enabled") is bool) || Text(Get(entry, "revision")).Length == 0 || controls.ContainsKey(name)) throw new InvalidDataException();
@@ -133,10 +135,13 @@ namespace CMCP {
             var states = Obj(Get(status, "targets"));
             var list = targets as object[];
             if (list == null && Obj(targets) != null) list = new object[] { targets };
-            foreach (var item in (list ?? new object[0]).Take(100)) {
+            var all=(list??new object[0]).ToList();var cloud=CloudCliStore.Load(directory);if(cloud.ReadError)result.ReadError=true;
+            foreach(var login in cloud.logins)all.Add(new Dictionary<string,object>{{"name",login.ConnectionName},{"url",login.url},{"password",login.secret},{"authMode","cloudcli"},{"autoLogin",login.autoLogin}});
+            foreach(var l in SshStore.Load(directory).logins)foreach(var app in new[]{"web","cloudcli"})if(app=="web"?l.webTunnel:l.cloudcliTunnel)all.Add(new Dictionary<string,object>{{"name","tunnel:"+app+":"+l.name},{"url","http://127.0.0.1:"+(app=="web"?l.webPort:l.cloudcliPort)},{"password",app=="web"?l.webSecret:l.cloudcliSecret},{"authMode",app=="web"?"shared-browser":"cloudcli"},{"autoLogin",app=="web"?l.webAutoLogin:l.cloudcliAutoLogin}});
+            foreach (var item in all.Take(400)) {
                 var d = Obj(item); if (d == null) continue;
                 string name = Text(Get(d, "name")), url = Text(Get(d, "url")); Uri parsed;
-                if (name.Length < 1 || name.Length > 512 || !Uri.TryCreate(url, UriKind.Absolute, out parsed) || parsed.Scheme != "https" || !String.IsNullOrEmpty(parsed.UserInfo) || parsed.AbsolutePath != "/" || parsed.Query.Length != 0 || parsed.Fragment.Length != 0) { result.ReadError = true; continue; }
+                if (name.Length < 1 || name.Length > 512 || !Uri.TryCreate(url, UriKind.Absolute, out parsed) || (parsed.Scheme != "https" && !(name.StartsWith("tunnel:",StringComparison.Ordinal)&&parsed.Scheme=="http"&&parsed.Host=="127.0.0.1")) || !String.IsNullOrEmpty(parsed.UserInfo) || parsed.AbsolutePath != "/" || parsed.Query.Length != 0 || parsed.Fragment.Length != 0) { result.ReadError = true; continue; }
                 var entry = Obj(Get(states, name));
                 string state = !result.Running ? "stopped" : result.Stale ? "stale" : Text(Get(entry, "state"));
                 IDictionary<string, object> control;
@@ -146,10 +151,11 @@ namespace CMCP {
                     else if (result.Running && !result.Stale && Text(Get(control, "revision")) != Text(Get(entry, "revision"))) state = "connecting";
                 }
                 string message = Text(Get(entry, "message"));
-                bool auto=Text(Get(d,"authMode"))=="shared-browser"&&Object.Equals(Get(d,"autoLogin"),true);
-                result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,DesktopClient=ClientFlag(entry,"desktop"),CliClient=ClientFlag(entry,"cli"),Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"共享网页自动登录":"共享网页登录") : "自动识别 / 旧版", State = state,
-                    Detail = PreparationDetail(state,message) ?? ((auto&&state=="waiting-login"?"等待共享网页使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "")) });
+                bool auto=(Text(Get(d,"authMode"))=="shared-browser"||Text(Get(d,"authMode"))=="cloudcli")&&Object.Equals(Get(d,"autoLogin"),true);
+                result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,DesktopClient=ClientFlag(entry,"desktop"),CliClient=ClientFlag(entry,"cli"),Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"网页桌面自动登录":"网页桌面登录") : "自动识别 / 旧版", State = state,
+                    Detail = PreparationDetail(state,message) ?? ((auto&&state=="waiting-login"?"等待网页桌面使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "")) });
             }
+            foreach(var t in result.Targets.Where(t=>t.Name.StartsWith("cloudcli:",StringComparison.Ordinal)))t.Mode="CloudCLI 登录";
             return result;
         }
     }
@@ -345,6 +351,7 @@ namespace CMCP {
                 SettingsTests.Run(temp,check);
                 TrayTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
+                CloudCliTests.Run(temp,check);SshWebTests.Run(temp,check);
                 MotionTests.Run(temp,check);
                 SshTests.Run(temp,check);
                 ControlOrderTests.Run(temp,check);

@@ -121,7 +121,7 @@ test('tray snapshot is authenticated and includes display names and states witho
   const password='NOT-IN-TRAY-SECRET',id=await m.store.save({...input(),label:'工作 & 云电脑',autoLogin:true,password},async()=>true);
   let response=await call(),text=await response.text(),value=JSON.parse(text);
   assert.equal(response.status,200);assert.equal(value.targets[0].label,'工作 & 云电脑');assert.equal(value.targets[0].state,'stopped');assert.equal(value.targets[0].enabled,false);
-  assert.deepEqual(Object.keys(value.targets[0]).sort(),['enabled','id','label','state']);assert.equal(value.language,'zh-CN');assert.equal(value.updating,false);assert.ok(!text.includes(password)&&!text.includes('credentialId')&&!text.includes('https://'));
+  assert.deepEqual(Object.keys(value.targets[0]).sort(),['enabled','id','label','loginMode','state']);assert.equal(value.language,'zh-CN');assert.equal(value.updating,false);assert.ok(!text.includes(password)&&!text.includes('credentialId')&&!text.includes('https://'));
   await m.store.save({...input(),id,label:'Renamed',autoLogin:true},()=>assert.fail('rename must not probe'));
   assert.equal((await (await call()).json()).targets[0].label,'Renamed');assert.equal(await m.store.password(id),password);
 });

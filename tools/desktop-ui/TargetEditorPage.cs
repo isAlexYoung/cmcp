@@ -107,6 +107,12 @@ namespace CMCP {
         internal readonly ModernButton Save = new ModernButton { Glyph="check",Text="保存",Primary=true,AccessibleName="保存设备" };
         internal readonly EditorInput NameInput = new EditorInput(), NoteInput = new EditorInput{Height=64}, UrlInput = new EditorInput(), PasswordInput = new EditorInput();
         internal readonly EditorInput HostInput = new EditorInput(), PortInput = new EditorInput(), UserInput = new EditorInput(), SshSecretInput = new EditorInput(), KeyInput = new EditorInput();
+        internal readonly EditorInput CloudUrlInput=new EditorInput(),CloudPasswordInput=new EditorInput();
+        internal readonly ToggleSwitch CloudRemember=new ToggleSwitch{Size=new Size(48,30)};
+        readonly CloudCliLogin savedCloud;
+        internal readonly EditorInput WebPortInput=new EditorInput(),CloudPortInput=new EditorInput(),WebTunnelPassword=new EditorInput(),CloudTunnelPassword=new EditorInput();
+        internal readonly ToggleSwitch WebTunnel=new ToggleSwitch{Size=new Size(48,30)},CloudTunnel=new ToggleSwitch{Size=new Size(48,30)},WebTunnelRemember=new ToggleSwitch{Size=new Size(48,30)},CloudTunnelRemember=new ToggleSwitch{Size=new Size(48,30)};
+        internal bool HasCloud {get{return CloudUrlInput.Box.Text.Trim().Length>0;}}
         internal readonly ToggleSwitch Remember = new ToggleSwitch{Size=new Size(48,30)}, HideAddress = new ToggleSwitch{Size=new Size(48,30)};
         internal readonly DropdownField MethodField = new DropdownField(new[]{new KeyValuePair<string,string>("password","密码"),new KeyValuePair<string,string>("key","公钥")}){Height=38,Value="password"};
         internal bool AutoLogin {get{return Remember.Checked;}}
@@ -120,7 +126,7 @@ namespace CMCP {
         internal readonly EditorViewport viewport = new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
         readonly SettingsSheet sheet = new SettingsSheet();
         readonly LocalToolTip tips = new LocalToolTip();
-        readonly Category general=new Category{Title="常规",Glyph="profile"},web=new Category{Title="共享网页登录",Glyph="monitor"},ssh=new Category{Title="SSH 登录",Glyph="terminal"};
+        readonly Category general=new Category{Title="常规",Glyph="profile"},web=new Category{Title="网址登录",Glyph="monitor"},cloud=new Category{Title="CloudCLI 登录",Glyph="link"},ssh=new Category{Title="SSH 登录",Glyph="terminal"};
         readonly List<Category> categories=new List<Category>();
         Row secretRow,keyRow;
         Category current;
@@ -143,7 +149,14 @@ namespace CMCP {
         internal bool PreferSsh { get { return preferSsh; } }
         internal string CurrentCategory { get { return current.Title; } }
 
-        internal TargetEditorPage(Target target, CardPreference preference, Palette palette, SshLogin login = null) {
+        internal TargetEditorPage(Target target, CardPreference preference, Palette palette, SshLogin login = null,CloudCliLogin cloudLogin=null) {
+            savedCloud=cloudLogin;
+            WebPortInput.Box.Text=Convert.ToString(login==null?3000:login.webPort);CloudPortInput.Box.Text=Convert.ToString(login==null?3001:login.cloudcliPort);
+            WebTunnel.Checked=login!=null&&login.webTunnel;CloudTunnel.Checked=login!=null&&login.cloudcliTunnel;
+            WebTunnelRemember.Checked=login!=null&&login.webAutoLogin;CloudTunnelRemember.Checked=login!=null&&login.cloudcliAutoLogin;
+            WebTunnelPassword.Box.UseSystemPasswordChar=CloudTunnelPassword.Box.UseSystemPasswordChar=true;
+            WebTunnelPassword.Box.MaxLength=CloudTunnelPassword.Box.MaxLength=256;WebPortInput.Box.MaxLength=CloudPortInput.Box.MaxLength=5;
+            WebTunnelPassword.Cue=CloudTunnelPassword.Cue="手动登录可留空；已保存的密码留空保留";
             TargetName=target.Name;IconData=preference.icon;Dock=DockStyle.Fill;Font=UiFont.Points(11F);colors=palette;
             initialUrl=target.Url;storedAutoPassword=target.AutoLogin&&target.HasSavedPassword;savedSsh=login;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);
@@ -151,8 +164,10 @@ namespace CMCP {
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             NoteInput.Box.Multiline=true;NoteInput.Box.MaxLength=200;NoteInput.Box.Text=preference.note??"";
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;UrlInput.Cue="https://";
-            PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;PasswordInput.Cue=target.HasSavedPassword?"已加密保存；同一地址留空保留":"手动共享网页登录可留空";
+            PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;PasswordInput.Cue=target.HasSavedPassword?"已加密保存；同一地址留空保留":"手动网页桌面登录可留空";
             Remember.Checked=target.AutoLogin;HideAddress.Checked=preference.hideAddress;HideAddress.AccessibleName=L.Text("隐藏卡片中的网址和IP");
+            CloudUrlInput.Box.MaxLength=300;CloudUrlInput.Cue="https://";CloudUrlInput.Box.Text=cloudLogin==null?"":cloudLogin.url;
+            CloudPasswordInput.Box.UseSystemPasswordChar=true;CloudPasswordInput.Box.MaxLength=256;CloudPasswordInput.Cue=cloudLogin!=null&&cloudLogin.secret.Length>0?"已加密保存；同一地址留空保留":"手动 CloudCLI 登录可留空";CloudRemember.Checked=cloudLogin!=null&&cloudLogin.autoLogin;
             HostInput.Box.MaxLength=253;PortInput.Box.MaxLength=5;UserInput.Box.MaxLength=64;KeyInput.Box.MaxLength=512;
             SshSecretInput.Box.UseSystemPasswordChar=true;SshSecretInput.Box.MaxLength=256;
             HostInput.Cue="域名或 IP";PortInput.Box.Text="22";UserInput.Cue="root";
@@ -173,7 +188,7 @@ namespace CMCP {
                 if(picker.ShowDialog(FindForm())==DialogResult.OK)KeyInput.Box.Text=picker.FileName;
             }};
             forget.Click+=delegate{forgetSecret=true;SshSecretInput.Box.Clear();RefreshMethod();LayoutSheet();ApplyVisibility();};
-            foreach(var input in new[]{UrlInput,HostInput,UserInput,KeyInput})input.Box.TextChanged+=delegate{RefreshTabs();};
+            foreach(var input in new[]{UrlInput,CloudUrlInput,HostInput,UserInput,KeyInput})input.Box.TextChanged+=delegate{RefreshTabs();};
             foreach(var input in new[]{HostInput,UserInput,KeyInput})input.Box.TextChanged+=delegate{RefreshMethod();LayoutSheet();ApplyVisibility();};
             top.Controls.Add(pageTitle);pageTitle.Bounds=new Rectangle(58,0,420,55);
             top.Paint+=delegate(object sender,PaintEventArgs e){
@@ -192,7 +207,7 @@ namespace CMCP {
             Controls.Add(viewport);Controls.Add(footer);Controls.Add(top);Controls.Add(side);
             Save.Text=IsNew?"添加":"保存";group.Text=L.Text(IsNew?"添加设备":"编辑设备");
             tips.SetToolTip(Back,"返回列表，不保存本次修改");tips.SetToolTip(choose,"选择 PNG、JPEG 或 ICO，最多 1 MiB");tips.SetToolTip(reset,"移除自定义图标，使用默认图标");tips.SetToolTip(Save,"保存这台设备的修改");
-            tips.SetToolTip(Remember,"仅用于共享网页登录。密码使用当前 Windows 账户加密，不会显示原密码；旧版仍沿用原有登录方式。");
+            tips.SetToolTip(Remember,"仅用于网页桌面登录。密码使用当前 Windows 账户加密，不会显示原密码；旧版仍沿用原有登录方式。");
             tips.SetToolTip(SshSecretInput,"密码或口令使用当前 Windows 账户加密，不会显示原内容。");
             side.SizeChanged+=delegate{LayoutSide();};viewport.SizeChanged+=delegate{PlaceSheet();};sheet.SizeChanged+=delegate{LayoutSheet();};
             footer.SizeChanged+=delegate{Save.Bounds=new Rectangle(Math.Max(28,footer.Width-156),18,128,42);error.Bounds=new Rectangle(28,8,Math.Max(10,footer.Width-200),62);};
@@ -218,12 +233,14 @@ namespace CMCP {
             AddRow(looks,"名称",NameInput);
             AddRow(looks,"备注",NoteInput).Height=84;
             var display=AddSection(general,"显示");AddRow(display,"隐藏卡片中的网址和IP",HideAddress,48);
-            var address=AddSection(web,"连接");
+            var address=AddSection(web,"WebDesktop");
             AddRow(address,"网页地址",UrlInput);
             AddRow(address,"密码",PasswordInput);
             var auto=AddSection(web,"自动登录","打开后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。关闭会删除共享模式保存的密码。");
             AddRow(auto,"记住密码",Remember,48);
-            var link=AddSection(ssh,"连接","SSH 只用来打开终端，不经过 MCP 连接。");
+            var cloudAddress=AddSection(web,"CloudCLI");AddRow(cloudAddress,"CloudCLI 地址",CloudUrlInput);AddRow(cloudAddress,"密码",CloudPasswordInput);
+            var cloudAuto=AddSection(web,"自动登录","打开后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。");AddRow(cloudAuto,"记住密码",CloudRemember,48);
+            var link=AddSection(ssh,"连接","SSH 凭据由 WebDesktop、CloudCLI 和 Terminal 共用。");
             AddRow(link,"主机",HostInput);
             AddRow(link,"端口",PortInput,96);
             var login=AddSection(ssh,"认证");
@@ -231,6 +248,9 @@ namespace CMCP {
             AddRow(login,"用户名",UserInput);
             secretRow=AddRow(login,"密码",SshSecretInput,0,forget);
             keyRow=AddRow(login,"私钥",KeyInput,0,browse);
+            var wt=AddSection(ssh,"WebDesktop","服务端口是 VPS 本机的网页端口；访问密码与 SSH 密码不同。");AddRow(wt,"启用 SSH 隧道",WebTunnel,48);AddRow(wt,"服务端口",WebPortInput,96);AddRow(wt,"访问密码",WebTunnelPassword);AddRow(wt,"自动登录",WebTunnelRemember,48);
+            var ct=AddSection(ssh,"CloudCLI","CloudCLI 使用独立的网页端口，MCP 通过 WebDesktop 服务连接。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);
+            AddSection(ssh,"Terminal","使用上方的 SSH 凭据打开终端；终端程序可在设置的连接页面选择。");
         }
         bool SecretStillUsable { get {
             if(savedSsh==null||forgetSecret||String.IsNullOrEmpty(savedSsh.secret)||savedSsh.method!=MethodField.Value)return false;
@@ -251,7 +271,7 @@ namespace CMCP {
         }
         void RefreshTabs(){
             if(web.Tab==null)return;
-            web.Tab.Dot=web.Tab.DotOk=HasWeb;ssh.Tab.Dot=ssh.Tab.DotOk=HasSsh;
+            web.Tab.Dot=web.Tab.DotOk=HasWeb||HasCloud;ssh.Tab.Dot=ssh.Tab.DotOk=HasSsh;
             web.Tab.Invalidate();ssh.Tab.Invalidate();
         }
         void LayoutSide(){
@@ -358,7 +378,7 @@ namespace CMCP {
         }
         internal void ShowError(string message) { error.Text=L.Message(message); }
         internal void SetBusy(bool busy){
-            foreach(var control in new Control[]{Save,Back,choose,reset,browse,forget,NameInput,NoteInput,UrlInput,PasswordInput,Remember,HideAddress,HostInput,PortInput,UserInput,SshSecretInput,KeyInput,MethodField})control.Enabled=!busy;
+            foreach(var control in new Control[]{Save,Back,choose,reset,browse,forget,NameInput,NoteInput,UrlInput,PasswordInput,Remember,HideAddress,HostInput,PortInput,UserInput,SshSecretInput,KeyInput,MethodField,CloudUrlInput,CloudPasswordInput,CloudRemember,WebPortInput,CloudPortInput,WebTunnelPassword,CloudTunnelPassword,WebTunnel,CloudTunnel,WebTunnelRemember,CloudTunnelRemember})control.Enabled=!busy;
             if(!busy)RefreshMethod();
         }
         bool Fail(Category category,string message){Show(category,false);ShowError(message);return false;}
@@ -366,10 +386,20 @@ namespace CMCP {
             Uri parsed;
             if(DisplayName.Any(Char.IsControl))return Fail(general,"名称不能包含控制字符。");
             if(Note.Any(c=>Char.IsControl(c)&&c!='\r'&&c!='\n'))return Fail(general,"备注不能包含控制字符。");
-            if(!HasWeb&&!HasSsh)return Fail(current==general?web:current,"请至少填写一种登录方式：共享网页地址或 SSH 主机。");
+            if(!HasWeb&&!HasSsh&&!HasCloud)return Fail(current==general?web:current,"请至少填写一种登录方式：网页桌面、CloudCLI 或 SSH。");
+            if(HasCloud){
+                if(!CloudCliLogin.ValidUrl(CloudUrlInput.Box.Text.Trim()))return Fail(web,"请输入完整的 CloudCLI HTTPS 地址，不含路径或登录信息。");
+                if(CloudRemember.Checked&&CloudPasswordInput.Box.Text.Length==0&&(savedCloud==null||savedCloud.secret.Length==0||savedCloud.url.TrimEnd('/')!=CloudUrlInput.Box.Text.Trim().TrimEnd('/')))return Fail(web,"请填写 CloudCLI 自动登录密码；更换地址时需要重新填写。");
+            }
             if(HasWeb){
                 if(!Uri.TryCreate(Url,UriKind.Absolute,out parsed)||parsed.Scheme!="https"||parsed.UserInfo.Length>0||parsed.AbsolutePath!="/"||parsed.Query.Length>0||parsed.Fragment.Length>0)return Fail(web,"请输入完整的 HTTPS 网页地址，不含路径或登录信息。");
                 if(AutoLogin&&Password.Length==0&&(!storedAutoPassword||!String.Equals(Url.TrimEnd('/'),initialUrl.TrimEnd('/'),StringComparison.OrdinalIgnoreCase)))return Fail(web,"请填写自动登录密码；更换地址时需要重新填写。");
+            }
+            if(HasSsh||WebTunnel.Checked||CloudTunnel.Checked){
+                int wp,cp;if(!HasSsh)return Fail(ssh,"请先填写共用的 SSH 主机和用户名。");
+                if(!Int32.TryParse(WebPortInput.Box.Text,out wp)||wp<1||wp>65535||!Int32.TryParse(CloudPortInput.Box.Text,out cp)||cp<1||cp>65535||wp==cp)return Fail(ssh,"WebDesktop 和 CloudCLI 的服务端口必须有效且不同。");
+                bool same=savedSsh!=null&&savedSsh.host==HostInput.Box.Text.Trim()&&savedSsh.port.ToString()==PortInput.Box.Text.Trim()&&savedSsh.username==UserInput.Box.Text.Trim();
+                if(WebTunnelRemember.Checked&&WebTunnelPassword.Box.Text.Length==0&&(!same||savedSsh.webPort!=wp||String.IsNullOrEmpty(savedSsh.webSecret))||CloudTunnelRemember.Checked&&CloudTunnelPassword.Box.Text.Length==0&&(!same||savedSsh.cloudcliPort!=cp||String.IsNullOrEmpty(savedSsh.cloudcliSecret)))return Fail(ssh,"请填写自动登录的网页访问密码；更换服务器或端口时需要重新填写。");
             }
             if(HasSsh){
                 string problem=SshLogin.Problem(HostInput.Box.Text.Trim(),PortInput.Box.Text.Trim(),UserInput.Box.Text.Trim(),MethodField.Value,UsesKey?KeyInput.Box.Text.Trim():"");
@@ -381,13 +411,21 @@ namespace CMCP {
         }
         // Encrypts what was typed. A saved secret is kept only for the same host, user and method,
         // so it can never be sent to a server the user just typed in.
-        internal SshLogin BuildSsh(string name){
+        internal SshLogin BuildSsh(string name){var l=BuildSshBase(name);if(l==null)return null;l.webTunnel=WebTunnel.Checked;l.cloudcliTunnel=CloudTunnel.Checked;l.webPort=Int32.Parse(WebPortInput.Box.Text);l.cloudcliPort=Int32.Parse(CloudPortInput.Box.Text);l.webAutoLogin=WebTunnelRemember.Checked;l.cloudcliAutoLogin=CloudTunnelRemember.Checked;
+            bool same=savedSsh!=null&&savedSsh.host==l.host&&savedSsh.port==l.port&&savedSsh.username==l.username;
+            l.webSecret=!l.webAutoLogin?"":WebTunnelPassword.Box.Text.Length>0?CloudCliLogin.Protect(WebTunnelPassword.Box.Text):same&&savedSsh.webPort==l.webPort?savedSsh.webSecret:"";
+            l.cloudcliSecret=!l.cloudcliAutoLogin?"":CloudTunnelPassword.Box.Text.Length>0?CloudCliLogin.Protect(CloudTunnelPassword.Box.Text):same&&savedSsh.cloudcliPort==l.cloudcliPort?savedSsh.cloudcliSecret:"";return l;}
+        SshLogin BuildSshBase(string name){
             if(!HasSsh)return null;
             var login=new SshLogin{name=name,host=HostInput.Box.Text.Trim(),port=Int32.Parse(PortInput.Box.Text.Trim()),username=UserInput.Box.Text.Trim(),method=MethodField.Value,keyPath=UsesKey?KeyInput.Box.Text.Trim():""};
             string typed=SshSecretInput.Box.Text;
             login.secret=typed.Length>0?SshSecret.Protect(typed):SecretStillUsable?savedSsh.secret:"";
             login.active=!HasWeb||preferSsh;
             return login;
+        }
+        internal CloudCliLogin BuildCloud(string name){
+            if(!HasCloud)return null;string url=CloudUrlInput.Box.Text.Trim().TrimEnd('/'),typed=CloudPasswordInput.Box.Text;
+            return new CloudCliLogin{name=name,url=url,autoLogin=CloudRemember.Checked,secret=!CloudRemember.Checked?"":typed.Length>0?CloudCliLogin.Protect(typed):savedCloud!=null&&savedCloud.url.TrimEnd('/')==url?savedCloud.secret:""};
         }
         void RefreshIcon() {
             var previous=icon.Image;

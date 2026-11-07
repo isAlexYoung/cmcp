@@ -19,7 +19,7 @@ export async function supportsDirectBrowser(baseUrl,agent,signal) {
 }
 
 // A local launch page only. It never proxies HTML, files, APIs or GUI WebSockets.
-export async function createDirectBrowser({baseUrl,agent,autoPassword,diagnostic=()=>{},pollMs=2000}) {
+export async function createDirectBrowser({baseUrl,agent,autoPassword,diagnostic=()=>{},pollMs=2000,launchPath='/'}) {
   const remote=new URL(baseUrl);
   if((remote.protocol!=='https:'&&!(remote.protocol==='http:'&&remote.hostname==='127.0.0.1'))||remote.pathname!=='/'||remote.search||remote.hash||remote.username||remote.password)throw Error('干净的 HTTPS 地址 required');
   const token=secret(),controller=new AbortController();
@@ -76,7 +76,7 @@ export async function createDirectBrowser({baseUrl,agent,autoPassword,diagnostic
         const next={sessionId:r.value.sessionId,cookie:r.value.cookie};authHeaders(next);
         if(!next.cookie?.startsWith('wd_cmcp='))throw Error('Expected tool credential');auth=next;issue=null;
       }
-      const url=new URL(remote);url.hash='cmcp='+id+'.'+pending.launchSecret;
+      const url=new URL(launchPath,remote);url.hash='cmcp='+id+'.'+pending.launchSecret;
       // Chrome need not wait for a second remote request to start displaying.
       pending=null;prepared=true;if(!auth)void poll();return url.href;
     })().finally(()=>{opening=null;});

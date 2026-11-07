@@ -138,7 +138,8 @@ namespace CMCP {
         }
         // What a connection opens, and whether stopping it closes that window again.
         void BuildConnect(){
-            var web=AddSection("共享网页");
+            {
+            var web=AddSection("网页桌面");
             var browsers=Browsers.Detect();
             var choices=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("","系统默认浏览器")};
             choices.AddRange(browsers.Select(b=>new KeyValuePair<string,string>(b.Id,b.Label)));
@@ -149,13 +150,34 @@ namespace CMCP {
             Func<BrowserChoice> chosen=()=>browsers.FirstOrDefault(b=>b.Id==settings.browser);
             browser.Chosen+=key=>Commit(s=>s.browser=key);
             refresh.Add(delegate{browser.Value=chosen()==null?"":chosen().Id;browser.AccessibleName=L.Text("浏览器");browser.Invalidate();});
-            AddRow(web,"浏览器","打开共享网页时使用的浏览器。这里只列出这台电脑已安装的浏览器。",browser);
+            AddRow(web,"浏览器","打开网页桌面时使用的浏览器。这里只列出这台电脑已安装的浏览器。",browser);
             // A page in the system default browser is a tab of the user's own window, which CMCP cannot close.
             var closeWeb=Switch("断开连接后关闭网页",()=>settings.closeWeb&&chosen()!=null,(s,on)=>s.closeWeb=on);
             refresh.Add(delegate{closeWeb.Enabled=chosen()!=null;});
             AddRow(web,()=>L.Text("断开连接后关闭网页"),()=>chosen()==null?L.Text("系统默认浏览器打开的网页 CMCP 无法关闭。请先在上面选择具体的浏览器。")
                 :String.Format(L.Text("网页在 CMCP 单独打开的 {0} 窗口中显示，断开连接时关闭这个窗口。这个窗口的登录状态与平时的浏览器分开，第一次需要登录一次。"),chosen().Label),closeWeb);
             web.Rows[web.Rows.Count-1].Dim=()=>chosen()==null;
+            }
+            {
+            var web=AddSection("CloudCLI");
+            var browsers=Browsers.Detect();
+            var choices=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("","系统默认浏览器")};
+            choices.AddRange(browsers.Select(b=>new KeyValuePair<string,string>(b.Id,b.Label)));
+            var browser=new DropdownField(choices.ToArray()){Font=sheet.Font,Size=new Size(216,36),Colors=colors};
+            // Each browser shows its own program icon; the default shows the program Windows uses now.
+            var preset=Browsers.IconOf(Browsers.DefaultProgram(),20);if(preset!=null)browser.Images[""]=preset;
+            foreach(var b in browsers){var image=Browsers.IconOf(b.Path,20);if(image!=null)browser.Images[b.Id]=image;}
+            Func<BrowserChoice> chosen=()=>browsers.FirstOrDefault(b=>b.Id==settings.cloudcliBrowser);
+            browser.Chosen+=key=>Commit(s=>s.cloudcliBrowser=key);
+            refresh.Add(delegate{browser.Value=chosen()==null?"":chosen().Id;browser.AccessibleName=L.Text("浏览器");browser.Invalidate();});
+            AddRow(web,"浏览器","打开 CloudCLI 时使用的浏览器。这里只列出这台电脑已安装的浏览器。",browser);
+            // A page in the system default browser is a tab of the user's own window, which CMCP cannot close.
+            var closeWeb=Switch("断开连接后关闭网页",()=>settings.closeCloudcli&&chosen()!=null,(s,on)=>s.closeCloudcli=on);
+            refresh.Add(delegate{closeWeb.Enabled=chosen()!=null;});
+            AddRow(web,()=>L.Text("断开连接后关闭网页"),()=>chosen()==null?L.Text("系统默认浏览器打开的网页 CMCP 无法关闭。请先在上面选择具体的浏览器。")
+                :String.Format(L.Text("网页在 CMCP 单独打开的 {0} 窗口中显示，断开连接时关闭这个窗口。这个窗口的登录状态与平时的浏览器分开，第一次需要登录一次。"),chosen().Label),closeWeb);
+            web.Rows[web.Rows.Count-1].Dim=()=>chosen()==null;
+            }
             var console=AddSection("SSH");
             var installed=Terminals.Detect();
             var terminal=new DropdownField(installed.Select(t=>new KeyValuePair<string,string>(t.Id,t.Label)).ToArray()){Font=sheet.Font,Size=new Size(216,36),Colors=colors};
@@ -300,6 +322,7 @@ namespace CMCP {
         bool hover,dismissedByThisClick;
         internal Palette Colors=Palette.Create(false);
         internal string Value;
+        internal string DisplayOverride;
         // Optional per-choice pictures, owned by this field.
         internal readonly Dictionary<string,Image> Images=new Dictionary<string,Image>();
         const int ImageSize=20;
@@ -383,7 +406,7 @@ namespace CMCP {
             var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using(var b=new SolidBrush(BackColor))g.FillRectangle(b,ClientRectangle);
             PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),8,hover?Colors.Subtle:Colors.Surface,Focused&&ShowFocusCues?Colors.SelectionBorder:Colors.Border);
-            string text=items.Where(i=>i.Key==Value).Select(i=>L.Text(i.Value)).FirstOrDefault()??"";
+            string text=DisplayOverride??items.Where(i=>i.Key==Value).Select(i=>L.Text(i.Value)).FirstOrDefault()??"";
             Image picture;int left=12;
             if(Value!=null&&Images.TryGetValue(Value,out picture)){g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(picture,new Rectangle(12,(Height-ImageSize)/2,ImageSize,ImageSize));left=12+ImageSize+8;}
             PaintUi.Text(g,text,Font,new Rectangle(left,0,Width-left-28,Height),Colors.Text);

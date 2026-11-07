@@ -242,7 +242,7 @@ test('missing SSH mode persists through restart and edits without touching a web
 test('SSH-only mode can select missing web and survives restart and credential edits',async t=>{
   const f=fixture(t),s=new ManagerState(f.directory,f.secrets),id=await s.save(sshInput({},{secret:'fixture-secret'}),async()=>true);
   s.setLogin(id,false);assert.equal(s.view().targets[0].loginMode,'web');assert.equal(s.view().targets[0].ssh.active,false);
-  assert.throws(()=>s.setEnabled(id,true),/还没有填写共享网页地址/);
+  assert.throws(()=>s.setEnabled(id,true),/还没有填写网页桌面地址/);
   const again=new ManagerState(f.directory,f.secrets);assert.equal(again.view().targets[0].loginMode,'web');
   const secret=again.sshFor(id).credentialId;await again.save(sshInput({id,label:'Renamed'}),async()=>true);
   assert.equal(again.view().targets[0].loginMode,'web');assert.equal(again.sshFor(id).credentialId,secret);

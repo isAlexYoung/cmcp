@@ -6,7 +6,7 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.17.4'
+$script:KitVersion = '4.18.0'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = if ($env:CMCP_STATE_DIR) { [IO.Path]::GetFullPath($env:CMCP_STATE_DIR) } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'user' }
 $script:TargetsFile = Join-Path $script:StateDir 'cloudpc-targets.json'
@@ -39,7 +39,7 @@ function Initialize-PortableState([string]$Destination,[string]$Legacy) {
         if (Test-Path -LiteralPath $Legacy) {
             Assert-PrivateStatePath $Legacy
             if ((Get-Item -LiteralPath $Legacy -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe legacy user directory' }
-            foreach ($name in @('config.json','cloudpc-targets.json','vps-targets.json','target-controls.json','control-order.txt','application-preferences.json','dashboard-preferences.json','manager-preferences.json','node-extra-args.txt','machine-id')) {
+            foreach ($name in @('config.json','cloudpc-targets.json','cloudcli-logins.json','ssh-logins.json','vps-targets.json','target-controls.json','control-order.txt','application-preferences.json','dashboard-preferences.json','manager-preferences.json','node-extra-args.txt','machine-id')) {
                 $file=Join-Path $Legacy $name
                 if (!(Test-Path -LiteralPath $file)) { continue }
                 $item=Get-Item -LiteralPath $file -Force
@@ -251,6 +251,21 @@ function Get-CloudTargets {
     return @($list)
 }
 
+function Get-ConnectionTargets {
+    @(Get-CloudTargets)
+    $file=Join-Path $script:StateDir 'cloudcli-logins.json'
+    if (!(Test-Path -LiteralPath $file)) { $data=@{schema=1;logins=@()} } else { $data=Read-JsonFile $file }
+    if ($data.schema -ne 1 -or @($data.logins).Count -gt 100) { throw 'CloudCLI 配置损坏，原文件已保留。' }
+    foreach ($login in @($data.logins)) {
+        if (!$login.name -or [string]$login.name -match '[\x00-\x1f]' -or [string]$login.name -like 'cloudcli:*') { throw 'CloudCLI 配置损坏，原文件已保留。' }
+        [pscustomobject]@{name=('cloudcli:'+[string]$login.name);url=(Get-NormalizedUrl ([string]$login.url));password=[string]$login.secret;authMode='cloudcli';autoLogin=($login.autoLogin -eq $true);stamp=([string]$login.url+[string]$login.secret+[string]$login.autoLogin)}
+    }
+    $ssh=Read-JsonFile (Join-Path $script:StateDir 'ssh-logins.json')
+    foreach($l in @($ssh.logins)) { if (!$l) {continue}; foreach($app in @('web','cloudcli')) { if ($l.($app+'Tunnel') -ne $true) {continue}; $port=$l.($app+'Port'); $mode=if($app -eq 'web'){'shared-browser'}else{'cloudcli'}
+        [pscustomobject]@{name=('tunnel:'+$app+':'+$l.name);url=('http://127.0.0.1:'+$port);password=[string]$l.($app+'Secret');authMode=$mode;autoLogin=($l.($app+'AutoLogin') -eq $true)}
+    }}
+}
+
 function Save-CloudTarget([string]$name, [string]$url, [string]$password, [string]$authMode = '', [bool]$AutoLogin = $false) {
     if (!$authMode) { $authMode = Get-CloudAuthMode $url }
     if ($AutoLogin -and ($authMode -ne 'shared-browser' -or !$password)) { throw '共享自动登录需要保存密码。' }
@@ -290,12 +305,14 @@ function Find-BrowserProgram([string]$id) {
     return $null
 }
 
-function Get-BrowserChoice {
+function Get-BrowserChoice([string]$name = '') {
     try { $settings = Read-JsonFile (Join-Path $script:StateDir 'application-preferences.json') } catch { return $null }
-    if (!$settings -or [string]$settings.browser -notin @('edge', 'chrome', 'firefox')) { return $null }
-    $program = Find-BrowserProgram ([string]$settings.browser)
+    $cloud=$name.StartsWith('cloudcli:') -or $name.StartsWith('tunnel:cloudcli:');$id=if($cloud){[string]$settings.cloudcliBrowser}else{[string]$settings.browser}
+    if (!$settings -or $id -notin @('edge', 'chrome', 'firefox')) { return $null }
+    $program = Find-BrowserProgram $id
     if (!$program) { return $null }
-    return [pscustomobject]@{ Id = [string]$settings.browser; Path = $program; Close = ($settings.closeWeb -eq $true) }
+    $close=if($cloud){$settings.closeCloudcli -eq $true}else{$settings.closeWeb -eq $true}
+    return [pscustomobject]@{ Id = $id; Path = $program; Close = $close }
 }
 
 # A page that closes on disconnect gets a profile of its own per device, so its window is a
@@ -307,7 +324,7 @@ function Get-CloudPageFolder([string]$name, [string]$browser) {
 }
 
 function Open-CloudPage([string]$name, [string]$url) {
-    $browser = Get-BrowserChoice
+    $browser = Get-BrowserChoice $name
     if (!$browser) { Start-Process -FilePath $url; return }
     if (!$browser.Close) { Start-Process -FilePath $browser.Path -ArgumentList @('"' + $url + '"'); return }
     $folder = Get-CloudPageFolder $name $browser.Id
@@ -319,7 +336,7 @@ function Open-CloudPage([string]$name, [string]$url) {
 
 # Closes this device's page windows when Settings ask for it. Returns how many processes ended.
 function Close-CloudPage([string]$name) {
-    $browser = Get-BrowserChoice
+    $browser = Get-BrowserChoice $name
     if (!$browser -or !$browser.Close) { return 0 }
     $folders = @('edge', 'chrome', 'firefox' | ForEach-Object { Get-CloudPageFolder $name $_ })
     $owned = {

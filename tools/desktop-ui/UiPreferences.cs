@@ -15,6 +15,7 @@ namespace CMCP {
     internal sealed class CardPreference {
         public string name = "", label = "", icon = "", note = "", loginMode = "";
         public bool hideAddress;
+        public string webRoute="url",cloudcliRoute="url";
     }
     internal sealed class UiPreferences {
         public int schema = 1;
@@ -33,7 +34,8 @@ namespace CMCP {
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var c in data.cards) {
                     if (c == null || String.IsNullOrEmpty(c.name) || c.name.Length > 512 || !seen.Add(c.name) || c.label == null || c.label.Length > 80 || c.label.Any(Char.IsControl) || c.icon == null || c.icon.Length > 32768 || c.note == null || c.note.Length > 200 || c.note.Any(x => Char.IsControl(x) && x != '\r' && x != '\n')) throw new InvalidDataException();
-                    if(c.loginMode!=""&&c.loginMode!="web"&&c.loginMode!="ssh")throw new InvalidDataException();
+                    if(c.webRoute!="url"&&c.webRoute!="ssh"||c.cloudcliRoute!="url"&&c.cloudcliRoute!="ssh")throw new InvalidDataException();
+                    if(c.loginMode!=""&&c.loginMode!="web"&&c.loginMode!="cloudcli"&&c.loginMode!="ssh")throw new InvalidDataException();
                     if (c.icon.Length > 0) using (var bmp = DecodeIcon(c.icon)) { }
                 }
                 return data;

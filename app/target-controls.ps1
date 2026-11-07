@@ -34,7 +34,7 @@ function Get-TargetControls {
     if (!(Test-Path -LiteralPath $file)) { return $null }
     if ((Get-Item -LiteralPath $file).Length -gt 262144) { throw '连接开关文件过大，请检查本机设置。' }
     $data = Read-JsonFile $file
-    if (!$data -or $data.schema -ne 1 -or $null -eq $data.targets -or @($data.targets).Count -gt 100) { throw '连接开关文件损坏；为避免误连，不会自动重置。' }
+    if (!$data -or $data.schema -ne 1 -or $null -eq $data.targets -or @($data.targets).Count -gt 400) { throw '连接开关文件损坏；为避免误连，不会自动重置。' }
     $seen = @{}
     foreach ($t in @($data.targets)) {
         if (!$t.name -or ([string]$t.name).Length -gt 512 -or $t.enabled -isnot [bool] -or !$t.revision -or $seen.ContainsKey([string]$t.name)) { throw '连接开关文件损坏；请检查本机设置。' }
@@ -74,8 +74,8 @@ function New-TargetRequestOrder {
 function Set-TargetConnection([string]$Name, [bool]$Enabled, [switch]$All, [long]$RequestTime = 0) {
     Invoke-TargetStateLock {
         if (!$RequestTime) { $RequestTime = New-TargetRequestOrder }
-        $targets = @(Get-CloudTargets)
-        if ($targets.Count -gt 100) { throw '最多支持 100 个保存的云电脑。' }
+        $targets = @(Get-ConnectionTargets)
+        if ($targets.Count -gt 400) { throw '最多支持 100 个保存的云电脑。' }
         if (!$All -and !@($targets | Where-Object { $_.name -ceq $Name }).Count) { throw '所选云电脑已不存在，请刷新列表。' }
         $old = Get-TargetControls
         $entries = @()

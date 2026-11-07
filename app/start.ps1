@@ -58,7 +58,7 @@ function Test-Environment {
 function Confirm-Targets {
     $script:Step = '检查云电脑设置'
     Write-Step '[2/5] 正在检查云电脑设置...'
-    $targets = @(Get-CloudTargets)
+    $targets = @(Get-ConnectionTargets)
     if ($TargetName) {
         $targets = @($targets | Where-Object { $_.name -ceq $TargetName })
         if (!$targets.Count) { throw '所选云电脑已不存在，请刷新列表。' }
@@ -69,16 +69,16 @@ function Confirm-Targets {
         if (!$cred) { throw '已取消。' }
         Save-CloudTarget (Get-TargetName $cred.Url) $cred.Url $cred.Password $cred.AuthMode
         Write-Ok '云电脑设置已保存。'
-        return @(Get-CloudTargets)
+        return @(Get-ConnectionTargets)
     }
     foreach ($t in $targets) {
         try {
             # The background checks every protocol before logging in. Do not let
             # an unreachable saved address delay opening a new shared desktop.
             $mode = $t.authMode
-            if ($mode -eq 'shared-browser') {
-                if ($t.password -and $t.autoLogin -ne $true) { Save-CloudTarget $t.name $t.url '' 'shared-browser' }
-                Write-Ok ('共享网页登录：' + $t.url)
+            if ($mode -in @('shared-browser','cloudcli')) {
+                if ($mode -eq 'shared-browser' -and $t.password -and $t.autoLogin -ne $true) { Save-CloudTarget $t.name $t.url '' 'shared-browser' }
+                Write-Ok ('网页桌面登录：' + $t.url)
                 continue
             }
             $plain = $null
@@ -95,7 +95,7 @@ function Confirm-Targets {
             Write-Warn ('暂时无法检查 ' + $t.url + '；后台会继续尝试，不会影响其它云电脑。')
         }
     }
-    return @(Get-CloudTargets | Where-Object { !$TargetName -or $_.name -ceq $TargetName })
+    return @(Get-ConnectionTargets | Where-Object { !$TargetName -or $_.name -ceq $TargetName })
 }
 
 function Start-Background {
@@ -167,7 +167,7 @@ function Wait-Connected($targets) {
             if ($status.targets) { $s = $status.targets.($t.name) }
             if (!$s -or ($TargetName -and $s.revision -ne $script:Control.revision)) { $done = $false; continue }
             if ($s.state -eq 'waiting-login' -and !$opened[$t.name]) {
-                if (Open-SharedCloudBrowser $t.name) { $opened[$t.name] = $true; Write-Line '已打开共享网页，请在网页中输入云电脑密码。' }
+                if (Open-SharedCloudBrowser $t.name) { $opened[$t.name] = $true; Write-Line '已打开网页桌面，请在网页中输入云电脑密码。' }
             }
             # 每一步的说明都显示出来（读取密码 → 登录 → 建立连接）
             $key = [string]$s.state + '|' + [string]$s.message
@@ -177,7 +177,7 @@ function Wait-Connected($targets) {
             }
             switch ($s.state) {
                 'connected' { }
-                'password' { throw '保存的密码未通过或无法读取；自动尝试已停止。请停止此连接后编辑密码，或在共享网页手动登录。' }
+                'password' { throw '保存的密码未通过或无法读取；自动尝试已停止。请停止此连接后编辑密码，或在网页桌面手动登录。' }
                 'outdated' { throw '云电脑版本过旧，不支持直连。请联系管理员更新云电脑。' }
                 'replaced' { throw '另一台电脑也在连接这台云电脑。请先在那台电脑上断开。' }
                 'expired' { throw $s.message }
@@ -203,7 +203,7 @@ function Install-Connectors($targets) {
     $restart = $false
     foreach ($t in $targets) {
         $browserEntries = Read-JsonFile (Join-Path $StateDir 'browser-entries.json')
-        if ($t.authMode -eq 'shared-browser' -or @($browserEntries.targets | Where-Object { $_.name -eq $t.name -and $_.url -eq $t.url }).Count) { Write-Ok '共享会话的 Claude MCP 配置由后台完成，无需再次登录。'; continue }
+        if ($t.authMode -in @('shared-browser','cloudcli') -or @($browserEntries.targets | Where-Object { $_.name -eq $t.name -and $_.url -eq $t.url }).Count) { Write-Ok '共享会话的 Claude MCP 配置由后台完成，无需再次登录。'; continue }
         $currentStatus = Get-LinkStatus
         if ($currentStatus.targets.($t.name).state -ne 'connected') { continue }
         Connect-CloudPc $t.url (Unprotect-Text $t.password)
@@ -223,7 +223,7 @@ try {
     Initialize-StateDir
     if ($TargetName) {
         Assert-TargetControlSupport
-        $chosen = @(Get-CloudTargets | Where-Object { $_.name -ceq $TargetName })
+        $chosen = @(Get-ConnectionTargets | Where-Object { $_.name -ceq $TargetName })
         $running = Get-LinkStatus
         if ($chosen.Count -eq 1 -and $chosen[0].autoLogin -eq $true -and $running -and $running.pid -and (Get-Process -Id ([int]$running.pid) -ErrorAction SilentlyContinue) -and $running.autoLoginProtocol -ne 1) {
             throw '当前后台不支持网页自动登录。请在方便时手动停止旧后台并启动新版；程序不会自动中断其他云电脑。'

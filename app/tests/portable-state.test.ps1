@@ -12,18 +12,19 @@ try{
     $legacy=Join-Path $temporary 'legacy';$user=Join-Path $temporary 'user'
     $cipher=Protect-Text 'portable fixture secret'
     Put (Join-Path $legacy 'cloudpc-targets.json') ('[{"name":"fixture","password":"'+$cipher+'"}]')
+    Put (Join-Path $legacy 'cloudcli-logins.json') ('{"schema":1,"logins":[{"name":"fixture","url":"https://cli.example.com","secret":"'+$cipher+'","autoLogin":true}]}')
     Put (Join-Path $legacy 'application-preferences.json') '{"schema":1,"language":"en","theme":"dark"}'
     Put (Join-Path $legacy 'control-order.txt') '999999999999999999'
     Put (Join-Path $legacy 'machine-id') 'fixture-machine'
     Put (Join-Path $legacy 'dashboard-preferences.json') '{"label":"fixture remark","icon":"fixture icon"}'
     foreach($name in @('session.json','link-status.json','browser-entries.json','stopped.flag','updates/old.zip')){Put (Join-Path $legacy $name) 'runtime only'}
     Initialize-PortableState $user $legacy
-    foreach($name in @('cloudpc-targets.json','application-preferences.json','control-order.txt','machine-id','dashboard-preferences.json')){
+    foreach($name in @('cloudpc-targets.json','cloudcli-logins.json','application-preferences.json','control-order.txt','machine-id','dashboard-preferences.json')){
         Check ((Get-FileHash -LiteralPath (Join-Path $legacy $name)).Hash -ceq (Get-FileHash -LiteralPath (Join-Path $user $name)).Hash) ('migration preserves exact '+$name+' bytes and retains the source')
     }
     $target=(Get-Content -LiteralPath (Join-Path $user 'cloudpc-targets.json') -Raw|ConvertFrom-Json)[0]
     Check ((Unprotect-Text $target.password) -ceq 'portable fixture secret') 'migrated DPAPI ciphertext decrypts without re-encryption'
-    Check (@(Get-ChildItem -LiteralPath $user).Count -eq 5) 'stale runtime, sessions and downloads are not imported'
+    Check (@(Get-ChildItem -LiteralPath $user).Count -eq 6) 'stale runtime, sessions and downloads are not imported'
     Put (Join-Path $legacy 'machine-id') 'changed old data';Initialize-PortableState $user $legacy
     Check ([IO.File]::ReadAllText((Join-Path $user 'machine-id')) -ceq 'fixture-machine') 'existing portable data is never overwritten by legacy data'
     $badLegacy=Join-Path $temporary 'bad-legacy';$badUser=Join-Path $temporary 'bad-user'

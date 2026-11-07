@@ -8,8 +8,32 @@ using System.Text;
 using System.Windows.Forms;
 
 namespace CMCP {
+    internal static class SshWebTests {
+        internal static void Run(string root,Action<bool,string> check){
+            string directory=Path.Combine(root,"ssh-web-settings");Directory.CreateDirectory(directory);
+            using(var page=new TargetEditorPage(new Target{Name="",Url=""},new CardPreference(),Palette.Create(true))){
+                page.HostInput.Box.Text="example.test";page.UserInput.Box.Text="user";page.WebTunnel.Checked=true;page.CloudTunnel.Checked=true;page.WebTunnelRemember.Checked=true;page.CloudTunnelRemember.Checked=true;page.WebTunnelPassword.Box.Text="WEB-SECRET";page.CloudTunnelPassword.Box.Text="CLOUD-SECRET";
+                check(page.ValidateFields(),"SSH web editor accepts one common SSH identity and independent service credentials");
+                var login=page.BuildSsh("device");var store=new SshStore();store.Put(login);store.Save(directory);string text=File.ReadAllText(SshStore.PathFor(directory));
+                check(!text.Contains("WEB-SECRET")&&!text.Contains("CLOUD-SECRET"),"SSH web access passwords are encrypted separately from SSH authentication");
+                var snapshot=LocalState.Load(directory);check(snapshot.Targets.Count==2&&snapshot.Targets.Any(t=>t.Name=="tunnel:web:device")&&snapshot.Targets.Any(t=>t.Name=="tunnel:cloudcli:device"),"both SSH webpages have independent selectable runtime identities");
+                page.CloudPortInput.Box.Text="3000";check(!page.ValidateFields(),"SSH web editor rejects overlapping service ports");
+            }
+            using(var form=new Manager(true)){
+                form.Show();Application.DoEvents();var card=form.Cards.Values.First();card.TestHover(true);
+                check(card.AppChoice.Visible&&card.RouteChoice.Visible&&card.AppChoice.AccessibleRole==AccessibleRole.ComboBox,"cards use the same animated dropdown control as settings");
+                card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.CloudActive,"the application dropdown selects CloudCLI without connecting");
+                card.RouteChoice.Choose("ssh");Application.DoEvents();check(card.TunnelActive&&card.ConnectionName=="tunnel:cloudcli:"+card.Target.Name,"CloudCLI can select its own SSH route without a network request");
+                card.AppChoice.Choose("ssh");Application.DoEvents();check(card.SshActive&&!card.RouteChoice.Enabled&&card.RouteChoice.Value=="ssh"&&card.RouteChoice.DisplayOverride=="SSH","Terminal always uses SSH and its route dropdown is disabled");
+                card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.TunnelActive,"returning to an application restores its remembered connection route");
+                form.OpenEditor(card.Target.Name);form.Editor.ShowWeb();Application.DoEvents();check(form.Editor.CurrentCategory=="网址登录"&&form.Editor.UrlInput.Visible&&form.Editor.CloudUrlInput.Visible,"the URL category holds both WebDesktop and CloudCLI");
+                form.Close();
+            }
+        }
+    }
     internal static class SshTests {
         static void Pump(){for(int i=0;i<4;i++){Application.DoEvents();System.Threading.Thread.Sleep(5);}}
+        static void SwitchDesktopOrSsh(TargetCard card){card.LoginSwitch.PerformClick();Pump();if(card.CloudActive){card.LoginSwitch.PerformClick();Pump();}}
         static SshLogin Sample(string secret="",string method="password",string key=""){return new SshLogin{name="dev'ice",host="203.0.113.24",port=2222,username="root",method=method,keyPath=key,secret=secret};}
         static bool ContainsText(Control c,string text){return c.Text.Contains(L.Text(text))||c.Controls.Cast<Control>().Any(child=>ContainsText(child,text));}
         static string Decoded(string arguments){string marker="-EncodedCommand ";int at=arguments.IndexOf(marker,StringComparison.Ordinal);string rest=arguments.Substring(at+marker.Length).Split(' ','"')[0];return Encoding.Unicode.GetString(Convert.FromBase64String(rest));}
@@ -184,8 +208,8 @@ namespace CMCP {
                 ProcessStartInfo started=null;form.StartTerminal=info=>started=info;form.Options.terminal="cmd";
                 form.Cards.Values.First().Connect.PerformClick();Pump();
                 check(started!=null&&started.Arguments.StartsWith("/d /k")&&Decoded(started.Arguments).Contains("'192.0.2.9'")&&!started.Arguments.Contains("TESTONLY"),"the card's button opens the chosen terminal with this device's address");
-                form.Cards.Values.First().LoginSwitch.PerformClick();Pump();check(!form.Cards.Values.First().SshActive,"an SSH-only device can persist web as its selected mode");
-                started=null;form.Cards.Values.First().Connect.PerformClick();Pump();check(started==null&&ContainsText(form,"还没有填写共享网页地址，请编辑设备后再连接。"),"missing web details never open the SSH terminal");
+                SwitchDesktopOrSsh(form.Cards.Values.First());check(!form.Cards.Values.First().SshActive,"an SSH-only device can persist web as its selected mode");
+                started=null;form.Cards.Values.First().Connect.PerformClick();Pump();check(started==null&&ContainsText(form,"还没有填写网页桌面地址，请编辑设备后再连接。"),"missing web details never open the SSH terminal");
             }
             using(var again=new Manager(false,state,kit)){
                 again.Show();Pump();var card=again.Cards.Values.FirstOrDefault();
@@ -196,11 +220,11 @@ namespace CMCP {
             using(var form=new Manager(true)){
                 form.Show();Pump();var card=form.Cards["preview-b"];
                 check(card.Address==card.Target.Url,"web mode exposes only the web address for display and copying");
-                card.LoginSwitch.PerformClick();Pump();check(card.Address==card.Ssh.host&&!card.Address.Contains("@"),"SSH mode displays and copies the host without user, port or command");
+                SwitchDesktopOrSsh(card);check(card.Address==card.Ssh.host&&!card.Address.Contains("@"),"SSH mode displays and copies the host without user, port or command");
                 check(form.Cards["preview-a"].Top<card.Top,"switching sign-in preserves the existing card order");
                 form.OpenEditor(card.Target.Name);Pump();form.Editor.HideAddress.Checked=true;form.Editor.NoteInput.Box.Text="Private device note";form.Editor.NameInput.Box.Text="Work device";form.Editor.Save.PerformClick();Pump();
                 check(form.Editor==null&&card.Preference.hideAddress&&card.Caption=="Work device"&&card.IconNote.AccessibleDescription=="Private device note"&&card.Details.Note=="","hidden address and icon note save without adding a note to the detail panel");
-                card.LoginSwitch.PerformClick();Pump();check(card.Preference.hideAddress&&card.Address==card.Target.Url,"changing sign-in retains address hiding while copying still uses the current address");
+                SwitchDesktopOrSsh(card);check(card.Preference.hideAddress&&card.Address==card.Target.Url,"changing sign-in retains address hiding while copying still uses the current address");
                 form.OpenEditor(card.Target.Name);Pump();var page=form.Editor;
                 check(page.HideAddress.Checked&&page.HideAddress.Right==page.HideAddress.Parent.Width-16,"editing restores the saved display switch and aligns it at the right edge");
                 page.ShowWeb();Pump();check(page.Remember.Right==page.Remember.Parent.Width-16,"remember-password switch uses the same right edge");
@@ -229,25 +253,25 @@ namespace CMCP {
             using(var form=new Manager(true)){
                 form.Show();Pump();
                 var a=form.Cards["preview-a"];var b=form.Cards["preview-b"];
-                check(b.Ssh!=null&&!b.SshActive&&b.LoginSwitch.Text=="网页"&&a.Ssh==null,"a card starts on shared web sign-in");
+                check(b.Ssh!=null&&!b.SshActive&&b.LoginSwitch.Text=="网页桌面"&&a.Ssh==null,"a card starts on web desktop sign-in");
                 string state=b.Target.State;
                 b.TestHover(true);Pump();check(b.LoginSwitch.Visible&&b.ActionsVisible&&b.LoginSwitch.Right<=b.Connect.Left,"the switch sits beside the connect button");
                 b.SetExpanded(true,false);Pump();check(b.Details.Stop.Visible,"web sign-in offers stop in the details");
-                b.LoginSwitch.PerformClick();Pump();
+                SwitchDesktopOrSsh(b);
                 check(b.SshActive&&b.LoginSwitch.Text=="SSH"&&b.Connect.Text=="打开终端"&&b.Connect.Glyph=="terminal"&&b.Target.State==state,"switching changes the card's button and leaves the web connection alone");
                 check(b.Details.Stop.Visible&&!b.Details.Stop.Enabled&&b.Details.Open.Text=="打开终端"&&b.StatusText.Text=="ssh · 已停止","a stopped SSH channel shows its state and has nothing to stop");
                 b.Connect.PerformClick();Pump();check(b.Target.State==state,"opening a terminal never starts the web connection");
-                b.LoginSwitch.PerformClick();Pump();check(!b.SshActive&&b.Connect.Text!="打开终端"&&b.Details.Stop.Visible,"switching back restores shared web sign-in");b.SetExpanded(false,false);Pump();
+                SwitchDesktopOrSsh(b);check(!b.SshActive&&b.Connect.Text!="打开终端"&&b.Details.Stop.Visible,"switching back restores web desktop sign-in");b.SetExpanded(false,false);Pump();
                 var channels=new Dictionary<string,string>();var stops=new List<string>();bool stopWorks=true;
                 form.ReadSshState=(directory,id)=>{string phase;return channels.TryGetValue(id,out phase)?phase:"";};
                 form.StopSshWorker=(directory,id)=>{stops.Add(id);if(stopWorks)channels.Remove(id);return stopWorks;};
-                b.LoginSwitch.PerformClick();Pump();b.SetExpanded(true,false);
+                SwitchDesktopOrSsh(b);b.SetExpanded(true,false);
                 channels["preview-b"]="connecting";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 连接中"&&b.Details.Stop.Enabled,"a starting SSH channel can already be stopped");
                 channels["preview-b"]="recovering";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 正在恢复","a recovering SSH channel says so");
                 channels["preview-b"]="failed";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 连接异常"&&b.Details.Stop.Enabled,"a failed SSH channel can still be stopped");
                 channels["preview-b"]="ready";form.RefreshState();Pump();
                 check(b.StatusText.Text=="ssh · 已连接"&&b.StatusText.ForeColor.ToArgb()==b.Colors.Success.ToArgb()&&b.Details.Stop.Enabled&&b.Details.Stop.Visible,"a ready SSH channel shows as connected and can be stopped");
-                check(b.Target.State==state&&b.Details.Logs.Left>b.Details.Stop.Right,"the stop button sits where shared web sign-in has it");
+                check(b.Target.State==state&&b.Details.Logs.Left>b.Details.Stop.Right,"the stop button sits where web desktop sign-in has it");
                 stopWorks=false;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();
                 check(stops.Count==1&&b.StatusText.Text=="ssh · 已连接"&&b.Details.Stop.Enabled,"a failed stop leaves the channel shown as connected");
                 stopWorks=true;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
@@ -258,8 +282,8 @@ namespace CMCP {
                 b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
                 check(closes.Count==1&&closes[0]=="preview-b"&&stops.Count==3&&ContainsText(form,"SSH 通道已停止，终端窗口已关闭。"),"with the setting on, stopping SSH also closes this device's terminals");
                 form.Options.closeTerminal=false;
-                b.LoginSwitch.PerformClick();Pump();check(b.StatusText.Text.StartsWith("web · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();
-                a.LoginSwitch.PerformClick();Pump();
+                SwitchDesktopOrSsh(b);check(b.StatusText.Text.StartsWith("web · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();
+                SwitchDesktopOrSsh(a);
                 check(form.Editor==null&&a.SshActive&&a.Ssh==null,"a card without SSH details switches without opening the editor");
                 a.Connect.PerformClick();Pump();check(form.Editor==null&&ContainsText(form,"还没有填写 SSH 信息，请编辑设备后再连接。")&&a.Target.State=="connected","missing SSH details are reported only when connecting and retain the running web link");
                 form.OpenEditor(a.Target.Name);form.Editor.ShowSsh();
@@ -269,18 +293,18 @@ namespace CMCP {
                 var only=form.Cards.Values.FirstOrDefault(c=>c.Target.Url.Length==0);
                 check(form.Editor==null&&form.Cards.Count==before+1&&only!=null&&only.SshActive&&only.Caption=="我的 VPS"&&only.Connect.Text=="打开终端","a device with only SSH gets its own card");
                 check(only.Ssh.Address=="root@192.0.2.9:22"&&only.AccessibleName.StartsWith("我的 VPS"),"an SSH-only card shows its address and needs no web address");
-                only.LoginSwitch.PerformClick();Pump();check(form.Editor==null&&!only.SshActive,"an SSH-only card switches to web without opening the editor");
-                only.Connect.PerformClick();Pump();check(ContainsText(form,"还没有填写共享网页地址，请编辑设备后再连接。")&&only.Target.State=="stopped","missing web details are reported on connect without starting the backend");only.LoginSwitch.PerformClick();Pump();
+                SwitchDesktopOrSsh(only);check(form.Editor==null&&!only.SshActive,"an SSH-only card switches to web without opening the editor");
+                only.Connect.PerformClick();Pump();check(ContainsText(form,"还没有填写网页桌面地址，请编辑设备后再连接。")&&only.Target.State=="stopped","missing web details are reported on connect without starting the backend");SwitchDesktopOrSsh(only);
                 form.FinishTransition();Pump();
                 check(form.TrayItems.Length>0,"the tray still builds with an SSH-only device");
                 form.TrayAction(only.Target.Name,"connect");Pump();check(only.Target.State=="stopped","connecting from the tray only opens a terminal for an SSH-only device");
                 only.Delete.PerformClick();Pump();check(!form.Cards.ContainsKey(only.Target.Name)&&form.Ssh.Get(only.Target.Name)==null,"deleting an SSH-only device removes its details");
                 form.OpenSettings();Pump();form.Settings.ShowConnect();Pump();
                 var fields=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().ToArray();
-                check(fields.Length==2&&fields[0].Value==""&&fields[1].Value==Terminals.Resolve("",Terminals.Detect()).Id,"the connection page shows the browser and terminal dropdowns");
-                fields[1].Choose("cmd");Pump();check(form.Options.terminal=="cmd"&&fields[1].Value=="cmd","the chosen terminal is kept");
+                check(fields.Length==3&&fields[0].Value==""&&fields[1].Value==""&&fields[2].Value==Terminals.Resolve("",Terminals.Detect()).Id,"the connection page shows the browser and terminal dropdowns");
+                fields[2].Choose("cmd");Pump();check(form.Options.terminal=="cmd"&&fields[2].Value=="cmd","the chosen terminal is kept");
                 var switches=form.Settings.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().ToArray();
-                check(switches.Length==2&&!switches[0].Enabled&&!switches[0].Checked&&switches[1].Enabled,"closing the page needs a specific browser, closing the terminal does not");
+                check(switches.Length==3&&!switches[0].Enabled&&!switches[0].Checked&&!switches[1].Enabled&&switches[2].Enabled,"closing the page needs a specific browser, closing the terminal does not");
                 var browsers=Browsers.Detect();
                 if(browsers.Count>0){fields[0].Choose(browsers[0].Id);Pump();check(form.Options.browser==browsers[0].Id&&switches[0].Enabled&&fields[0].Images.ContainsKey(browsers[0].Id),"choosing an installed browser shows its own icon and allows closing its page");}
                 else check(fields[0].Value=="","without another browser only the system default is offered");

@@ -18,6 +18,9 @@ namespace CMCP {
     internal sealed class SshLogin {
         public string name="",host="",username="",method="password",keyPath="",secret="";
         public int port=22;
+        public bool webTunnel,cloudcliTunnel,webAutoLogin,cloudcliAutoLogin;
+        public int webPort=3000,cloudcliPort=3001;
+        public string webSecret="",cloudcliSecret="";
         public bool active;
         internal bool UsesKey{get{return method=="key";}}
         internal string Address{get{return username+"@"+host+":"+port;}}
@@ -66,6 +69,7 @@ namespace CMCP {
                 var seen=new HashSet<string>(StringComparer.Ordinal);
                 foreach(var login in data.logins){
                     if(login==null||String.IsNullOrEmpty(login.name)||login.name.Length>512||!seen.Add(login.name)||login.secret==null||login.secret.Length>8192||login.keyPath==null)throw new InvalidDataException();
+                    if(login.webPort<1||login.webPort>65535||login.cloudcliPort<1||login.cloudcliPort>65535||login.webPort==login.cloudcliPort||login.webSecret==null||login.cloudcliSecret==null||login.webSecret.Length>16384||login.cloudcliSecret.Length>16384)throw new InvalidDataException();
                     if(SshLogin.Problem(login.host,Convert.ToString(login.port),login.username,login.method,login.keyPath).Length>0)throw new InvalidDataException();
                 }
                 return data;

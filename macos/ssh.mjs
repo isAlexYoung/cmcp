@@ -89,6 +89,11 @@ export function writeLaunch(login,directory,{node=process.execPath,kit=KIT,owner
   atomicWrite(script,commandScript(login,{askpass,state:directory,mcp,sessions,ended}),0o700);fs.chmodSync(script,0o700);
   return script;
 }
+export function webTunnelEnvironment(login,directory){
+  const askpass=path.join(privateDir(path.join(directory,'ssh-run')),'web-askpass');
+  atomicWrite(askpass,`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(KIT,'ssh-askpass.mjs'))} "$1"\n`,0o700);fs.chmodSync(askpass,0o700);
+  return {...process.env,CMCP_STATE_DIR:directory,CMCP_SSH_ASKPASS:login.id,SSH_ASKPASS:askpass,SSH_ASKPASS_REQUIRE:'force',DISPLAY:'cmcp'};
+}
 export async function openTerminal(login,directory,chosen,{found=detectTerminals(),run=runFile,closeTerminal=false}={}){
   const terminal=resolveTerminal(chosen,found);if(!terminal)throw Error('无法打开所选终端，请在设置中换一个终端后重试。');
   const script=writeLaunch(login,directory,{closeTerminal});

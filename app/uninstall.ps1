@@ -10,7 +10,7 @@ try {
     Write-Utf8File $StopFlag ([DateTime]::UtcNow.ToString('o'))
     Unregister-AutoStart
     Stop-LinkService
-    foreach ($t in @(Get-CloudTargets)) {
+    foreach ($t in @(Get-ConnectionTargets)) {
         try {
             Connect-CloudPc $t.url (Unprotect-Text $t.password)
             $info = Invoke-CloudApi '/api/sys/info?lite=1'

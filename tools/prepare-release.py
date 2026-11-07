@@ -48,7 +48,7 @@ def inspect_package(file, version, commit, platform):
         required = ('Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs') if platform.startswith('macos-') else ('CMCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json')
         if any(prefix + name not in actual for name in required):
             raise ValueError('Required application files are missing')
-        forbidden = {'.env', 'targets.json', 'cloudpc-targets.json', 'target-controls.json', 'browser-entries.json', 'session.json', 'manager-instance.json'}
+        forbidden = {'.env', 'targets.json', 'cloudpc-targets.json', 'cloudcli-logins.json', 'target-controls.json', 'browser-entries.json', 'session.json', 'manager-instance.json'}
         if any(PurePosixPath(n).name in forbidden for n in actual):
             raise ValueError('Personal state in package')
 

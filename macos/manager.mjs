@@ -1,3 +1,6 @@
+import {acquireWebTunnel} from '../app/ssh-web.mjs';
+import {webTunnelEnvironment} from './ssh.mjs';
+import {cloudcliName} from '../app/cloudcli.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -30,7 +33,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const status={set(name,state,message){if(state==='password')message='保存的密码不正确或不可用。请停止此连接后编辑密码。';states[name]={state,message,at:new Date().toISOString(),clients:states[name]?.clients};},clients(name,value){if(states[name])states[name].clients=value;}};
   const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);const recovery=/\] ((?:web (?:document|api|asset) (?:(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) attempt=[1-5] code=(?:ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|HTTP_50[234]) tls=(?:true|false)|recovered attempts=[2-5]|cache hit|failed code=NON_TRANSIENT))|heartbeat (?:delayed; retaining connection|recovered without reconnect))$/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+(recovery?recovery[1]:name[2]):'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
   const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
-    create:managedTargetFactory({proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
+    create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:webTunnelEnvironment(login,directory)});},proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false,checking=null,preparedUpdate=null;
@@ -39,37 +42,42 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
   const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
-  async function entry(id){if(!store.targets.some(t=>t.id===id)&&store.sshFor(id))throw Error('还没有填写共享网页地址，请编辑设备后再连接。');for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===id);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(id)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
+  const connectionName=id=>store.connectionName(id);
+  const browserPreferences=id=>store.loginMode(id)==='cloudcli'?{...store.preferences,browser:store.preferences.cloudcliBrowser||'',closeWeb:store.preferences.closeCloudcli===true}:store.preferences;
+  async function entry(id){const name=connectionName(id);if(!store.linkTargets().some(t=>t.name===name))throw Error(store.route(id)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':store.loginMode(id)==='cloudcli'?'还没有填写 CloudCLI 地址，请编辑设备后再连接。':'还没有填写网页桌面地址，请编辑设备后再连接。');for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===name);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(name)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
   // A running connection already holds a session; otherwise only a saved password can open one.
   const removeCloudConfig=removeCloud||(async target=>{
     const record=connections.values().find(t=>t.name===target.id);
     if(record?.auth)return new Cloud(record.url,record.auth,record.agent).uninstall();
+    if(target.authMode==='cloudcli')throw Error('CloudCLI must be connected to remove its cloud configuration');
     const cloud=await Cloud.connect(target.url,await store.password(target.id),await proxy(target.url));
     try{await cloud.uninstall();}finally{cloud.close();}
   });
   async function uninstallApplication(appPid){
     installation.check();
-    const cloudFailed=(await Promise.all(store.targets.map(target=>Promise.race([removeCloudConfig(target),delay(45000,undefined,{ref:false}).then(()=>{throw Error('Cloud removal timed out');})]).then(()=>0,()=>1)))).reduce((sum,failed)=>sum+failed,0);
+    const cleanupTargets=[...store.targets,...store.linkTargets().filter(t=>t.authMode==='cloudcli').map(t=>({...t,id:t.name}))];
+    const cloudFailed=(await Promise.all(cleanupTargets.map(target=>Promise.race([removeCloudConfig(target),delay(45000,undefined,{ref:false}).then(()=>{throw Error('Cloud removal timed out');})]).then(()=>0,()=>1)))).reduce((sum,failed)=>sum+failed,0);
     await store.serial(()=>store.setEnabled(null,false));
     await Promise.allSettled(store.targets.map(t=>{const ref=t.credentialId||(!t.authMode?t.id:null);return ref?secrets('delete',ref):null;}));
-    await Promise.allSettled(store.ssh.logins.map(l=>l.credentialId?secrets('delete',l.credentialId):null));
+    await Promise.allSettled([...store.ssh.logins,...store.cloudcli.logins].flatMap(l=>[l.credentialId,l.webCredentialId,l.cloudcliCredentialId].filter(Boolean).map(ref=>secrets('delete',ref))));
     installation.launch([process.pid,process.ppid,appPid]);
     return {uninstalled:true,cloudFailed};
   }
   async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await Promise.all([connections.close(),stopSshWorkers(directory)]);staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
-    '/api/tray':async()=>({targets:store.view(states).targets.map(({id,label,state,enabled,loginMode})=>({id,label,state,enabled,...(loginMode==='ssh'?{ssh:true}:{})})),language:store.preferences.language,updating}),
+    '/api/tray':async()=>({targets:store.view(states).targets.map(t=>{const v=t.route==='ssh'&&t.loginMode!=='ssh'?t.tunnels[t.loginMode]:t.loginMode==='cloudcli'?t.cloudcli:t;return {id:t.id,label:t.label,state:v?.state||'stopped',enabled:v?.enabled===true,loginMode:t.loginMode,...t.loginMode==='ssh'?{ssh:true}:{}};}),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
     '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();return {started:true};}),
     // The page window closes after the stop is saved; that never holds up the reply.
-    '/api/targets/stop':async input=>{const result=await store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};});closeBrowserPages(store.preferences,directory,input.id).catch(()=>{});return result;},
+    '/api/targets/stop':async input=>{const result=await store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};});closeBrowserPages(browserPreferences(input.id),directory,connectionName(input.id)).catch(()=>{});return result;},
     '/api/targets/delete':input=>store.serial(async()=>{await store.remove(input.id);connections.tick();return {deleted:true};}),
     '/api/targets/order':input=>store.serial(()=>{store.reorder(input.ids);return {saved:true};}),
     // opened:false leaves the page to the system default browser, which the native host opens.
-    '/api/targets/open':async input=>{const url=await entry(input.id);let opened=false;try{opened=await openBrowserPage(store.preferences,directory,input.id,url);}catch{}return {url,opened};},
+    '/api/targets/open':async input=>{const url=await entry(input.id);let opened=false;try{opened=await openBrowserPage(browserPreferences(input.id),directory,connectionName(input.id),url);}catch{}return {url,opened};},
     '/api/targets/ssh-stop':async input=>{if(!store.sshFor(input.id))throw Error('连接不存在');const close=store.preferences.closeTerminal===true;if(close)await closeTerminals(directory,input.id).catch(()=>0);await stopChannel(directory,input.id);return {stopped:true,closedTerminals:close};},
-    '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.active);return {saved:true};}),
+    '/api/targets/route':input=>store.serial(()=>{store.setRoute(input.id,input.route);return {saved:true};}),
+    '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.mode??input.active);return {saved:true};}),
     '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error(store.targets.some(t=>t.id===input.id)?'还没有填写 SSH 信息，请编辑设备后再连接。':'连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal,{closeTerminal:store.preferences.closeTerminal===true})};},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     '/api/update/check':async()=>{

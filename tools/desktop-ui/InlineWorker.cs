@@ -65,7 +65,7 @@ namespace CMCP {
                         if(new FileInfo(controls).Length>262144)throw new IOException("Invalid connection preferences");
                         var data=LocalState.Obj(new JavaScriptSerializer{MaxJsonLength=262144}.DeserializeObject(File.ReadAllText(controls)));
                         var targets=LocalState.Get(data,"targets") as object[];
-                        if(Convert.ToString(LocalState.Get(data,"schema"))!="1"||targets==null||targets.Length>100)throw new IOException("Invalid connection preferences");
+                        if(Convert.ToString(LocalState.Get(data,"schema"))!="1"||targets==null||targets.Length>400)throw new IOException("Invalid connection preferences");
                         foreach(var value in targets){var entry=LocalState.Obj(value);var time=LocalState.Get(entry,"requestTime");if(time!=null)latest=Math.Max(latest,ReadNumber(Convert.ToString(time)));}
                     }
                     long next=checked(latest+1);

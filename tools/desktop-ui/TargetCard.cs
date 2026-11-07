@@ -27,15 +27,24 @@ namespace CMCP {
         internal Palette Colors=Palette.Create(false);
         internal bool Selected, Expanded, BusyConnect, BusyStop;
         internal SshLogin Ssh;
+        internal CloudCliLogin Cloud;
+        internal Target CloudTarget,WebTunnelTarget,CloudTunnelTarget;
+        internal bool TunnelActive {get{return !SshActive&&(CloudActive?Preference.cloudcliRoute:Preference.webRoute)=="ssh";}}
+        internal string ConnectionName {get{return TunnelActive?"tunnel:"+(CloudActive?"cloudcli:":"web:")+Target.Name:CloudActive?"cloudcli:"+Target.Name:Target.Name;}}
+        internal bool CloudActive {get{return Preference.loginMode=="cloudcli"||Preference.loginMode==""&&Target.Url.Length==0&&Cloud!=null&&Ssh==null;}}
+        internal Target Connection {get{if(TunnelActive)return (CloudActive?CloudTunnelTarget:WebTunnelTarget)??new Target{Name=ConnectionName,Url="",Mode="SSH 隧道",State="stopped",Detail="已停止"};return !CloudActive?Target:CloudTarget??new Target{Name="cloudcli:"+Target.Name,Url=Cloud==null?"":Cloud.url,State="stopped",Mode="CloudCLI 登录",Detail="已停止",AutoLogin=Cloud!=null&&Cloud.autoLogin,HasSavedPassword=Cloud!=null&&Cloud.secret.Length>0};}}
         // The background SSH channel: empty while nothing runs, otherwise its reported phase.
         internal string SshState="";
         internal bool SshStopping;
         // Only the card's own button changes here; a running web connection is not touched.
-        internal bool SshActive { get { return Preference.loginMode=="ssh"||(Preference.loginMode!="web"&&Ssh!=null&&(Ssh.active||Target.Url.Length==0)); } }
+        internal bool SshActive { get { return Preference.loginMode=="ssh"||(Preference.loginMode!="web"&&Preference.loginMode!="cloudcli"&&Ssh!=null&&(Ssh.active||Target.Url.Length==0)); } }
         internal string SshAddress {get{return Ssh==null?"":Ssh.Address;}}
-        internal string Address {get{return SshActive?(Ssh==null?"":Ssh.host):Target.Url;}}
+        internal string Address {get{return SshActive||TunnelActive?(Ssh==null?"":Ssh.host):Connection.Url;}}
         internal readonly CardIcon IconNote=new CardIcon();
-        internal string Caption { get { return Preference.label.Length>0?Preference.label:Preference.hideAddress?L.Text("未命名设备"):Target.Url.Length>0?new Uri(Target.Url).Host:Ssh!=null?Ssh.host:Target.Name; } }
+        internal string Caption { get { return Preference.label.Length>0?Preference.label:Preference.hideAddress?L.Text("未命名设备"):Target.Url.Length>0?new Uri(Target.Url).Host:Cloud!=null?new Uri(Cloud.url).Host:Ssh!=null?Ssh.host:Target.Name; } }
+        internal readonly DropdownField AppChoice=new DropdownField(new[]{new System.Collections.Generic.KeyValuePair<string,string>("web","WebDesktop"),new System.Collections.Generic.KeyValuePair<string,string>("cloudcli","CloudCLI"),new System.Collections.Generic.KeyValuePair<string,string>("ssh","Terminal")}){AccessibleName="打开对象"};
+        internal readonly DropdownField RouteChoice=new DropdownField(new[]{new System.Collections.Generic.KeyValuePair<string,string>("url","网址直连"),new System.Collections.Generic.KeyValuePair<string,string>("ssh","SSH 隧道")}){AccessibleName="连接方式"};
+        internal event Action<TargetCard,string> AppChosen,RouteChosen;
         internal readonly ModernButton LoginSwitch=new ModernButton{Glyph="swap",Neutral=true,AccessibleName="切换登录方式"};
         internal readonly ModernButton Connect=new ModernButton();
         internal readonly ModernButton Edit=new ModernButton{Glyph="edit",AccessibleName="编辑设备"};
@@ -51,7 +60,7 @@ namespace CMCP {
         Bitmap icon;
         bool hovered, keyboardFocus, changingHover, dragArmed;
         Point dragStart;
-        internal bool Compact { get { return Width<860; } }
+        internal bool Compact { get { return Width<1000; } }
         internal int HeaderHeight { get { return Compact?156:116; } }
         internal int FinalHeight { get { return HeaderHeight+(Expanded?Details.NeededHeight(Width-40)+22:0); } }
         internal bool ActionsVisible { get { return Connect.Visible&&Edit.Visible&&Copy.Visible&&Delete.Visible; } }
@@ -59,9 +68,11 @@ namespace CMCP {
         internal TargetCard(Target target,CardPreference preference) {
             Target=target;Preference=preference;DoubleBuffered=true;
             SetStyle(ControlStyles.Selectable|ControlStyles.ResizeRedraw,true);TabStop=true;AllowDrop=true;Height=116;Cursor=Cursors.Hand;
-            Controls.AddRange(new Control[]{LoginSwitch,Connect,Edit,Copy,Delete,Toggle,StatusText,Details,IconNote});
+            Controls.AddRange(new Control[]{AppChoice,RouteChoice,Connect,Edit,Copy,Delete,Toggle,StatusText,Details,IconNote});
             if(preference.icon.Length>0)icon=UiPreferences.DecodeIcon(preference.icon);IconNote.Picture=icon;
             IconNote.MouseUp+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left){SelectCard();SetExpanded(!Expanded,true);}};
+            AppChoice.Chosen+=value=>{if(AppChosen!=null)AppChosen(this,value);};RouteChoice.Chosen+=value=>{if(RouteChosen!=null)RouteChosen(this,value);};
+            AppChoice.Menu.Closed+=delegate{QueuePointerCheck();};RouteChoice.Menu.Closed+=delegate{QueuePointerCheck();};
             LoginSwitch.Click+=delegate{if(SwitchRequested!=null)SwitchRequested(this);};
             Connect.Click+=delegate{if(ConnectRequested!=null)ConnectRequested(this);};
             Edit.Click+=delegate{if(EditRequested!=null)EditRequested(this);};
@@ -72,7 +83,7 @@ namespace CMCP {
             Details.Open.Click+=delegate{if(OpenRequested!=null)OpenRequested(this);};
             Details.Stop.Click+=delegate{if(StopRequested!=null)StopRequested(this);};
             Details.Logs.Click+=delegate{if(LogsRequested!=null)LogsRequested(this);};
-            tips.SetToolTip(LoginSwitch,"切换登录方式：共享网页 / SSH");
+            tips.SetToolTip(LoginSwitch,"切换登录方式：网页桌面 / CloudCLI / SSH");
             tips.SetToolTip(Edit,"编辑名称、备注、图标和登录方式");
                         tips.SetToolTip(Delete,"删除这一台设备，其他连接保持不变");
             tips.SetToolTip(Toggle,"展开 / 收起详情");
@@ -102,7 +113,7 @@ namespace CMCP {
 
         internal void SyncPointer() {
             if(IsDisposed||changingHover)return;
-            bool pointerInside=Visible&&ClientRectangle.Contains(PointToClient(Cursor.Position));
+            bool pointerInside=Visible&&(ClientRectangle.Contains(PointToClient(Cursor.Position))||AppChoice.IsOpen||RouteChoice.IsOpen);
             SetHover(pointerInside||(Visible&&ContainsFocus&&keyboardFocus));
         }
 
@@ -111,9 +122,9 @@ namespace CMCP {
         void SelectCard() { Focus();if(SelectedCard!=null)SelectedCard(this); }
 
         internal void RefreshTarget(Target target) {
-            Target=target;Details.Target=target;Details.Ssh=SshActive?Ssh:null;Details.SshMode=SshActive;Details.Note="";tips.SetToolTip(IconNote,Preference.note??"",true);IconNote.AccessibleName=Caption;IconNote.AccessibleDescription=Preference.note??"";
-            AccessibleName=Caption+"，"+(SshActive?"SSH":LocalState.Caption(target.State));
-            AccessibleDescription=(SshActive?SshAddress:target.Url)+" · "+L.Text(target.Mode??"")+" · "+L.Message(target.Detail??"");
+            Target=target;Details.Target=Connection;Details.Ssh=SshActive?Ssh:null;Details.SshMode=SshActive;Details.Note="";tips.SetToolTip(IconNote,Preference.note??"",true);IconNote.AccessibleName=Caption;IconNote.AccessibleDescription=Preference.note??"";
+            AccessibleName=Caption+"，"+(SshActive?"SSH":LocalState.Caption(Connection.State));
+            AccessibleDescription=(SshActive?SshAddress:Connection.Url)+" · "+L.Text(Connection.Mode??"")+" · "+L.Message(Connection.Detail??"");
             UpdateActions();Invalidate();Details.Invalidate();
         }
 
@@ -130,7 +141,8 @@ namespace CMCP {
             Color fill=Selected?colors.Selected:colors.Surface;IconNote.Apply(colors,fill);
             Details.Apply(colors);Details.BackColor=fill;
             StatusText.BackColor=fill;
-            StatusText.ForeColor=(SshActive?SshState=="ready":Target.State=="connected")?colors.Success:colors.Muted;
+            StatusText.ForeColor=(SshActive?SshState=="ready":Connection.State=="connected")?colors.Success:colors.Muted;
+            foreach(var field in new[]{AppChoice,RouteChoice}){field.Colors=colors;field.BackColor=fill;field.Invalidate();}
             foreach(var button in new[]{LoginSwitch,Connect,Edit,Copy,Delete,Toggle}){
                 button.Colors=colors;button.BackColor=fill;button.Invalidate();
             }
@@ -138,29 +150,30 @@ namespace CMCP {
         }
 
         internal void UpdateActions() {
-            bool connected=Target.State=="connected";
-            bool connecting=BusyConnect||Target.State=="connecting"||Target.State=="configuring"||Target.State=="waiting-login"||(Target.State=="recovering"||Target.State=="unstable");
-            Details.StatusOverride=BusyStop?"正在停止":BusyConnect&&Target.State=="stopped"?"连接中":"";
+            bool connected=Connection.State=="connected";
+            bool connecting=BusyConnect||Connection.State=="connecting"||Connection.State=="configuring"||Connection.State=="waiting-login"||(Connection.State=="recovering"||Connection.State=="unstable");
+            Details.StatusOverride=BusyStop?"正在停止":BusyConnect&&Connection.State=="stopped"?"连接中":"";
             Connect.Text=BusyStop?"正在停止":connected?"成功连接":connecting?"连接中":"未连接";
             Connect.Glyph=connected?"check":connecting?"stop":"play";
             Connect.Primary=connected&&!BusyStop;Connect.Neutral=!Connect.Primary;
             Connect.Enabled=!BusyStop;
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
-            string shown=SshActive?(SshStopping?"正在停止":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):BusyStop?"正在停止":(Target.State=="recovering"||Target.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Target.State);
-            StatusText.Text=(SshActive?"ssh":"web")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
+            string shown=SshActive?(SshStopping?"正在停止":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):BusyStop?"正在停止":(Connection.State=="recovering"||Connection.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Connection.State);
+            StatusText.Text=(SshActive?"ssh":CloudActive?"CloudCLI":"web")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
             tips.SetToolTip(Connect,connected?"点击停止此设备的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台设备");
-            Connect.AccessibleName=L.Text(Connect.Text)+" · "+Target.Url;
+            Connect.AccessibleName=L.Text(Connect.Text)+" · "+Connection.Url;
             Details.Stop.Text=BusyStop?"正在停止":"停止连接";
-            LoginSwitch.Text=SshActive?"SSH":"网页";LoginSwitch.Enabled=!BusyStop;
-            Details.Open.Text=SshActive?"打开终端":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":"monitor";
-            Details.Stop.Visible=true;Details.Logs.Visible=Target.Url.Length>0;
+            LoginSwitch.Text=SshActive?"SSH":CloudActive?"CloudCLI":"网页桌面";LoginSwitch.Enabled=!BusyStop;
+            Details.Open.Text=SshActive?"打开终端":CloudActive?"打开 CloudCLI":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":CloudActive?"web":"monitor";
+            Details.Stop.Visible=true;Details.Logs.Visible=Connection.Url.Length>0;
             tips.SetToolTip(Copy,SshActive?"复制 IP":"复制设备地址");Copy.AccessibleName=L.Text(SshActive?"复制 IP":"复制设备地址");
             if(SshActive){
                 Connect.Text="打开终端";Connect.Glyph="terminal";Connect.Primary=false;Connect.Neutral=true;Connect.Enabled=true;
                 tips.SetToolTip(Connect,"用设置里选定的终端连接这台设备");Connect.AccessibleName=L.Text(Connect.Text)+" · "+SshAddress;
                 Details.Stop.Enabled=SshState.Length>0&&!SshStopping;Details.Stop.Text=SshStopping?"正在停止":"停止连接";
             }
+            AppChoice.Value=SshActive?"ssh":CloudActive?"cloudcli":"web";RouteChoice.DisplayOverride=SshActive?"SSH":null;RouteChoice.Value=SshActive||TunnelActive?"ssh":"url";RouteChoice.Enabled=!SshActive&&!BusyStop;AppChoice.Enabled=!BusyStop;AppChoice.Invalidate();RouteChoice.Invalidate();
             Details.PerformLayout();LoginSwitch.Invalidate();Details.Open.Invalidate();
             Connect.Invalidate();StatusText.Invalidate();
         }
@@ -174,13 +187,13 @@ namespace CMCP {
 
         void SetHover(bool value) {
             if(changingHover)return;
-            if(hovered==value&&StatusText.Visible==!value&&LoginSwitch.Visible==value&&Connect.Visible==value&&Edit.Visible==value&&Copy.Visible==value&&Delete.Visible==value)return;
+            if(hovered==value&&StatusText.Visible==!value&&AppChoice.Visible==value&&RouteChoice.Visible==value&&Connect.Visible==value&&Edit.Visible==value&&Copy.Visible==value&&Delete.Visible==value)return;
             changingHover=true;SuspendLayout();
             try {
                 hovered=value;
                 // Set both sides on every transition. Never hide status based
                 // on a stale paint flag while the action controls are hidden.
-                foreach(var button in new[]{LoginSwitch,Connect,Edit,Copy,Delete})button.Visible=value;
+                AppChoice.Visible=RouteChoice.Visible=value;foreach(var button in new[]{Connect,Edit,Copy,Delete})button.Visible=value;
                 StatusText.Visible=!value;
             } finally {ResumeLayout();changingHover=false;}
             Invalidate();
@@ -234,7 +247,7 @@ namespace CMCP {
             base.OnLayout(e);if(Details==null)return;
             IconNote.Bounds=new Rectangle(51,35,44,44);
             int y=Compact?103:38, x=Width-(Compact?22:66)-268;
-            LoginSwitch.Bounds=new Rectangle(x-112,y,104,40);
+            AppChoice.Bounds=new Rectangle(x-276,y,128,40);RouteChoice.Bounds=new Rectangle(x-140,y,132,40);
             Connect.Bounds=new Rectangle(x,y,136,40);
             Edit.Bounds=new Rectangle(x+144,y,36,40);
             Copy.Bounds=new Rectangle(x+188,y,36,40);
@@ -248,7 +261,7 @@ namespace CMCP {
             base.OnPaint(e);var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
             PaintUi.Box(g,new Rectangle(1,1,Width-3,Height-3),Palette.Radius,Selected?Colors.Selected:Colors.Surface,Selected?Colors.SelectionBorder:Colors.Border);
             PaintUi.Icon(g,"grip",new Rectangle(16,44,22,28),Colors.Muted);
-            int right=Compact?Width-72:hovered?LoginSwitch.Left-14:StatusText.Left-14;
+            int right=Compact?Width-72:hovered?AppChoice.Left-14:StatusText.Left-14;
             string label=Caption;
             using(var f=new Font(Font.FontFamily,Preference.hideAddress?Font.Size*1.18f:Font.Size,FontStyle.Bold))PaintUi.Text(g,label,f,new Rectangle(112,Preference.hideAddress?34:30,Math.Max(20,right-112),Preference.hideAddress?46:30),Colors.Text);
             if(!Preference.hideAddress)PaintUi.Text(g,Address,Font,new Rectangle(112,64,Math.Max(20,right-112),28),Colors.Blue);

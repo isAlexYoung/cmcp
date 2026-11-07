@@ -16,6 +16,7 @@ $required += @('tools\desktop-ui\TargetCard.cs','tools\desktop-ui\TargetEditorPa
 $required += @('app\manager-events.ps1','app\manager-save.ps1','tools\desktop-ui\InlineWorker.cs','tools\desktop-ui\CardList.cs')
 $required += @('app\shared-autofill.mjs','app\web-recovery.mjs','app\static-assets.mjs')
 $required += @('app\direct-browser.mjs')
+$required += @('app\cloudcli.mjs','app\ssh-web.mjs','tools\desktop-ui\CloudCliLogin.cs')
 $required += @('app\connection-transport.mjs')
 $required += @('app\manager-restart.ps1','tools\desktop-ui\BackendRestart.cs')
 $required += @('app\update.ps1','app\update-core.ps1','app\update-apply.ps1','tools\desktop-ui\SettingsPage.cs','tools\desktop-ui\AppSettings.cs','tools\desktop-ui\Language.cs','tools\desktop-ui\Updater.cs','tools\desktop-ui\SettingsTests.cs')
@@ -46,7 +47,7 @@ $inventory = @()
 foreach ($file in Get-ChildItem -LiteralPath $destination -File -Recurse -Force) {
     $relative = $file.FullName.Substring($destination.Length+1).Replace('\','/')
     if ($relative -eq 'app/distribution-manifest.json') { throw 'Stale distribution manifest must not be packaged' }
-    if ($file.Name -like '.env*' -or $file.Name -in @('application-preferences.json','config.json','cloudpc-targets.json','vps-targets.json','link-status.json','target-controls.json','browser-entries.json','manager-preferences.json','dashboard-preferences.json','session.json','stopped.flag') -or $file.Extension -in @('.lnk','.key','.pem','.pfx','.p12')) { throw 'Private state must not enter a distribution' }
+    if ($file.Name -like '.env*' -or $file.Name -in @('application-preferences.json','config.json','cloudpc-targets.json','cloudcli-logins.json','vps-targets.json','link-status.json','target-controls.json','browser-entries.json','manager-preferences.json','dashboard-preferences.json','session.json','stopped.flag') -or $file.Extension -in @('.lnk','.key','.pem','.pfx','.p12')) { throw 'Private state must not enter a distribution' }
     $inventory += [ordered]@{path=$relative;sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
 }
 $manifest = [ordered]@{schema=1;version=$version;platform='windows-x64';sourceCommit=$commit;files=$inventory}

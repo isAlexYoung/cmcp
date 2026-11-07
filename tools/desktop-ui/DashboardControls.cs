@@ -196,14 +196,14 @@ namespace CMCP {
         void ClientRow(Graphics g,string label,bool? running,int y){string value=LocalState.ClientState(Target.State,running==true);PaintUi.Text(g,label,Font,new Rectangle(18,y,190,24),Colors.Muted);PaintUi.Text(g,L.Text(value),Font,new Rectangle(130,y,Width-148,24),value=="已连接"?Colors.Success:Colors.Text,true);}
         string Body{get{
             if(Target==null)return "";
-            string text=!SshMode?L.Message(Target.Detail??""):L.Text("点击“打开终端”，用设置里选定的终端连接这台设备。SSH 不经过 MCP 连接。")+(Target.Url.Length>0&&Target.State!="stopped"?"\r\n"+L.Text("共享网页连接")+"："+L.Text(LocalState.Caption(Target.State)):"");
+            string text=!SshMode?L.Message(Target.Detail??""):L.Text("点击“打开终端”，用设置里选定的终端连接这台设备。SSH 不经过 MCP 连接。")+(Target.Url.Length>0&&Target.State!="stopped"?"\r\n"+L.Text("网页桌面连接")+"："+L.Text(LocalState.Caption(Target.State)):"");
             return text;
         }}
         internal int NeededHeight(int width){return 164+ClientRows+TextRenderer.MeasureText(Body,Font,new Size(Math.Max(100,width-44),1000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height;}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);Open.Bounds=new Rectangle(14,Height-54,164,40);Stop.Bounds=new Rectangle(185,Height-54,144,40);Logs.Bounds=new Rectangle(Stop.Visible?336:185,Height-54,140,40);}
         protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(Target==null)return;var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;PaintUi.Box(g,new Rectangle(0,0,Width-1,Height-1),11,Colors.Surface,Colors.Border);
             PaintUi.Text(g,L.Text(SshMode?"SSH 地址":"连接状态"),Font,new Rectangle(18,10,100,24),Colors.Muted);PaintUi.Text(g,SshMode?(Ssh==null?"":Ssh.Address):StatusOverride.Length>0?L.Text(StatusOverride):L.Text(LocalState.Caption(Target.State)),Font,new Rectangle(130,10,Width-148,24),!SshMode&&Target.State=="connected"?Colors.Success:Colors.Text,true);
-            PaintUi.Text(g,L.Text("登录方式"),Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,SshMode?(Ssh==null?"SSH":"SSH · "+L.Text(Ssh.UsesKey?"公钥":"密码")):Target.Url.Length==0?L.Text("共享网页"):L.Text(Target.Mode),Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
+            PaintUi.Text(g,L.Text("登录方式"),Font,new Rectangle(18,40,100,24),Colors.Muted);PaintUi.Text(g,SshMode?(Ssh==null?"SSH":"SSH · "+L.Text(Ssh.UsesKey?"公钥":"密码")):Target.Url.Length==0?L.Text("网页桌面"):L.Text(Target.Mode),Font,new Rectangle(130,40,Width-148,24),Colors.Text,true);
             int rows=ClientRows;if(rows>0){ClientRow(g,"Claude Desktop",Target.DesktopClient,70);ClientRow(g,"CLI",Target.CliClient,100);}
             using(var p=new Pen(Colors.Border))g.DrawLine(p,18,76+rows,Width-18,76+rows);
             TextRenderer.DrawText(g,Body,Font,new Rectangle(18,88+rows,Width-36,Height-153-rows),Colors.Muted,TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix);

@@ -21,7 +21,7 @@ function Invoke-ManagerSave($request) {
     if ($mode -notin @('legacy','shared-browser')) { throw '无法安全识别协议，未提交密码。' }
     $password = ''
     if ($auto) {
-        if ($mode -ne 'shared-browser') { Send-ManagerEvent 'error' '此选项用于共享网页登录；旧版请取消勾选后保存。'; return $false }
+        if ($mode -ne 'shared-browser') { Send-ManagerEvent 'error' '此选项用于网页桌面登录；旧版请取消勾选后保存。'; return $false }
         $password = [string]$request.password
         if (!$password -and $request.action -eq 'edit') {
             $old = @(Get-CloudTargets | Where-Object { $_.name -ceq $request.name -and $_.url -eq $url -and $_.autoLogin -eq $true -and $_.authMode -eq 'shared-browser' })
@@ -50,7 +50,9 @@ function Invoke-ManagerSave($request) {
             Update-ManagerCloudTarget ([string]$request.name) $url $password $mode $auto
             return [string]$request.name
         }
-        $name = ([Uri]$url).Host.Split('.')[0] -replace '[^a-zA-Z0-9_-]', '-'
+        $preferred=[string]$request.name
+        if($preferred -and ($preferred -match '[\x00-\x1f]' -or @($existing|Where-Object { $_.name -ceq $preferred }).Count)){throw '设备标识已存在或无效。'}
+        $name = if($preferred){$preferred}else{([Uri]$url).Host.Split('.')[0] -replace '[^a-zA-Z0-9_-]', '-'}
         if ($name.Length -gt 40) { $name = $name.Substring(0,40) }
         if (!$name) { $name = 'cloudpc' }
         while (@($existing | Where-Object { $_.name -eq $name }).Count) { $name += '-2' }

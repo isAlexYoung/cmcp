@@ -55,6 +55,15 @@ class UnifiedReleaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 inspect_package(self.file, '4.1.1', COMMIT, 'macos-arm64')
 
+        def private_profile(payload, manifest, base):
+            name = 'Contents/Resources/cloudcli-logins.json'
+            payload[base + name] = b'{}'
+            manifest['files'].append({'path': name, 'sha256': hashlib.sha256(b'{}').hexdigest()})
+
+        self.package(change=private_profile)
+        with self.assertRaises(ValueError):
+            inspect_package(self.file, '4.1.1', COMMIT, 'macos-arm64')
+
     def test_signature_marker_cannot_skip_resource_hashes(self):
         self.package(change=lambda p, m, base: m['files'][0].update(codeSignature=True))
         with self.assertRaises(ValueError):

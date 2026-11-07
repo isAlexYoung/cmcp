@@ -48,10 +48,10 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/client-status.test.mjs app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs app/tests/ssh-mcp.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/client-status.test.mjs app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/cloudcli.test.mjs app/tests/ssh-web.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs app/tests/ssh-mcp.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 133' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0' -or $tap -notmatch '# cancelled 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 143' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0' -or $tap -notmatch '# cancelled 0') { throw 'Incomplete Node regression' }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |
@@ -59,6 +59,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/powershell.json -Raw | ConvertFrom-Json
           if ($r.passed -ne 25 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete PowerShell regression' }
+      - name: CloudCLI profiles and current-user credentials
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/cloudcli.test.ps1 | Set-Content test-results/cloudcli.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/cloudcli.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 8 -or $r.failed -ne 0) { throw 'Incomplete CloudCLI profile regression' }
+      - name: SSH webpage profile regression
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/ssh-web.test.ps1 | Set-Content test-results/ssh-web.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/ssh-web.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 6 -or $r.failed -ne 0) { throw 'Incomplete SSH webpage regression' }
       - name: Offline platform update and rollback boundaries
         shell: pwsh
         run: |
@@ -72,7 +86,7 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/portable-state.test.ps1 | Set-Content test-results/portable-state.json -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/portable-state.json -Raw | ConvertFrom-Json
-          if ($r.passed -ne 21 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete portable state regression' }
+          if ($r.passed -ne 22 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete portable state regression' }
       - name: Page windows that close on disconnect
         shell: pwsh
         run: |
@@ -111,7 +125,7 @@ jobs:
           if (!$p.WaitForExit(180000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 469 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 488 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Theme-aware native tooltips and focus preservation
         shell: pwsh
         run: |
