@@ -26,6 +26,13 @@ export function sshArguments(login, {background=false}={}) {
   return args;
 }
 
+// On a WebDesktop VPS whose `claude` joins one shared session, Claude runs as the terminal
+// user (wdterm), so root hands the connector to that user: its config and relay must be ones
+// that Claude can read from inside the terminal sandbox.
+export const sharedSessionHandoff='if [ "$(id -u)" = 0 ] && [ -e /etc/systemd/system/wd-claude-session.service ]; then '
+  +'exec /usr/sbin/runuser -u wdterm -g wdguest -- env -i HOME=/home/wdguest PATH=/usr/bin:/bin LANG=C.UTF-8 CMCP_SHARED_SESSION=1 "$@"; fi; exec "$@"';
+export const remoteCommand=bootstrap=>'sh -c '+quote(sharedSessionHandoff)+' sh python3 -I -B -u -c '+quote(bootstrap);
+
 export function bootstrapPayload(key, catalog,platform=process.platform) {
   return {name:sshConnectorName(key), catalog,
     relay:fs.readFileSync(new URL('./cloudpc-relay.py',import.meta.url),'utf8'),
@@ -44,8 +51,7 @@ export class SshPipe extends EventEmitter {
     super();this.readyState=1;this.bufferedAmount=0;
     const bootstrap=fs.readFileSync(new URL('./ssh-bootstrap.py',import.meta.url),'utf8');
     // No credentials or user paths enter the remote shell command.
-    const command='python3 -I -B -u -c '+quote(bootstrap);
-    this.child=spawnProcess(ssh,[...sshArguments(login,{background:true}),command],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+    this.child=spawnProcess(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
     let stderr='';
     this.child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString()).slice(-16384);});
     this.child.stdout.on('data',chunk=>this.emit('message',chunk,true));

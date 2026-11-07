@@ -8,7 +8,8 @@ import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {setTimeout as delay} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
-import {sshArguments,sshConnectorName,sshExitCode,SshPipe,startSshMcp,bootstrapPayload} from '../ssh-mcp.mjs';
+import {execFileSync} from 'node:child_process';
+import {sshArguments,sshConnectorName,sshExitCode,SshPipe,startSshMcp,bootstrapPayload,remoteCommand,sharedSessionHandoff} from '../ssh-mcp.mjs';
 import {workerPaths,runWorker,queryWorker,ensureSshWorker,stopSshWorkers,readSshLogin} from '../ssh-terminal.mjs';
 import {sshRoots,createSshDispatcher} from '../ssh-local-tools.mjs';
 
@@ -51,10 +52,22 @@ test('raw SSH pipe sends bootstrap through stdin and maps authentication failure
   let observed;const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{};
   let input='';child.stdin.on('data',chunk=>{input+=chunk;});
   const pipe=new SshPipe({login,payload:{catalog:{tools:[]}},spawnProcess:(file,args,options)=>{observed={file,args,options};return child;}});
-  assert.ok(observed.args.at(-1).startsWith('python3 -I -B -u -c '));assert.ok(!JSON.stringify(observed.args).includes(login.secret));
+  assert.equal(observed.args.at(-1),remoteCommand(fs.readFileSync(new URL('../ssh-bootstrap.py',import.meta.url),'utf8')));
+  assert.ok(observed.args.at(-1).startsWith("sh -c '"));assert.ok(observed.args.at(-1).includes(" sh python3 -I -B -u -c '"));
+  assert.ok(!JSON.stringify(observed.args).includes(login.secret));
   assert.equal(JSON.parse(input).catalog.tools.length,0);assert.equal(observed.options.windowsHide,true);
   const errors=[];pipe.on('error',e=>errors.push(e));child.stderr.write('Permission denied (publickey,password).');child.emit('close',255);
   assert.equal(errors[0].code,'SSH_AUTH');assert.ok(!errors[0].message.includes('PLACEHOLDER'));
+});
+
+test('only root on a VPS with the shared Claude session hands the connector to the terminal user',{skip:process.platform==='win32'},()=>{
+  // Any other account, or a VPS without the session service, runs the bootstrap command itself.
+  assert.equal(execFileSync('sh',['-c',sharedSessionHandoff,'sh','printf','%s','direct']).toString(),'direct');
+  assert.match(sharedSessionHandoff,/^if \[ "\$\(id -u\)" = 0 \] && \[ -e \/etc\/systemd\/system\/wd-claude-session\.service \]; then exec \/usr\/sbin\/runuser -u wdterm -g wdguest -- env -i HOME=\/home\/wdguest /);
+  assert.ok(sharedSessionHandoff.includes(' CMCP_SHARED_SESSION=1 "$@"; fi; exec "$@"'));
+  // The quoted command survives a POSIX shell intact, bootstrap source included.
+  const source="print('it''s', \"$HOME\" \\n)";
+  assert.equal(execFileSync('sh',['-c',remoteCommand(source).replace(' sh python3 -I -B -u -c ',' sh printf %s ')]).toString(),source);
 });
 
 test('auth, host key and remote setup failures are classified separately from network interruptions',()=>{

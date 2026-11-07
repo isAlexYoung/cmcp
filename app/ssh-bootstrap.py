@@ -59,6 +59,14 @@ def main():
     if os.environ.get('CLAUDE_CONFIG_DIR'):
         raise ValueError('Custom CLAUDE_CONFIG_DIR requires an explicit connector configuration')
     home = Path.home()
+    config = home / '.claude.json'
+    if os.environ.get('CMCP_SHARED_SESSION') == '1':
+        # Root handed over to the WebDesktop terminal user (ssh-mcp.mjs). The shared folder there
+        # belongs to the web connector and must keep its group access, so this connector gets a
+        # private home of its own and only adds its entry to the terminal's Claude config.
+        home = home / '.cmcp-ssh'
+        private_directory(home)
+        os.environ['HOME'] = str(home)
     directory = home
     for part in ('.local', 'share', 'cloudpc-link', name):
         directory = directory / part
@@ -82,7 +90,7 @@ def main():
     for attempt in range(5):
         try:
             with contextlib.redirect_stdout(sys.stderr):
-                connector.apply_install(directory, [home / '.claude.json'], catalog, name)
+                connector.apply_install(directory, [config], catalog, name)
             break
         except connector.ConfigRace:
             if attempt == 4:
