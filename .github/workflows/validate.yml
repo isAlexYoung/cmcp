@@ -48,10 +48,10 @@ jobs:
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |
-          node --test app/tests/client-status.test.mjs app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/cloudcli.test.mjs app/tests/ssh-web.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs app/tests/ssh-mcp.test.mjs | Tee-Object test-results/node.tap
+          node --test app/tests/client-status.test.mjs app/tests/reconnect.test.mjs app/tests/shared-session.test.mjs app/tests/terminal-link.test.mjs app/tests/target-connections.test.mjs app/tests/shared-auto.test.mjs app/tests/request-recovery.test.mjs app/tests/connection-health.test.mjs app/tests/web-recovery.test.mjs app/tests/static-assets.test.mjs app/tests/direct-browser.test.mjs app/tests/cloudcli.test.mjs app/tests/ssh-web.test.mjs app/tests/relay-preparation.test.mjs app/tests/connection-transport.test.mjs app/tests/ssh-mcp.test.mjs app/tests/cloudcli-setup.test.mjs | Tee-Object test-results/node.tap
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
-          if ($tap -notmatch '# pass 143' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0' -or $tap -notmatch '# cancelled 0') { throw 'Incomplete Node regression' }
+          if ($tap -notmatch '# pass 151' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0' -or $tap -notmatch '# cancelled 0') { throw 'Incomplete Node regression' }
       - name: Local Blender add-on protocol and MCP routing
         shell: pwsh
         run: |
@@ -130,7 +130,7 @@ jobs:
           if (!$p.WaitForExit(180000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 496 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 519 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Theme-aware native tooltips and focus preservation
         shell: pwsh
         run: |
@@ -302,6 +302,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m unittest discover -s app/tests -p 'test_ssh_bootstrap.py' -v
+          python -m unittest discover -s app/tests -p 'test_cloudcli_setup.py' -v
           node --test app/tests/ssh-mcp.test.mjs app/tests/ssh-mcp-unix.integration.mjs | tee test-results/ssh-mcp.tap
           grep -q '^# cancelled 0$' test-results/ssh-mcp.tap
       - uses: actions/upload-artifact@v4

@@ -88,9 +88,12 @@ namespace CMCP {
                 default: return "点击连接开始；进度会显示在此处，可随时停止。";
             }
         }
+        internal const string SelfHostedReady="自行安装的 CloudCLI：网页可以打开；本机工具经此设备的 SSH 后台通道连接。",SelfHostedDown="自行安装的 CloudCLI 暂时无法访问，正在重试。";
         internal static string PreparationDetail(string state, string message) {
             if(state=="error"&&new[]{"SSH 认证失败，请检查密码或密钥。","SSH 主机指纹校验失败，请核对服务器指纹。","无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。"}.Contains(message))return message;
             if(state=="offline"&&message=="CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。")return message;
+            // A self-hosted CloudCLI (app/managed-target.mjs): fixed texts only.
+            if(state=="connected"&&message==SelfHostedReady||state=="offline"&&message==SelfHostedDown)return message;
             if (state != "connecting" && state != "recovering") return null;
             // Only fixed local stage text is displayed, never arbitrary backend
             // errors, URLs, paths, cookies or credential-bearing values.
@@ -351,7 +354,7 @@ namespace CMCP {
                 SettingsTests.Run(temp,check);
                 TrayTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
-                CloudCliTests.Run(temp,check);SshWebTests.Run(temp,check);
+                CloudCliTests.Run(temp,check);SshWebTests.Run(temp,check);CloudCliSetupTests.Run(temp,check);
                 MotionTests.Run(temp,check);
                 SshTests.Run(temp,check);
                 ControlOrderTests.Run(temp,check);

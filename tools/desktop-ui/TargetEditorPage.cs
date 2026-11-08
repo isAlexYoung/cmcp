@@ -113,6 +113,10 @@ namespace CMCP {
         internal readonly EditorInput WebPortInput=new EditorInput(),CloudPortInput=new EditorInput(),WebTunnelPassword=new EditorInput(),CloudTunnelPassword=new EditorInput();
         internal readonly ToggleSwitch WebTunnel=new ToggleSwitch{Size=new Size(48,30)},CloudTunnel=new ToggleSwitch{Size=new Size(48,30)},WebTunnelRemember=new ToggleSwitch{Size=new Size(48,30)},CloudTunnelRemember=new ToggleSwitch{Size=new Size(48,30)};
         internal bool HasCloud {get{return CloudUrlInput.Box.Text.Trim().Length>0;}}
+        // Starts the device's SSH channel with CMCP. A self-hosted CloudCLI needs it for local tools.
+        internal readonly ToggleSwitch AutoChannel=new ToggleSwitch{Size=new Size(48,30)};
+        readonly string cloudKind;
+        bool AutoChannelDefault {get{return cloudKind==CloudCliKinds.SelfHosted;}}
         internal readonly ToggleSwitch Remember = new ToggleSwitch{Size=new Size(48,30)}, HideAddress = new ToggleSwitch{Size=new Size(48,30)};
         internal readonly DropdownField MethodField = new DropdownField(new[]{new KeyValuePair<string,string>("password","密码"),new KeyValuePair<string,string>("key","公钥")}){Height=38,Value="password"};
         internal bool AutoLogin {get{return Remember.Checked;}}
@@ -149,8 +153,9 @@ namespace CMCP {
         internal bool PreferSsh { get { return preferSsh; } }
         internal string CurrentCategory { get { return current.Title; } }
 
-        internal TargetEditorPage(Target target, CardPreference preference, Palette palette, SshLogin login = null,CloudCliLogin cloudLogin=null) {
-            savedCloud=cloudLogin;
+        internal TargetEditorPage(Target target, CardPreference preference, Palette palette, SshLogin login = null,CloudCliLogin cloudLogin=null,string cloudcliKind="") {
+            savedCloud=cloudLogin;cloudKind=cloudcliKind??"";
+            AutoChannel.Checked=login!=null&&login.sshAutoStart.HasValue?login.sshAutoStart.Value:AutoChannelDefault;AutoChannel.AccessibleName=L.Text("启动时连接本机工具");
             WebPortInput.Box.Text=Convert.ToString(login==null?3000:login.webPort);CloudPortInput.Box.Text=Convert.ToString(login==null?3001:login.cloudcliPort);
             WebTunnel.Checked=login!=null&&login.webTunnel;CloudTunnel.Checked=login!=null&&login.cloudcliTunnel;
             WebTunnelRemember.Checked=login!=null&&login.webAutoLogin;CloudTunnelRemember.Checked=login!=null&&login.cloudcliAutoLogin;
@@ -249,7 +254,7 @@ namespace CMCP {
             secretRow=AddRow(login,"密码",SshSecretInput,0,forget);
             keyRow=AddRow(login,"私钥",KeyInput,0,browse);
             var wt=AddSection(ssh,"WebDesktop","服务端口是 VPS 本机的网页端口；访问密码与 SSH 密码不同。");AddRow(wt,"启用 SSH 隧道",WebTunnel,48);AddRow(wt,"服务端口",WebPortInput,96);AddRow(wt,"访问密码",WebTunnelPassword);AddRow(wt,"自动登录",WebTunnelRemember,48);
-            var ct=AddSection(ssh,"CloudCLI","CloudCLI 使用独立的网页端口，MCP 通过 WebDesktop 服务连接。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);
+            var ct=AddSection(ssh,"CloudCLI","CloudCLI 使用独立的网页端口。WebDesktop 上的 CloudCLI 经 WebDesktop 连接 MCP；自行安装的 CloudCLI 经此设备的 SSH 后台通道使用本机工具。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);AddRow(ct,"启动时连接本机工具",AutoChannel,48);
             AddSection(ssh,"Terminal","使用上方的 SSH 凭据打开终端；终端程序可在设置的连接页面选择。");
         }
         bool SecretStillUsable { get {
@@ -378,7 +383,7 @@ namespace CMCP {
         }
         internal void ShowError(string message) { error.Text=L.Message(message); }
         internal void SetBusy(bool busy){
-            foreach(var control in new Control[]{Save,Back,choose,reset,browse,forget,NameInput,NoteInput,UrlInput,PasswordInput,Remember,HideAddress,HostInput,PortInput,UserInput,SshSecretInput,KeyInput,MethodField,CloudUrlInput,CloudPasswordInput,CloudRemember,WebPortInput,CloudPortInput,WebTunnelPassword,CloudTunnelPassword,WebTunnel,CloudTunnel,WebTunnelRemember,CloudTunnelRemember})control.Enabled=!busy;
+            foreach(var control in new Control[]{Save,Back,choose,reset,browse,forget,NameInput,NoteInput,UrlInput,PasswordInput,Remember,HideAddress,HostInput,PortInput,UserInput,SshSecretInput,KeyInput,MethodField,CloudUrlInput,CloudPasswordInput,CloudRemember,WebPortInput,CloudPortInput,AutoChannel,WebTunnelPassword,CloudTunnelPassword,WebTunnel,CloudTunnel,WebTunnelRemember,CloudTunnelRemember})control.Enabled=!busy;
             if(!busy)RefreshMethod();
         }
         bool Fail(Category category,string message){Show(category,false);ShowError(message);return false;}
@@ -395,6 +400,7 @@ namespace CMCP {
                 if(!Uri.TryCreate(Url,UriKind.Absolute,out parsed)||parsed.Scheme!="https"||parsed.UserInfo.Length>0||parsed.AbsolutePath!="/"||parsed.Query.Length>0||parsed.Fragment.Length>0)return Fail(web,"请输入完整的 HTTPS 网页地址，不含路径或登录信息。");
                 if(AutoLogin&&Password.Length==0&&(!storedAutoPassword||!String.Equals(Url.TrimEnd('/'),initialUrl.TrimEnd('/'),StringComparison.OrdinalIgnoreCase)))return Fail(web,"请填写自动登录密码；更换地址时需要重新填写。");
             }
+            if(cloudKind==CloudCliKinds.SelfHosted&&(HasCloud||CloudTunnel.Checked)&&!HasSsh)return Fail(ssh,"自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。");
             if(HasSsh||WebTunnel.Checked||CloudTunnel.Checked){
                 int wp,cp;if(!HasSsh)return Fail(ssh,"请先填写共用的 SSH 主机和用户名。");
                 if(!Int32.TryParse(WebPortInput.Box.Text,out wp)||wp<1||wp>65535||!Int32.TryParse(CloudPortInput.Box.Text,out cp)||cp<1||cp>65535||wp==cp)return Fail(ssh,"WebDesktop 和 CloudCLI 的服务端口必须有效且不同。");
@@ -414,7 +420,10 @@ namespace CMCP {
         internal SshLogin BuildSsh(string name){var l=BuildSshBase(name);if(l==null)return null;l.webTunnel=WebTunnel.Checked;l.cloudcliTunnel=CloudTunnel.Checked;l.webPort=Int32.Parse(WebPortInput.Box.Text);l.cloudcliPort=Int32.Parse(CloudPortInput.Box.Text);l.webAutoLogin=WebTunnelRemember.Checked;l.cloudcliAutoLogin=CloudTunnelRemember.Checked;
             bool same=savedSsh!=null&&savedSsh.host==l.host&&savedSsh.port==l.port&&savedSsh.username==l.username;
             l.webSecret=!l.webAutoLogin?"":WebTunnelPassword.Box.Text.Length>0?CloudCliLogin.Protect(WebTunnelPassword.Box.Text):same&&savedSsh.webPort==l.webPort?savedSsh.webSecret:"";
-            l.cloudcliSecret=!l.cloudcliAutoLogin?"":CloudTunnelPassword.Box.Text.Length>0?CloudCliLogin.Protect(CloudTunnelPassword.Box.Text):same&&savedSsh.cloudcliPort==l.cloudcliPort?savedSsh.cloudcliSecret:"";return l;}
+            l.cloudcliSecret=!l.cloudcliAutoLogin?"":CloudTunnelPassword.Box.Text.Length>0?CloudCliLogin.Protect(CloudTunnelPassword.Box.Text):same&&savedSsh.cloudcliPort==l.cloudcliPort?savedSsh.cloudcliSecret:"";
+            // The CloudCLI account belongs to this server only; an untouched switch keeps following the kind.
+            l.cloudcliUser=same?savedSsh.cloudcliUser??"":"";
+            l.sshAutoStart=savedSsh!=null&&savedSsh.sshAutoStart.HasValue||AutoChannel.Checked!=AutoChannelDefault?(bool?)AutoChannel.Checked:null;return l;}
         SshLogin BuildSshBase(string name){
             if(!HasSsh)return null;
             var login=new SshLogin{name=name,host=HostInput.Box.Text.Trim(),port=Int32.Parse(PortInput.Box.Text.Trim()),username=UserInput.Box.Text.Trim(),method=MethodField.Value,keyPath=UsesKey?KeyInput.Box.Text.Trim():""};

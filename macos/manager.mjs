@@ -1,6 +1,7 @@
 import {acquireWebTunnel} from '../app/ssh-web.mjs';
 import {webTunnelEnvironment} from './ssh.mjs';
-import {cloudcliName} from '../app/cloudcli.mjs';
+import {cloudcliName,recordCloudcliKind} from '../app/cloudcli.mjs';
+import {runSetup} from '../app/cloudcli-setup.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -21,11 +22,11 @@ import {checkFailed,checkRelease,downloadUpdate} from './updates.mjs';
 import {currentInstallation} from './uninstall.mjs';
 import {closeSessions,detectTerminals,openTerminal} from './ssh.mjs';
 import {closePages,detectBrowsers,openPage} from './browsers.mjs';
-import {stopSshWorker,sshWorkerState,stopSshWorkers} from '../app/ssh-terminal.mjs';
+import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../app/ssh-terminal.mjs';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate}={}){
+export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate,startChannel,setupCloudcli=runSetup}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
   const dispatcher=injected||await createDispatcher({roots:store.config.roots});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
@@ -34,10 +35,29 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);const recovery=/\] ((?:web (?:document|api|asset) (?:(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) attempt=[1-5] code=(?:ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|HTTP_50[234]) tls=(?:true|false)|recovered attempts=[2-5]|cache hit|failed code=NON_TRANSIENT))|heartbeat (?:delayed; retaining connection|recovered without reconnect))$/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+(recovery?recovery[1]:name[2]):'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
   const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
     create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:webTunnelEnvironment(login,directory)});},proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
-      askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),
+      askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),onCloudcliKind:(id,kind)=>recordCloudcliKind(directory,id,kind),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
+  // The device's background SSH channel, as a terminal would start it, but with no window.
+  const ensureChannel=startChannel||(login=>ensureSshWorker({directory,id:login.id,owner:process.pid,ssh:'/usr/bin/ssh',env:webTunnelEnvironment(login,directory),progress:()=>{}}));
+  const channel=id=>{const login=store.sshFor(id);if(login)Promise.resolve().then(()=>ensureChannel(login)).catch(()=>{});};
+  // Per device: checking, confirm (waiting for the user), running, done. Passwords never stay here.
+  const setups=new Map();
+  const setupView=id=>{const s=setups.get(id);return s?{phase:s.phase,progress:s.progress,plan:s.phase==='confirm'?{summary:s.plan.summary,steps:s.plan.steps,needsPassword:s.plan.needsPassword}:null,result:s.result||null}:{phase:'idle'};};
+  async function beginSetup(id){
+    const login=store.sshFor(id);if(!login)throw Error('还没有填写 SSH 信息，请编辑设备后再连接。');
+    if(['checking','confirm','running'].includes(setups.get(id)?.phase))return setupView(id);
+    const s={phase:'checking',progress:'正在通过 SSH 检查 VPS（只读）…'};setups.set(id,s);
+    const direct=store.cloudcliFor(id)?.url||'';
+    s.task=setupCloudcli({directory,id,login,owner:process.pid,ssh:'/usr/bin/ssh',env:webTunnelEnvironment(login,directory),directUrl:direct,
+      progress:message=>{s.progress=message;},
+      confirm:plan=>new Promise(resolve=>{s.plan=plan;s.phase='confirm';s.answer=resolve;}),
+      save:value=>store.serial(()=>{store.applyCloudcliSetup(id,value);connections.tick();}),
+    }).then(result=>{s.result=result;},error=>{s.result={ok:false,message:error.message||'初始化未完成'};}).finally(()=>{s.phase='done';s.answer=null;});
+    for(let i=0;i<300&&s.phase==='checking';i++)await delay(100);
+    return setupView(id);
+  }
   let origin='',closing=false,updates={state:'unchecked',version:null},updating=false,uninstalling=false,checking=null,preparedUpdate=null;
-  const devices=()=>{const view=store.view(states);return {...view,targets:view.targets.map(t=>t.ssh?{...t,sshState:channelState(directory,t.id)}:t)};};
+  const devices=()=>{const view=store.view(states);return {...view,targets:view.targets.map(t=>t.ssh?{...t,sshState:channelState(directory,t.id),...setups.has(t.id)?{setup:setups.get(t.id).phase}:{}}:t)};};
   const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label})),browsers:browsers().map(({id,label})=>({id,label}))});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
@@ -68,7 +88,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/state':async()=>snapshot(),
     '/api/tray':async()=>({targets:store.view(states).targets.map(t=>{const v=t.route==='ssh'&&t.loginMode!=='ssh'?t.tunnels[t.loginMode]:t.loginMode==='cloudcli'?t.cloudcli:t;return {id:t.id,label:t.label,state:v?.state||'stopped',enabled:v?.enabled===true,loginMode:t.loginMode,...t.loginMode==='ssh'?{ssh:true}:{}};}),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
-    '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();return {started:true};}),
+    '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,true);connections.tick();if(store.loginMode(input.id)==='cloudcli'&&store.autoChannel(input.id))channel(input.id);return {started:true};}),
     // The page window closes after the stop is saved; that never holds up the reply.
     '/api/targets/stop':async input=>{const result=await store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');store.setEnabled(input.id,false);connections.tick();return {stopped:true};});closeBrowserPages(browserPreferences(input.id),directory,connectionName(input.id)).catch(()=>{});return result;},
     '/api/targets/delete':input=>store.serial(async()=>{await store.remove(input.id);connections.tick();return {deleted:true};}),
@@ -79,6 +99,10 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/targets/route':input=>store.serial(()=>{store.setRoute(input.id,input.route);return {saved:true};}),
     '/api/targets/login':input=>store.serial(()=>{store.setLogin(input.id,input.mode??input.active);return {saved:true};}),
     '/api/targets/terminal':async input=>{const login=store.sshFor(input.id);if(!login)throw Error(store.targets.some(t=>t.id===input.id)?'还没有填写 SSH 信息，请编辑设备后再连接。':'连接不存在');return {terminal:await launchTerminal(login,directory,store.preferences.terminal,{closeTerminal:store.preferences.closeTerminal===true})};},
+    '/api/targets/cloudcli-setup':input=>{if(typeof input.id!=='string')throw Error('请选择连接');return beginSetup(input.id);},
+    '/api/targets/cloudcli-setup/status':async input=>setupView(input.id),
+    // The sudo password goes straight into this run and is not kept once it has been handed on.
+    '/api/targets/cloudcli-setup/answer':async input=>{const s=setups.get(input.id);if(s?.phase!=='confirm'||!s.answer)throw Error('没有等待确认的初始化');if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length>1024))throw Error('密码无效');const answer=s.answer;s.answer=null;s.phase=input.ok===true?'running':'checking';answer({ok:input.ok===true,password:input.password});return setupView(input.id);},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     '/api/update/check':async()=>{
       if(updating)return updates;if(checking)return checking;
@@ -129,6 +153,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   server.requestTimeout=30000;server.headersTimeout=10000;
   server.listen(0,'127.0.0.1');await new Promise((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
   origin='http://127.0.0.1:'+server.address().port;
+  for(const login of store.ssh.logins)if(store.autoChannel(login.id))channel(login.id);
   const publish=setInterval(()=>{try{atomicWrite(path.join(directory,'status.json'),JSON.stringify({pid:process.pid,at:new Date().toISOString(),targets:states}));}catch{}},2000);publish.unref();
   return {origin,token,url:origin+'/#'+token,store,connections,snapshot,close};
 }

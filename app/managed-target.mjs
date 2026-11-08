@@ -4,12 +4,17 @@ import {createSharedSessionGateway} from './shared-session-gateway.mjs';
 import {Cloud} from './cloud-connector.mjs';
 import {supportsDirectBrowser,createDirectBrowser} from './direct-browser.mjs';
 import {connectionDetail} from './connection-transport.mjs';
-import {discoverCloudcli} from './cloudcli.mjs';
+import {discoverCloudcli,createLaunchPage,cloudcliDevice,SELF_HOSTED,WEBDESKTOP} from './cloudcli.mjs';
+import {requestBuffered} from './desktop-auth.mjs';
+
+// Fixed texts, so the Windows card may show them as they are (Manager.cs PreparationDetail).
+export const SELF_HOSTED_READY='自行安装的 CloudCLI：网页可以打开；本机工具经此设备的 SSH 后台通道连接。';
+export const SELF_HOSTED_DOWN='自行安装的 CloudCLI 暂时无法访问，正在重试。';
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
 export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log, deviceName, recoveryOptions, healthOptions,
-  openTunnel, passwordFor, session = false, onReplaced, install = (t, auth, agent, signal, preparation) => new Cloud(t.url, auth, agent, signal,preparation).install()}) {
+  openTunnel, passwordFor, session = false, onReplaced, onCloudcliKind = () => {}, selfHostedProbeMs = 15000, install = (t, auth, agent, signal, preparation) => new Cloud(t.url, auth, agent, signal,preparation).install()}) {
   return async (t, {signal, current, status}) => {
     const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null,connected:false,connectionEpoch:0};
     const preparationCache={};
@@ -45,7 +50,26 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
       record.agent = agentFor(t.url, proxy);
       const cloudcli=t.authMode==='cloudcli';
       if(cloudcli){
-        const discovered=await discoverCloudcli(t.url,record.agent,signal);
+        let discovered;
+        try{discovered=await discoverCloudcli(t.url,record.agent,signal);}
+        catch(error){
+          if(!error.selfHosted)throw error;
+          // No CMCP sign-in and no web MCP here: the page opens as it is, with CloudCLI's own login,
+          // and the device's SSH background channel carries the local tools. A later bridge
+          // transport would replace that channel, not this entrance.
+          const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,SELF_HOSTED);}catch{}
+          record.selfHosted=true;record.gateway=await createLaunchPage({url:t.url});
+          if(!current()){await record.gateway.close();throw Error('Target stopped');}
+          let up=true;publish(t.name,'connected',SELF_HOSTED_READY);
+          const probe=setInterval(async()=>{
+            if(!current()||signal.aborted)return;
+            try{const r=await requestBuffered(new URL('/',t.url),{agent:record.agent,signal,timeout:10000,limit:262144});up=r.status<500;}catch{up=false;}
+            if(current()&&!signal.aborted)publish(t.name,up?'connected':'offline',up?SELF_HOSTED_READY:SELF_HOSTED_DOWN);
+          },selfHostedProbeMs);probe.unref?.();
+          signal.addEventListener('abort',()=>clearInterval(probe),{once:true});
+          return record;
+        }
+        {const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,WEBDESKTOP);}catch{}}
         record.cloudcliAgent=record.agent;record.url=record.tunnel?.web||discovered.desktopOrigin;
         record.agent=agentFor(record.url,record.tunnel?'':await proxyFor(record.url,signal));
       }

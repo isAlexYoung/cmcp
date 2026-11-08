@@ -20,7 +20,7 @@ import net from 'node:net';
 import os from 'node:os';
 import { StatusBoard, machineId } from './link-client.mjs';
 import { managedTargetFactory } from './managed-target.mjs';
-import {readCloudcliLogins,cloudcliTargets} from './cloudcli.mjs';
+import {readCloudcliLogins,cloudcliTargets,recordCloudcliKind} from './cloudcli.mjs';
 import {staticAssets} from './static-assets.mjs';
 import { createTargetConnections, readTargetControls } from './target-connections.mjs';
 
@@ -255,6 +255,7 @@ function startLinks() {
     status, onChange:writeBrowserEntries,
     create:managedTargetFactory({openTunnel:async(t,signal)=>acquireWebTunnel({directory:stateDir,id:t.tunnel.id,login:readSshLogin(stateDir,t.tunnel.id),signal,env:{...process.env,CMCP_STATE_DIR:stateDir,CMCP_SSH_ASKPASS:t.tunnel.id,SSH_ASKPASS:path.resolve(here,"../CMCP.exe"),SSH_ASKPASS_REQUIRE:"force",DISPLAY:"cmcp"}}),proxyFor, machine:machineId(stateDir), version:bridgeVersion,
       forward, askPassword, notify, log, session:sessionMode, onReplaced:sessionMode ? () => stop(4) : undefined,
+      onCloudcliKind:(id,kind) => recordCloudcliKind(stateDir,id,kind),
       passwordFor:async (name,signal) => {
         const r = await powershell('get-password.ps1', ['-Name', name], {capture:true, timeoutMs:45000,signal});
         if (r.code !== 0 || !r.out.trim()) throw new Error('Cannot read saved password');

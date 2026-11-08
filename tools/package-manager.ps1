@@ -18,6 +18,7 @@ $required += @('app\manager-events.ps1','app\manager-save.ps1','tools\desktop-ui
 $required += @('app\shared-autofill.mjs','app\web-recovery.mjs','app\static-assets.mjs')
 $required += @('app\direct-browser.mjs')
 $required += @('app\cloudcli.mjs','app\ssh-web.mjs','tools\desktop-ui\CloudCliLogin.cs')
+$required += @('app\cloudcli-setup.mjs','app\cloudcli-setup.py','tools\desktop-ui\CloudCliSetup.cs')
 $required += @('app\connection-transport.mjs')
 $required += @('app\manager-restart.ps1','tools\desktop-ui\BackendRestart.cs')
 $required += @('app\update.ps1','app\update-core.ps1','app\update-apply.ps1','tools\desktop-ui\SettingsPage.cs','tools\desktop-ui\AppSettings.cs','tools\desktop-ui\Language.cs','tools\desktop-ui\Updater.cs','tools\desktop-ui\SettingsTests.cs')
