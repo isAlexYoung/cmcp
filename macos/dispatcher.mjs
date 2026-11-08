@@ -3,11 +3,12 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {compatibleToolDefinitions} from './tool-schemas.mjs';
 import {createMacTools} from './mac-tools.mjs';
 import {createBinaryTools} from './binary-tools.mjs';
+import {createBlenderTools,blenderInstructions} from '../app/blender-tools.mjs';
 import {KIT,VERSION} from './platform.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 export async function createDispatcher({roots,filesystem:injected}) {
-  const mac=createMacTools({roots}),binary=createBinaryTools({roots});
+  const mac=createMacTools({roots}),binary=createBinaryTools({roots}),blender=createBlenderTools();
   let filesystem=injected;
   if(!filesystem){
     const local=path.join(KIT,'node_modules/@modelcontextprotocol/server-filesystem/dist/index.js');
@@ -15,7 +16,7 @@ export async function createDispatcher({roots,filesystem:injected}) {
     filesystem=new Client({name:'cmcp-mac',version:VERSION});await filesystem.connect(transport);
   }
   let definitions=compatibleToolDefinitions(await filesystem.listTools()).tools;
-  definitions=[...definitions,...mac.definitions,...binary.definitions];
+  definitions=[...definitions,...mac.definitions,...binary.definitions,...blender.definitions];
   const names=new Set(definitions.map(d=>d.name));let active=0;
   async function forward(msg){
     const id=msg?.id??null;
@@ -31,11 +32,12 @@ export async function createDispatcher({roots,filesystem:injected}) {
       if(active>=16)return error(-32000,'Too many active requests');
       const args=p.arguments??{};if(!args||typeof args!=='object'||Array.isArray(args))return error(-32602,'Arguments must be an object');
       active++;
-      try{value=mac.owns(p.name)?await mac.call(p.name,args):binary.owns(p.name)?await binary.call(p.name,args):await filesystem.callTool({name:p.name,arguments:args},undefined,{timeout:120000});}
+      try{value=blender.owns(p.name)?await blender.call(p.name,args):mac.owns(p.name)?await mac.call(p.name,args):binary.owns(p.name)?await binary.call(p.name,args):await filesystem.callTool({name:p.name,arguments:args},undefined,{timeout:120000});}
       catch(e){value={isError:true,content:[{type:'text',text:e.message}]};}
       finally{active--;}
     }else return error(-32601,'Method not found');
+    if(msg.method==='initialize')value.instructions+=' '+blenderInstructions;
     return{jsonrpc:'2.0',id,result:value};
   }
-  return{forward,definitions,async close(){binary.close();await Promise.allSettled([mac.close(),filesystem.close()]);}};
+  return{forward,definitions,async close(){binary.close();await Promise.allSettled([blender.close(),mac.close(),filesystem.close()]);}};
 }

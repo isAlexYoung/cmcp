@@ -111,7 +111,7 @@ namespace CMCP {
             foreach(var update in refresh)update();
             Apply(colors);LayoutRows();top.Invalidate();
         }
-        void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.terminal=next.terminal;settings.browser=next.browser;settings.closeWeb=next.closeWeb;settings.closeTerminal=next.closeTerminal;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
+        void Commit(Action<AppSettings> edit){var next=settings.Copy();edit(next);try{change(next);settings.language=next.language;settings.theme=next.theme;settings.terminal=next.terminal;settings.browser=next.browser;settings.closeWeb=next.closeWeb;settings.cloudcliBrowser=next.cloudcliBrowser;settings.closeCloudcli=next.closeCloudcli;settings.closeTerminal=next.closeTerminal;settings.autoStart=next.autoStart;settings.closeToTray=next.closeToTray;}catch{RefreshControls();SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);return;}RefreshControls();SetFeedback("设置已保存。",false);}
         void Build(){
             refresh.Clear();sections.Clear();
             sheet.Controls.Remove(feedback);sheet.Controls.Remove(updateView);foreach(Control c in sheet.Controls.Cast<Control>().ToArray())c.Dispose();sheet.Controls.Clear();
@@ -323,6 +323,8 @@ namespace CMCP {
         internal Palette Colors=Palette.Create(false);
         internal string Value;
         internal string DisplayOverride;
+        internal Func<string,bool> ChoiceVisible;
+        internal int PreferredFieldWidth{get{return items.Max(i=>TextRenderer.MeasureText(L.Text(i.Value),Font).Width)+44;}}
         // Optional per-choice pictures, owned by this field.
         internal readonly Dictionary<string,Image> Images=new Dictionary<string,Image>();
         const int ImageSize=20;
@@ -371,7 +373,7 @@ namespace CMCP {
         }
         internal void TestClick(){OnClick(EventArgs.Empty);OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,0,0,0));}
         internal bool Choose(string key){
-            if(key==Value||!items.Any(i=>i.Key==key))return false;
+            if(key==Value||!items.Any(i=>i.Key==key&&(ChoiceVisible==null||ChoiceVisible(key))))return false;
             if(Chosen!=null)Chosen(key);
             return true;
         }
@@ -379,11 +381,14 @@ namespace CMCP {
             if(closingMenu&&Menu.Visible){AnimateMenu(false);return;}
             // The pictures belong to this field, so the old rows let go of them first.
             foreach(ToolStripItem old in Menu.Items.Cast<ToolStripItem>().ToArray()){old.Image=null;old.Dispose();}
-            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.MinimumSize=new Size(Width,0);Menu.Padding=new Padding(1,MenuInset,1,MenuInset);Menu.DropShadowEnabled=false;Menu.Renderer=new MenuRenderer(Colors);
+            var choices=items.Where(i=>ChoiceVisible==null||ChoiceVisible(i.Key)).ToArray();
+            if(choices.Length==0)return;
+            int menuWidth=Math.Max(Width,choices.Max(i=>TextRenderer.MeasureText(L.Text(i.Value),Font).Width)+32+(Images.Count>0?ImageSize+8:0));
+            Menu.Items.Clear();Menu.Font=Font;Menu.BackColor=Colors.Surface;Menu.ForeColor=Colors.Text;Menu.AutoSize=false;Menu.MinimumSize=Size.Empty;Menu.Size=new Size(menuWidth,choices.Length*34+2*MenuInset);Menu.Padding=new Padding(1,MenuInset,1,MenuInset);Menu.DropShadowEnabled=false;Menu.Renderer=new MenuRenderer(Colors);
             Menu.ShowImageMargin=Images.Count>0;Menu.ImageScalingSize=new Size(ImageSize,ImageSize);
-            foreach(var pair in items){
+            foreach(var pair in choices){
                 string key=pair.Key;Image image;Images.TryGetValue(key,out image);
-                var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(Width-2,34),Image=image,ImageScaling=ToolStripItemImageScaling.None};
+                var item=new ToolStripMenuItem(L.Text(pair.Value)){ForeColor=Colors.Text,Tag=key==Value,Margin=Padding.Empty,AutoSize=false,Size=new Size(menuWidth-2,34),Image=image,ImageScaling=ToolStripItemImageScaling.None};
                 item.Click+=delegate{Choose(key);};Menu.Items.Add(item);
             }
             if(!Motion.Enabled||!IsHandleCreated){Menu.Show(this,new Point(0,Height+2));ClearMenuMotion();return;}

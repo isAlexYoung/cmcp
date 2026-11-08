@@ -72,6 +72,18 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 - **个性化设置**：支持明暗主题、简体中文与 English。
 - **桌面集成**：支持系统托盘（macOS 上是菜单栏）、开机自启、桌面快捷方式和应用更新。
 
+## 用 VPS 上的 Claude 控制本机 Blender
+
+本机安装并启用 [MCP for Blender 插件](https://github.com/ahujasid/mcp-for-blender)，打开 Blender，在侧栏中启动插件服务。CMCP 默认连接 `127.0.0.1:9876`；插件改了端口时，让 Claude 在 Blender 工具的 `port` 参数中填写对应端口。
+
+连接 CMCP 后重新打开 VPS 上的 Claude，即可让它使用 `blender_*` 工具读取当前场景、检查物体、执行 Blender Python，以及获取视口图片。Windows 和 Mac 使用同一套接口；网页桌面、CloudCLI 与 SSH 终端沿用各自现有的 MCP 通道，无需开放 Blender 的公网端口，也不需要另外启动 `uvx` 服务。
+
+例如：“通过 CMCP 检查我本机 Blender 的连接，读取当前场景，然后创建一个红色立方体，给我看视口截图。先不要覆盖已有文件。”
+
+`blender_execute_code` 会立即返回任务编号，Claude 应在同一个 MCP 连接器中调用 `blender_job_status` 查询结果，再继续下一步。脚本等待上限默认 120 秒，可通过 `timeout_ms` 调整，最长 10 分钟。超时或断线不代表 Blender 已停止执行；CMCP 不会自动重复执行修改操作，应先检查场景。退出 CMCP 后任务记录不保留，也不会强制停止 Blender 中已经提交的代码。
+
+此集成直接兼容插件的本机接口，提供场景、物体、Python、视口与任务查询工具；不是将第三方 MCP 服务的全部工具直接导入。素材平台搜索、在线生成与第三方服务端的安全模式不包含在此适配器内。未启动 Blender 时，仅 Blender 工具提示如何连接，其余 MCP 工具正常使用。
+
 ## 常见问题
 
 **提示便携包不完整怎么办？**

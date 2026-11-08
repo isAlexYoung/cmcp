@@ -84,6 +84,7 @@ namespace CMCP {
         bool reveal,expanding,finished;
         int direction,collapsedBottom,expandedBottom;
         internal event Action Finished;
+        internal bool ClickThrough;
 
         internal static Bitmap Snapshot(Control control){
             var picture=new Bitmap(Math.Max(1,control.Width),Math.Max(1,control.Height),PixelFormat.Format32bppRgb);
@@ -109,6 +110,8 @@ namespace CMCP {
         }
         void HostResized(object sender,EventArgs e){Finish();}
         internal void PlayFade(Bitmap next,int slideDirection){direction=slideDirection;Play(next,PageMilliseconds);}
+        internal void PlayHover(Bitmap next){direction=0;Play(next,150);}
+        internal Bitmap CurrentPicture(){return RenderAt(progress);}
         internal void PlayReveal(Bitmap next,bool expand,int bottomCollapsed,int bottomExpanded){
             reveal=true;expanding=expand;collapsedBottom=bottomCollapsed;expandedBottom=bottomExpanded;Play(next,RevealMilliseconds);
         }
@@ -163,6 +166,11 @@ namespace CMCP {
             if(finished)return;
             Compose(progress);
             IntPtr dc=e.Graphics.GetHdc();try{BitBlt(dc,0,0,Width,Height,back.Dc,0,0,SourceCopy);}finally{e.Graphics.ReleaseHdc(dc);}
+        }
+        protected override void WndProc(ref Message message){
+            // Hover fades cover pictures only. Mouse input goes to the live controls below.
+            if(ClickThrough&&message.Msg==0x84){message.Result=new IntPtr(-1);return;}
+            base.WndProc(ref message);
         }
         // Finishing now, rather than dropping the click, means no click waits on an animation.
         protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(IsHandleCreated)BeginInvoke(new Action(Finish));}

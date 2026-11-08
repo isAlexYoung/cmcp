@@ -29,6 +29,7 @@ namespace CMCP {
         static Control Deepest(Control control){var box=control as ContainerControl;return box!=null&&box.ActiveControl!=null?Deepest(box.ActiveControl):control;}
 
         internal static void Run(string directory,Action<bool,string> check){
+            HoverMotion(check);
             check(Motion.EaseOut(0)==0&&Motion.EaseOut(1)==1&&Motion.EaseOut(.25)<Motion.EaseOut(.75)&&Motion.EaseOut(.5)>.5,"motion eases out and stays within its range");
             check(Motion.Mix(Color.Black,Color.White,0).ToArgb()==Color.Black.ToArgb()&&Motion.Mix(Color.Black,Color.White,1).ToArgb()==Color.White.ToArgb(),"colour fades start and end on the exact colours");
             check(!Motion.Enabled,"automated runs see final states with no animation");
@@ -144,6 +145,32 @@ namespace CMCP {
                 check(about.Controls.OfType<ModernButton>().Any(b=>b.Text=="下载更新")&&about.Controls.OfType<ModernButton>().Any(b=>b.Text=="检查更新"&&b.Enabled)&&about.Controls.OfType<Label>().Any(l=>l.Text.Contains("9.9.9")),"About offers the update and keeps a separate enabled check button");
                 check(NothingOverlaps(about),"the update offer does not cover other rows");
             }
+        }
+        static void HoverMotion(Action<bool,string> check){
+            bool pictures=true,input=true,reversal=true,reduced=true;Point cursor=Cursor.Position;bool forced=Motion.Forced;
+            try{
+                Cursor.Position=new Point(-5000,-5000);
+                foreach(bool dark in new[]{false,true})using(var host=new Form{ClientSize=new Size(1100,240)})using(var card=new TargetCard(new Target{Name="hover",Url="https://desktop.example.com",State="connected"},new CardPreference{name="hover",label="Hover device"}){Bounds=new Rectangle(20,20,1040,116),Font=UiFont.Points(11F)}){
+                    card.Apply(Palette.Create(dark));host.Controls.Add(card);host.Show();Application.DoEvents();Motion.Forced=false;card.TestHover(false);Motion.Forced=true;
+                    int clicks=0;card.ConnectRequested+=delegate{clicks++;};
+                    using(var icon=SnapshotOverlay.Snapshot(card.IconNote)){
+                        card.TestHover(true);var first=card.Controls.OfType<SnapshotOverlay>().Single();
+                        using(var start=first.RenderAt(0))using(var end=first.RenderAt(1))using(var after=SnapshotOverlay.Snapshot(card.IconNote))pictures&=!Same(start,end)&&Same(icon,after)&&first.Left>card.IconNote.Right&&SendMessage(first.Handle,0x84,IntPtr.Zero,IntPtr.Zero).ToInt64()==-1;
+                        card.Connect.PerformClick();input&=clicks==1&&card.ActionsVisible;
+                        using(var current=first.CurrentPicture()){
+                            card.TestHover(false);var back=card.Controls.OfType<SnapshotOverlay>().Single();using(var start=back.RenderAt(0))reversal&=Same(current,start);
+                        }
+                        for(int i=0;i<12;i++){card.TestHover(true);card.TestHover(false);}reversal&=card.Controls.OfType<SnapshotOverlay>().Count()==1;
+                        var clock=System.Diagnostics.Stopwatch.StartNew();while(card.HoverAnimating&&clock.ElapsedMilliseconds<1500){Application.DoEvents();System.Threading.Thread.Sleep(5);}
+                        reversal&=!card.HoverAnimating&&!card.ActionsVisible&&card.StatusText.Visible;
+                        Motion.Forced=false;card.TestHover(true);reduced&=!card.HoverAnimating&&card.ActionsVisible&&!card.StatusText.Visible;
+                    }
+                }
+            }finally{Motion.Forced=forced;Cursor.Position=cursor;}
+            check(pictures,"hover fades between different header pictures without covering the icon or intercepting mouse hits");
+            check(input,"hovering makes the real action buttons immediately usable while their pictures fade");
+            check(reversal,"rapid hover reversal starts at the current frame and leaves no stale overlay or hidden status");
+            check(reduced,"disabled system motion reveals actions immediately without creating an overlay");
         }
     }
 }

@@ -60,6 +60,8 @@ namespace CMCP {
         Bitmap icon;
         bool hovered, keyboardFocus, changingHover, dragArmed;
         Point dragStart;
+        SnapshotOverlay hoverTransition;
+        internal bool HoverAnimating{get{return hoverTransition!=null;}}
         internal bool Compact { get { return Width<1000; } }
         internal int HeaderHeight { get { return Compact?156:116; } }
         internal int FinalHeight { get { return HeaderHeight+(Expanded?Details.NeededHeight(Width-40)+22:0); } }
@@ -96,7 +98,7 @@ namespace CMCP {
         void WirePointer(Control control) {
             control.MouseEnter+=delegate{SetHover(true);};
             control.MouseLeave+=delegate{QueuePointerCheck();};
-            control.MouseDown+=delegate{keyboardFocus=false;};
+            control.MouseDown+=delegate{keyboardFocus=false;if(hoverTransition!=null)hoverTransition.Finish();};
             control.Enter+=delegate{
                 if(changingHover)return;
                 if(SelectedCard!=null)SelectedCard(this);
@@ -160,7 +162,7 @@ namespace CMCP {
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
             string shown=SshActive?(SshStopping?"正在停止":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):BusyStop?"正在停止":(Connection.State=="recovering"||Connection.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Connection.State);
-            StatusText.Text=(SshActive?"ssh":CloudActive?"CloudCLI":"web")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
+            StatusText.Text=(SshActive?"Terminal":CloudActive?"CloudCLI":"WebDesktop")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
             tips.SetToolTip(Connect,connected?"点击停止此设备的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台设备");
             Connect.AccessibleName=L.Text(Connect.Text)+" · "+Connection.Url;
             Details.Stop.Text=BusyStop?"正在停止":"停止连接";
@@ -173,7 +175,8 @@ namespace CMCP {
                 tips.SetToolTip(Connect,"用设置里选定的终端连接这台设备");Connect.AccessibleName=L.Text(Connect.Text)+" · "+SshAddress;
                 Details.Stop.Enabled=SshState.Length>0&&!SshStopping;Details.Stop.Text=SshStopping?"正在停止":"停止连接";
             }
-            AppChoice.Value=SshActive?"ssh":CloudActive?"cloudcli":"web";RouteChoice.DisplayOverride=SshActive?"SSH":null;RouteChoice.Value=SshActive||TunnelActive?"ssh":"url";RouteChoice.Enabled=!SshActive&&!BusyStop;AppChoice.Enabled=!BusyStop;AppChoice.Invalidate();RouteChoice.Invalidate();
+            AppChoice.ChoiceVisible=key=>key!="ssh"||SshActive||TunnelActive;
+            AppChoice.Value=SshActive?"ssh":CloudActive?"cloudcli":"web";RouteChoice.DisplayOverride=SshActive?"SSH":null;RouteChoice.Value=SshActive||TunnelActive?"ssh":"url";RouteChoice.Enabled=!BusyStop;AppChoice.Enabled=!BusyStop;AppChoice.Invalidate();RouteChoice.Invalidate();
             Details.PerformLayout();LoginSwitch.Invalidate();Details.Open.Invalidate();
             Connect.Invalidate();StatusText.Invalidate();
         }
@@ -188,7 +191,14 @@ namespace CMCP {
         void SetHover(bool value) {
             if(changingHover)return;
             if(hovered==value&&StatusText.Visible==!value&&AppChoice.Visible==value&&RouteChoice.Visible==value&&Connect.Visible==value&&Edit.Visible==value&&Copy.Visible==value&&Delete.Visible==value)return;
-            changingHover=true;SuspendLayout();
+            changingHover=true;
+            Rectangle area=Compact?Rectangle.FromLTRB(20,96,Width-20,148):Rectangle.FromLTRB(110,20,Width-64,96);
+            bool animate=Motion.Enabled&&IsHandleCreated&&Visible&&area.Width>0&&area.Height>0;
+            Bitmap before=null;
+            if(animate&&hoverTransition!=null&&hoverTransition.Bounds==area)before=hoverTransition.CurrentPicture();
+            if(hoverTransition!=null)hoverTransition.Finish();
+            if(animate&&before==null)before=HoverPicture(area);
+            SuspendLayout();
             try {
                 hovered=value;
                 // Set both sides on every transition. Never hide status based
@@ -197,7 +207,14 @@ namespace CMCP {
                 StatusText.Visible=!value;
             } finally {ResumeLayout();changingHover=false;}
             Invalidate();
+            if(before!=null){
+                var after=HoverPicture(area);
+                var overlay=new SnapshotOverlay(before,area){ClickThrough=true};hoverTransition=overlay;
+                overlay.Finished+=delegate{if(hoverTransition==overlay)hoverTransition=null;};
+                Controls.Add(overlay);overlay.BringToFront();overlay.PlayHover(after);
+            }
         }
+        Bitmap HoverPicture(Rectangle area){using(var picture=SnapshotOverlay.Snapshot(this))return picture.Clone(area,System.Drawing.Imaging.PixelFormat.Format32bppRgb);}
 
         internal void TestHover(bool value) { SetHover(value); }
         protected override void OnGotFocus(EventArgs e) {
@@ -247,7 +264,8 @@ namespace CMCP {
             base.OnLayout(e);if(Details==null)return;
             IconNote.Bounds=new Rectangle(51,35,44,44);
             int y=Compact?103:38, x=Width-(Compact?22:66)-268;
-            AppChoice.Bounds=new Rectangle(x-276,y,128,40);RouteChoice.Bounds=new Rectangle(x-140,y,132,40);
+            int appWidth=Math.Max(144,AppChoice.PreferredFieldWidth),routeWidth=Math.Max(132,RouteChoice.PreferredFieldWidth);
+            AppChoice.Bounds=new Rectangle(x-routeWidth-appWidth-16,y,appWidth,40);RouteChoice.Bounds=new Rectangle(x-routeWidth-8,y,routeWidth,40);
             Connect.Bounds=new Rectangle(x,y,136,40);
             Edit.Bounds=new Rectangle(x+144,y,36,40);
             Copy.Bounds=new Rectangle(x+188,y,36,40);
@@ -268,8 +286,9 @@ namespace CMCP {
             if(Expanded)using(var p=new Pen(Colors.Border))g.DrawLine(p,21,HeaderHeight-10,Width-21,HeaderHeight-10);
         }
         protected override void Dispose(bool disposing) {
-            if(disposing){tips.Dispose();if(icon!=null)icon.Dispose();}
+            if(disposing){if(hoverTransition!=null){hoverTransition.Dispose();hoverTransition=null;}tips.Dispose();if(icon!=null)icon.Dispose();}
             base.Dispose(disposing);
         }
+        protected override void OnVisibleChanged(EventArgs e){base.OnVisibleChanged(e);if(!Visible&&hoverTransition!=null)hoverTransition.Finish();}
     }
 }

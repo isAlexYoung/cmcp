@@ -72,6 +72,18 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 - **Personalization**: light and dark themes, English and Simplified Chinese.
 - **Desktop integration**: system tray (menu bar on macOS), start at login, desktop shortcut and in-app updates.
 
+## Control local Blender from Claude on a VPS
+
+Install and enable the [MCP for Blender add-on](https://github.com/ahujasid/mcp-for-blender) on this computer, open Blender and start the add-on server in its sidebar. CMCP connects to `127.0.0.1:9876` by default. If the add-on uses a different port, pass it in the Blender tools' `port` argument.
+
+Reconnect CMCP and restart Claude on the VPS to discover the `blender_*` tools. They inspect the live scene and objects, execute Blender Python and return viewport images. Windows and Mac share the adapter. WebDesktop, CloudCLI and SSH terminals use their existing MCP connections. No public Blender port or separate `uvx` server is needed.
+
+Example: “Use CMCP to check my local Blender connection, inspect the current scene, create a red cube and show a viewport screenshot. Do not overwrite existing files.”
+
+`blender_execute_code` immediately returns a job ID. Poll `blender_job_status` on the same MCP connector before continuing. Script deadlines default to 120 seconds and can be changed with `timeout_ms`, up to 10 minutes. A timeout or dropped connection does not cancel submitted Blender code. Edits are never automatically retried: inspect the scene first. Job records last only for the current CMCP session; exiting CMCP does not forcibly cancel submitted Blender code.
+
+This adapter speaks the add-on's local protocol directly; it does not import every tool from the third-party MCP server. Asset service search, online generation and that server's safe mode are not included. When Blender is closed, only Blender tools report it unavailable; other MCP tools remain usable.
+
 ## FAQ
 
 **CMCP says the portable package is incomplete. What should I do?**

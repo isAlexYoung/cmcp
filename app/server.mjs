@@ -13,6 +13,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { compatibleToolDefinitions } from './tool-schemas.mjs';
 import { createWindowsTools } from './windows-tools.mjs';
 import { createBinaryTools } from './binary-tools.mjs';
+import { createBlenderTools, blenderInstructions } from './blender-tools.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import net from 'node:net';
@@ -73,6 +74,7 @@ for (let attempt = 0; !selfTest; attempt++) {
 log(`service ${bridgeVersion} starting${sessionMode ? ' (session)' : ''} (pid ${process.pid}, node ${process.version})`);
 const windows = createWindowsTools({ defaultCwd: here, roots: config.roots, stateDir });
 const binary = createBinaryTools({ roots: config.roots });
+const blender = createBlenderTools();
 const expected = Buffer.from(`Bearer ${config.token}`);
 if (config.token.length < 40 || !config.roots.length) throw new Error('Missing credentials or allowed roots');
 const backend = new Client({ name: 'windows-filesystem-bridge', version: '1.0.0' });
@@ -91,8 +93,9 @@ try {
 }
 const backendTools = compatibleToolDefinitions(await backend.listTools());
 if (selfTest) {
-  const total = backendTools.tools.length + windows.definitions.length + binary.definitions.length;
+  const total = backendTools.tools.length + windows.definitions.length + binary.definitions.length + blender.definitions.length;
   process.stdout.write(`SELFTEST-OK ${total} tools; node ${process.version}\n`);
+  await blender.close();
   await backend.close().catch(() => {});
   process.exit(0);
 }
@@ -114,21 +117,25 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.get('/health', (req, res) => res.json({ ok: true, bridgeVersion, schemaDialect: '2020-12', tools: backendTools.tools.length + windows.definitions.length + binary.definitions.length, roots: config.roots, capabilities: ['files','windows_commands','background_processes','toolchains','browser','desktop','android','binary_transfer'] }));
+app.get('/health', (req, res) => res.json({ ok: true, bridgeVersion, schemaDialect: '2020-12', tools: backendTools.tools.length + windows.definitions.length + binary.definitions.length + blender.definitions.length, roots: config.roots, capabilities: ['files','windows_commands','background_processes','toolchains','browser','desktop','android','binary_transfer','blender'] }));
 app.use(express.json({ limit: '8mb' }));
 let active = 0;
 app.post('/mcp', async (req, res) => {
   if (active >= 16) return res.status(429).json({ error: 'Too many concurrent requests' });
   active++;
   const server = new Server({ name: 'windows-pc-files', version: bridgeVersion }, {
-    capabilities: { tools: {} }, instructions,
+    capabilities: { tools: {} }, instructions: instructions+' '+blenderInstructions,
   });
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const files = compatibleToolDefinitions(await backend.listTools());
-    return { ...files, tools: [...files.tools, ...windows.definitions, ...binary.definitions] };
+    return { ...files, tools: [...files.tools, ...windows.definitions, ...binary.definitions, ...blender.definitions] };
   });
   server.setRequestHandler(CallToolRequestSchema, async request => {
     log(`tool=${request.params.name}`);
+    if (blender.owns(request.params.name)) {
+      try { return await blender.call(request.params.name, request.params.arguments ?? {}); }
+      catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
+    }
     if (binary.owns(request.params.name)) {
       try { return await binary.call(request.params.name, request.params.arguments ?? {}); }
       catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
@@ -165,7 +172,7 @@ app.use((error, req, res, next) => {
 let localPort = 0;
 const listener = app.listen(0, '127.0.0.1', () => {
   localPort = listener.address().port;
-  log(`Windows MCP ready on 127.0.0.1:${localPort}; ${backendTools.tools.length + windows.definitions.length + binary.definitions.length} tools`);
+  log(`Windows MCP ready on 127.0.0.1:${localPort}; ${backendTools.tools.length + windows.definitions.length + binary.definitions.length + blender.definitions.length} tools`);
   startLinks();
 });
 listener.on('error', async error => { log('listen failed: ' + error.message); await backend.close(); process.exit(1); });
@@ -266,6 +273,7 @@ async function stop(code = 0) {
   try { fs.unlinkSync(entriesFile); } catch {}
   await windows.close().catch(() => {});
   try { binary.close(); } catch {}
+  await blender.close();
   await backend.close().catch(() => {});
   staticAssets.clear();
   process.exit(code);

@@ -8,6 +8,7 @@ namespace CMCP {
     // Explicit vertical layout avoids FlowLayoutPanel's partial resize paints.
     // Sorting uses short eased translations; preferences change only on drop.
     internal sealed class CardList : EditorViewport {
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window,IntPtr update,IntPtr region,uint flags);
         readonly Timer motion=new Timer{Interval=15};
         readonly Dictionary<Control,int> destinations=new Dictionary<Control,int>();
         List<TargetCard> order, original;
@@ -47,7 +48,14 @@ namespace CMCP {
                 int goal=pair.Value+scroll,delta=goal-pair.Key.Top;
                 if(delta!=0){int step=Math.Abs(delta)<3?delta:(int)Math.Ceiling(Math.Abs(delta)*.28)*Math.Sign(delta);pair.Key.Top+=step;more|=pair.Key.Top!=goal;}
             }}finally{ResumeLayout(false);}
-            Invalidate(true);if(!more)motion.Stop();
+            PaintPositions();if(!more)motion.Stop();
+        }
+        void PaintPositions(){
+            // Mouse moves can keep WM_PAINT queued while native child windows copy
+            // their old pixels across overlapping cards. Finish the parent AND
+            // descendant paints before displaying the next drag/animation frame.
+            if(IsHandleCreated&&Visible)RedrawWindow(Handle,IntPtr.Zero,IntPtr.Zero,0x0185); // INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
+            else Invalidate(true);
         }
         internal void FinishMotion(){while(motion.Enabled)Advance();}
         internal void BeginSort(TargetCard card,int pointerY){
@@ -62,7 +70,7 @@ namespace CMCP {
             var next=original.Where(c=>c!=dragging).ToList();int index=next.Count(c=>centers[c]<center);
             next.Insert(index,dragging);
             if(!next.SequenceEqual(order)){order=next;Place(order,true);}
-            dragging.Top=top;Invalidate(true);
+            dragging.Top=top;PaintPositions();
         }
         internal void EndSort(bool commit){
             if(!Sorting)return;

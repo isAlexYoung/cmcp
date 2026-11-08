@@ -52,6 +52,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tap = Get-Content test-results/node.tap -Raw
           if ($tap -notmatch '# pass 143' -or $tap -notmatch '# fail 0' -or $tap -notmatch '# skipped 0' -or $tap -notmatch '# cancelled 0') { throw 'Incomplete Node regression' }
+      - name: Local Blender add-on protocol and MCP routing
+        shell: pwsh
+        run: |
+          node --test app/tests/blender.test.mjs | Tee-Object test-results/blender.tap
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Windows PowerShell 5.1 selected-target regression
         shell: pwsh
         run: |
@@ -125,7 +130,7 @@ jobs:
           if (!$p.WaitForExit(180000)) { $p.Kill(); Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; throw 'Manager self-test timed out' }
           if ($p.ExitCode -ne 0) { Get-Content ($resultFile + '.progress.txt') -ErrorAction SilentlyContinue; Get-Content ($resultFile + '.unhandled.txt') -ErrorAction SilentlyContinue; Get-Content test-results/manager.stderr.txt -ErrorAction SilentlyContinue; Get-Content $resultFile -ErrorAction SilentlyContinue; throw ('Manager self-test failed with exit ' + $p.ExitCode) }
           $r = Get-Content $resultFile -Raw | ConvertFrom-Json
-          if ($r.passed -ne 488 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
+          if ($r.passed -ne 496 -or $r.failed -ne 0 -or $r.skipped -ne 0 -or $r.not_executed.Count -ne 3) { throw 'Incomplete manager regression' }
       - name: Theme-aware native tooltips and focus preservation
         shell: pwsh
         run: |

@@ -8,6 +8,7 @@ namespace CMCP {
     internal static class DashboardTests {
         internal static Action<string> Trace;
         internal static int? DarkCaptionResult, LightCaptionResult;
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetUpdateRect(IntPtr window,IntPtr rectangle,bool erase);
         static void Pump(){Application.DoEvents();}
         static bool Until(Func<bool> condition,Manager form){var until=DateTime.UtcNow.AddSeconds(12);do{Pump();form.RefreshState();if(condition())return true;System.Threading.Thread.Sleep(30);}while(DateTime.UtcNow<until);return false;}
         // Keep the previous painted pixels and repaint ONLY the regions WinForms
@@ -74,8 +75,40 @@ namespace CMCP {
                 }
             }
         }
+        static void DragPainting(Action<bool,string> check){
+            using(var form=new Manager(true)){
+                form.Show();Pump();
+                foreach(bool dark in new[]{false,true})foreach(bool compact in new[]{false,true}){
+                    form.SetTheme(dark);form.ClientSize=new Size(compact?800:1440,850);Pump();
+                    var card=form.Cards["preview-b"];bool painted=true;string evidence="";
+                    foreach(bool expanded in new[]{false,true}){
+                        card.SetExpanded(expanded,false);form.RefreshState();form.list.FinishMotion();Pump();
+                        int listPaints=0,cardPaints=0,detailPaints=0;
+                        PaintEventHandler listPaint=delegate{listPaints++;},cardPaint=delegate{cardPaints++;},detailPaint=delegate{detailPaints++;};
+                        form.list.Paint+=listPaint;card.Paint+=cardPaint;card.Details.Paint+=detailPaint;
+                        try{
+                            int start=card.Top;form.list.BeginSort(card,start+35);
+                            foreach(int delta in new[]{-6,-12,-18,6,12,18}){
+                                listPaints=cardPaints=detailPaints=0;
+                                // Do not pump messages: continuous mouse input can postpone WM_PAINT.
+                                form.list.MoveSort(start+35+delta);
+                                painted&=listPaints>0&&cardPaints>0&&!GetUpdateRect(card.IconNote.Handle,IntPtr.Zero,false)&&(!expanded||detailPaints>0);
+                                if(!painted)evidence+=" move="+delta+" expanded="+expanded+" paints="+listPaints+","+cardPaints+","+detailPaints;
+                            }
+                            form.list.EndSort(false);listPaints=cardPaints=detailPaints=0;
+                            form.list.FinishMotion();
+                            painted&=listPaints>0&&cardPaints>0&&!GetUpdateRect(card.IconNote.Handle,IntPtr.Zero,false)&&(!expanded||detailPaints>0)&&card.Top==start;
+                            if(!painted)evidence+=" settle="+listPaints+","+cardPaints+","+detailPaints+" top="+card.Top+" expected="+start;
+                        }finally{form.list.Paint-=listPaint;card.Paint-=cardPaint;card.Details.Paint-=detailPaint;}
+                    }
+                    check(painted,"dragging collapsed and expanded cards and settling their positions repaints the list, card, icon and details before returning in "+(dark?"dark":"light")+" "+(compact?"compact":"wide")+" layout"+evidence);
+                    card.SetExpanded(false,false);
+                }
+            }
+        }
         internal static void Run(string temp,Action<bool,string> check){
             HoverIcons(temp,check);
+            DragPainting(check);
             string directory=Path.Combine(temp,"dashboard");Directory.CreateDirectory(directory);
             var targets=Manager.Demo().Targets;var prefs=UiPreferences.Load(directory);
             check(!prefs.ReadError&&prefs.Sort(targets)[0].Name=="preview-a","fresh UI preferences preserve existing connection order");
@@ -98,7 +131,7 @@ namespace CMCP {
                 check(form.LayoutFits(),"real wide WinForms cards and toolbar fit inside window");
                 check(a.Connect.Text=="成功连接"&&a.Connect.Primary&&b.Connect.Text=="未连接"&&!b.Connect.Primary,"connection pill reflects confirmed versus disconnected state");
                 b.Target.State="unstable";b.TestHover(true);b.UpdateActions();
-                check(b.StatusText.Text=="web · 正在恢复"&&b.Connect.Text=="连接中","soft recovery keeps the card in an active connection state");
+                check(b.StatusText.Text=="WebDesktop · 正在恢复"&&b.Connect.Text=="连接中","soft recovery keeps the card in an active connection state");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","soft recovery stop action cancels only B instead of starting another connection");
                 b.TestHover(true);b.Connect.PerformClick();check(b.Target.State=="connected"&&a.Target.State=="connected","card connect dispatch addresses B only in isolated interactive demo");
                 b.Connect.PerformClick();check(b.Target.State=="stopped"&&a.Target.State=="connected","card disconnect leaves A intact in isolated interactive demo");
@@ -130,9 +163,9 @@ namespace CMCP {
                 check(form.Text=="CMCP","native title contains only CMCP");
                 check(form.Controls.Count==2&&!form.Controls.OfType<FlowLayoutPanel>().Any(),"main page has no footer or bottom links");
                 check(Math.Abs(a.Font.Size-11F*UiFont.Scale)<0.01f&&a.Connect.Height==40&&a.Edit.Width==36&&a.Connect.Width==136,"card text and interactive controls are enlarged together");
-                b.ClearPointer();form.RefreshState();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="web · 已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
-                b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="web · 连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
-                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="web · 已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
+                b.ClearPointer();form.RefreshState();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="WebDesktop · 已停止"&&!b.ActionsVisible,"idle card always shows stopped status without action buttons");
+                b.BusyConnect=true;b.UpdateActions();check(b.StatusText.Visible&&b.StatusText.Text=="WebDesktop · 连接中","pending connect immediately exposes a nonempty status");b.BusyConnect=false;
+                b.TestHover(true);b.Connect.PerformClick();b.ClearPointer();Pump();b.ClearPointer();check(b.StatusText.Visible&&b.StatusText.Text=="WebDesktop · 已连接"&&!b.ActionsVisible,"leaving a just-connected card restores confirmed status immediately");
                 b.TestHover(true);check(b.ActionsVisible&&!b.StatusText.Visible,"hover replaces idle status with full action set");
                 b.ClearPointer();for(int i=0;i<20;i++){b.TestHover(true);b.ClearPointer();b.UpdateActions();}
                 check(b.StatusText.Visible&&!b.ActionsVisible&&b.StatusText.Text.Length>0,"repeated hover exits and state updates never leave a blank status slot");

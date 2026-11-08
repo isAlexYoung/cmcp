@@ -12,7 +12,7 @@ test('SSH web routes persist independently, switch without connecting and expose
   assert.equal(s.loginMode(id),'web');assert.equal(s.route(id),'ssh');s.setLogin(id,'web');s.setRoute(id,'ssh');assert.equal(s.connectionName(id),'tunnel:web:'+id);assert.equal(s.controlMap().size,0);s.setEnabled(id,true);assert.equal(s.controlMap().get(s.connectionName(id)).enabled,true);
   s.setLogin(id,'cloudcli');assert.equal(s.route(id),'url');s.setRoute(id,'ssh');assert.equal(s.connectionName(id),'tunnel:cloudcli:'+id);assert.equal(s.controlMap().get('tunnel:web:'+id).enabled,true);
   const copy=new ManagerState(f.directory,f.secrets);assert.equal(copy.route(id,'web'),'ssh');assert.equal(await copy.password('tunnel:web:'+id),'WEB-SECRET');assert.equal(await copy.password('tunnel:cloudcli:'+id),'CLOUD-SECRET');assert.equal(f.values.size,3);const text=JSON.stringify(copy.view());assert.ok(!text.includes('SECRET'));assert.ok(!fs.readFileSync(path.join(f.directory,'ssh-logins.json'),'utf8').includes('SECRET'));
-  s.setLogin(id,'ssh');assert.equal(s.route(id),'ssh');s.setRoute(id,'url');assert.equal(s.route(id),'ssh');s.setEnabled(null,false);assert.ok([...s.controlMap().values()].every(v=>!v.enabled));
+  s.setLogin(id,'ssh');assert.equal(s.route(id),'ssh');s.setRoute(id,'url');assert.equal(s.loginMode(id),'web');assert.equal(s.route(id),'url');assert.equal(s.connectionName(id),id);assert.equal(new ManagerState(f.directory,f.secrets).loginMode(id),'web');s.setEnabled(null,false);assert.ok([...s.controlMap().values()].every(v=>!v.enabled));
 });
 test('new servers and ports never inherit web credentials and failed edits preserve previous secrets',async t=>{
   const f=fixture(t),s=f.state,id=await s.save(input(),()=>assert.fail());

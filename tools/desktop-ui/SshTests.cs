@@ -21,10 +21,12 @@ namespace CMCP {
             }
             using(var form=new Manager(true)){
                 form.Show();Application.DoEvents();var card=form.Cards.Values.First();card.TestHover(true);
-                check(card.AppChoice.Visible&&card.RouteChoice.Visible&&card.AppChoice.AccessibleRole==AccessibleRole.ComboBox,"cards use the same animated dropdown control as settings");
+                card.AppChoice.TestClick();Application.DoEvents();bool appMenuFits=card.AppChoice.Menu.Items.Cast<ToolStripItem>().All(i=>Math.Abs(i.Bounds.Right-(card.AppChoice.Menu.ClientSize.Width-1))<=1)&&!card.AppChoice.Menu.Items.Cast<ToolStripItem>().Any(i=>i.Text=="Terminal");card.AppChoice.Menu.Close();
+                card.RouteChoice.TestClick();Application.DoEvents();bool routeMenuFits=card.RouteChoice.Menu.Items.Cast<ToolStripItem>().All(i=>Math.Abs(i.Bounds.Right-(card.RouteChoice.Menu.ClientSize.Width-1))<=1);card.RouteChoice.Menu.Close();
+                check(card.AppChoice.Visible&&card.RouteChoice.Visible&&card.AppChoice.AccessibleRole==AccessibleRole.ComboBox&&appMenuFits&&routeMenuFits&&!card.AppChoice.Choose("ssh")&&card.AppChoice.Width>=card.AppChoice.PreferredFieldWidth,"card menus fill their width, show the complete app label and omit Terminal for direct URLs");
                 card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.CloudActive,"the application dropdown selects CloudCLI without connecting");
                 card.RouteChoice.Choose("ssh");Application.DoEvents();check(card.TunnelActive&&card.ConnectionName=="tunnel:cloudcli:"+card.Target.Name,"CloudCLI can select its own SSH route without a network request");
-                card.AppChoice.Choose("ssh");Application.DoEvents();check(card.SshActive&&!card.RouteChoice.Enabled&&card.RouteChoice.Value=="ssh"&&card.RouteChoice.DisplayOverride=="SSH","Terminal always uses SSH and its route dropdown is disabled");
+                card.AppChoice.Choose("ssh");Application.DoEvents();bool terminalSsh=card.SshActive&&card.RouteChoice.Enabled&&card.RouteChoice.Value=="ssh"&&card.RouteChoice.DisplayOverride=="SSH";card.RouteChoice.Choose("url");Application.DoEvents();check(terminalSsh&&!card.SshActive&&!card.TunnelActive&&card.RouteChoice.Value=="url"&&!card.AppChoice.Choose("ssh"),"Terminal uses SSH but can return to a valid web application through the route menu");
                 card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.TunnelActive,"returning to an application restores its remembered connection route");
                 form.OpenEditor(card.Target.Name);form.Editor.ShowWeb();Application.DoEvents();check(form.Editor.CurrentCategory=="网址登录"&&form.Editor.UrlInput.Visible&&form.Editor.CloudUrlInput.Visible,"the URL category holds both WebDesktop and CloudCLI");
                 form.Close();
@@ -259,30 +261,30 @@ namespace CMCP {
                 b.SetExpanded(true,false);Pump();check(b.Details.Stop.Visible,"web sign-in offers stop in the details");
                 SwitchDesktopOrSsh(b);
                 check(b.SshActive&&b.LoginSwitch.Text=="SSH"&&b.Connect.Text=="打开终端"&&b.Connect.Glyph=="terminal"&&b.Target.State==state,"switching changes the card's button and leaves the web connection alone");
-                check(b.Details.Stop.Visible&&!b.Details.Stop.Enabled&&b.Details.Open.Text=="打开终端"&&b.StatusText.Text=="ssh · 已停止","a stopped SSH channel shows its state and has nothing to stop");
+                check(b.Details.Stop.Visible&&!b.Details.Stop.Enabled&&b.Details.Open.Text=="打开终端"&&b.StatusText.Text=="Terminal · 已停止","a stopped SSH channel shows its state and has nothing to stop");
                 b.Connect.PerformClick();Pump();check(b.Target.State==state,"opening a terminal never starts the web connection");
                 SwitchDesktopOrSsh(b);check(!b.SshActive&&b.Connect.Text!="打开终端"&&b.Details.Stop.Visible,"switching back restores web desktop sign-in");b.SetExpanded(false,false);Pump();
                 var channels=new Dictionary<string,string>();var stops=new List<string>();bool stopWorks=true;
                 form.ReadSshState=(directory,id)=>{string phase;return channels.TryGetValue(id,out phase)?phase:"";};
                 form.StopSshWorker=(directory,id)=>{stops.Add(id);if(stopWorks)channels.Remove(id);return stopWorks;};
                 SwitchDesktopOrSsh(b);b.SetExpanded(true,false);
-                channels["preview-b"]="connecting";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 连接中"&&b.Details.Stop.Enabled,"a starting SSH channel can already be stopped");
-                channels["preview-b"]="recovering";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 正在恢复","a recovering SSH channel says so");
-                channels["preview-b"]="failed";form.RefreshState();Pump();check(b.StatusText.Text=="ssh · 连接异常"&&b.Details.Stop.Enabled,"a failed SSH channel can still be stopped");
+                channels["preview-b"]="connecting";form.RefreshState();Pump();check(b.StatusText.Text=="Terminal · 连接中"&&b.Details.Stop.Enabled,"a starting SSH channel can already be stopped");
+                channels["preview-b"]="recovering";form.RefreshState();Pump();check(b.StatusText.Text=="Terminal · 正在恢复","a recovering SSH channel says so");
+                channels["preview-b"]="failed";form.RefreshState();Pump();check(b.StatusText.Text=="Terminal · 连接异常"&&b.Details.Stop.Enabled,"a failed SSH channel can still be stopped");
                 channels["preview-b"]="ready";form.RefreshState();Pump();
-                check(b.StatusText.Text=="ssh · 已连接"&&b.StatusText.ForeColor.ToArgb()==b.Colors.Success.ToArgb()&&b.Details.Stop.Enabled&&b.Details.Stop.Visible,"a ready SSH channel shows as connected and can be stopped");
+                check(b.StatusText.Text=="Terminal · 已连接"&&b.StatusText.ForeColor.ToArgb()==b.Colors.Success.ToArgb()&&b.Details.Stop.Enabled&&b.Details.Stop.Visible,"a ready SSH channel shows as connected and can be stopped");
                 check(b.Target.State==state&&b.Details.Logs.Left>b.Details.Stop.Right,"the stop button sits where web desktop sign-in has it");
                 stopWorks=false;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();
-                check(stops.Count==1&&b.StatusText.Text=="ssh · 已连接"&&b.Details.Stop.Enabled,"a failed stop leaves the channel shown as connected");
+                check(stops.Count==1&&b.StatusText.Text=="Terminal · 已连接"&&b.Details.Stop.Enabled,"a failed stop leaves the channel shown as connected");
                 stopWorks=true;b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
-                check(stops.Count==2&&stops.All(id=>id=="preview-b")&&b.StatusText.Text=="ssh · 已停止"&&!b.Details.Stop.Enabled&&b.Target.State==state,"stopping affects only this device's SSH channel, never its web connection");
+                check(stops.Count==2&&stops.All(id=>id=="preview-b")&&b.StatusText.Text=="Terminal · 已停止"&&!b.Details.Stop.Enabled&&b.Target.State==state,"stopping affects only this device's SSH channel, never its web connection");
                 b.Details.Stop.PerformClick();Pump();check(stops.Count==2,"there is nothing to stop once the channel has stopped");
                 var closes=new List<string>();form.CloseSshSessions=(directory,id)=>{closes.Add(id);return 1;};
                 form.Options.closeTerminal=true;channels["preview-b"]="ready";form.RefreshState();Pump();
                 b.Details.Stop.PerformClick();for(int i=0;i<100&&b.SshStopping;i++)Pump();form.RefreshState();Pump();
                 check(closes.Count==1&&closes[0]=="preview-b"&&stops.Count==3&&ContainsText(form,"SSH 通道已停止，终端窗口已关闭。"),"with the setting on, stopping SSH also closes this device's terminals");
                 form.Options.closeTerminal=false;
-                SwitchDesktopOrSsh(b);check(b.StatusText.Text.StartsWith("web · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();
+                SwitchDesktopOrSsh(b);check(b.StatusText.Text.StartsWith("WebDesktop · "),"switching back shows the web state");b.SetExpanded(false,false);Pump();
                 SwitchDesktopOrSsh(a);
                 check(form.Editor==null&&a.SshActive&&a.Ssh==null,"a card without SSH details switches without opening the editor");
                 a.Connect.PerformClick();Pump();check(form.Editor==null&&ContainsText(form,"还没有填写 SSH 信息，请编辑设备后再连接。")&&a.Target.State=="connected","missing SSH details are reported only when connecting and retain the running web link");
@@ -306,7 +308,7 @@ namespace CMCP {
                 var switches=form.Settings.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().ToArray();
                 check(switches.Length==3&&!switches[0].Enabled&&!switches[0].Checked&&!switches[1].Enabled&&switches[2].Enabled,"closing the page needs a specific browser, closing the terminal does not");
                 var browsers=Browsers.Detect();
-                if(browsers.Count>0){fields[0].Choose(browsers[0].Id);Pump();check(form.Options.browser==browsers[0].Id&&switches[0].Enabled&&fields[0].Images.ContainsKey(browsers[0].Id),"choosing an installed browser shows its own icon and allows closing its page");}
+                if(browsers.Count>0){fields[0].Choose(browsers[0].Id);Pump();bool web=form.Options.browser==browsers[0].Id&&switches[0].Enabled&&fields[0].Images.ContainsKey(browsers[0].Id);fields[1].Choose(browsers[0].Id);Pump();bool cloud=fields[1].Value==browsers[0].Id&&switches[1].Enabled;switches[1].AccessibilityObject.DoDefaultAction();Pump();cloud&=switches[1].Checked&&form.Options.closeCloudcli&&!form.Options.closeWeb;fields[1].Choose("");Pump();cloud&=fields[1].Value==""&&!switches[1].Enabled&&!switches[1].Checked;fields[1].Choose(browsers[0].Id);Pump();cloud&=switches[1].Enabled&&switches[1].Checked&&form.Options.closeCloudcli;check(web&&cloud,"web and CloudCLI browser choices and switches update immediately, independently and retain their settings");}
                 else check(fields[0].Value=="","without another browser only the system default is offered");
                 form.CloseSettings();Pump();form.FinishTransition();
             }
