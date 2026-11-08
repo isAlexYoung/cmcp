@@ -444,17 +444,29 @@ namespace CMCP {
                 if(changed)SaveSsh();
             }catch{Error("地址已保存，但 SSH 信息保存失败，请稍后编辑。");}
         }
-        void ChooseApp(TargetCard card,string mode){Select(card);var p=card.Preference;string previous=p.loginMode;try{TurnPart(card,mode=="ssh"?1:-1,delegate{p.loginMode=mode;Preferences.Set(p.name,p.label,p.icon,targets,p.note);Preferences.Get(p.name).loginMode=mode;SavePreferences();card.UpdatePreference(Preferences.Get(p.name));});}catch{p.loginMode=previous;Error("无法保存打开对象，请重试。");}SyncTray();}
-        void ChooseRoute(TargetCard card,string route){if(route!="url"&&route!="ssh"||card.SshActive&&route=="ssh")return;Select(card);var p=card.Preference;bool terminal=card.SshActive,cloud=card.CloudActive||(terminal&&card.Target.Url.Length==0&&card.Cloud!=null);string previous=cloud?p.cloudcliRoute:p.webRoute,mode=p.loginMode;try{TurnPart(card,route=="ssh"?1:-1,delegate{if(terminal)p.loginMode=cloud?"cloudcli":"web";if(cloud)p.cloudcliRoute=route;else p.webRoute=route;Preferences.Set(p.name,p.label,p.icon,targets,p.note);SavePreferences();card.UpdatePreference(p);});}catch{p.loginMode=mode;if(cloud)p.cloudcliRoute=previous;else p.webRoute=previous;card.UpdatePreference(p);Error("无法保存连接方式，请重试。");}SyncTray();}
-        internal void SwitchLogin(TargetCard card){
-            Select(card);string name=card.Target.Name,mode=card.CloudActive?"ssh":card.SshActive?"web":"cloudcli",previous=card.Preference.loginMode;
-            var before=Preferences.cards.ToList();
-            try{
+        void ChooseApp(TargetCard card,string mode){
+            Select(card);var p=card.Preference;var before=Preferences.cards.ToList();
+            string previous=p.loginMode,web=p.webRoute,cloud=p.cloudcliRoute,route=card.TunnelActive?"ssh":"url";bool terminal=card.SshActive;
+            try{TurnPart(card,mode=="ssh"?1:-1,delegate{
                 Preferences.cards=Preferences.Sort(targets).Select(t=>Preferences.Get(t.Name)).ToList();
-                Preferences.Set(name,card.Preference.label,card.Preference.icon,targets,card.Preference.note);
-                var next=Preferences.Get(name);TurnPart(card,mode=="ssh"?1:-1,delegate{next.loginMode=mode;SavePreferences();card.UpdatePreference(next);});
-            }catch{Preferences.Get(name).loginMode=previous;Preferences.cards=before;card.UpdatePreference(Preferences.Get(name));Error("无法保存登录方式，请重试。");}
-            card.PerformLayout();SyncTray();
+                Preferences.Set(p.name,p.label,p.icon,targets,p.note,p.hideAddress);var next=Preferences.Get(p.name);next.loginMode=mode;
+                // Changing the web application must not change the transport the user just selected.
+                if(!terminal){if(mode=="web")next.webRoute=route;else if(mode=="cloudcli")next.cloudcliRoute=route;}
+                SavePreferences();card.UpdatePreference(next);
+            });}catch{p.loginMode=previous;p.webRoute=web;p.cloudcliRoute=cloud;Preferences.cards=before;card.UpdatePreference(p);Error("无法保存打开对象，请重试。");}SyncTray();
+        }
+        void ChooseRoute(TargetCard card,string route){
+            if(route!="url"&&route!="ssh"||card.SshActive&&route=="ssh")return;Select(card);var p=card.Preference;var before=Preferences.cards.ToList();
+            bool terminal=card.SshActive,cloud=card.CloudActive||(terminal&&card.Target.Url.Length==0&&card.Cloud!=null);string previous=cloud?p.cloudcliRoute:p.webRoute,mode=p.loginMode;
+            try{TurnPart(card,route=="ssh"?1:-1,delegate{
+                Preferences.cards=Preferences.Sort(targets).Select(t=>Preferences.Get(t.Name)).ToList();
+                Preferences.Set(p.name,p.label,p.icon,targets,p.note,p.hideAddress);var next=Preferences.Get(p.name);
+                if(terminal)next.loginMode=cloud?"cloudcli":"web";if(cloud)next.cloudcliRoute=route;else next.webRoute=route;
+                SavePreferences();card.UpdatePreference(next);
+            });}catch{p.loginMode=mode;if(cloud)p.cloudcliRoute=previous;else p.webRoute=previous;Preferences.cards=before;card.UpdatePreference(p);Error("无法保存连接方式，请重试。");}SyncTray();
+        }
+        internal void SwitchLogin(TargetCard card){
+            ChooseApp(card,card.CloudActive?"ssh":card.SshActive?"web":"cloudcli");
         }
         internal void OpenTerminal(TargetCard card){
             Select(card);var login=card.Ssh;if(login==null){Error("还没有填写 SSH 信息，请编辑设备后再连接。");return;}

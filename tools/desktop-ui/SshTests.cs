@@ -10,6 +10,7 @@ using System.Windows.Forms;
 namespace CMCP {
     internal static class SshWebTests {
         internal static void Run(string root,Action<bool,string> check){
+            RouteTransfers(root,check);
             string directory=Path.Combine(root,"ssh-web-settings");Directory.CreateDirectory(directory);
             using(var page=new TargetEditorPage(new Target{Name="",Url=""},new CardPreference(),Palette.Create(true))){
                 page.HostInput.Box.Text="example.test";page.UserInput.Box.Text="user";page.WebTunnel.Checked=true;page.CloudTunnel.Checked=true;page.WebTunnelRemember.Checked=true;page.CloudTunnelRemember.Checked=true;page.WebTunnelPassword.Box.Text="WEB-SECRET";page.CloudTunnelPassword.Box.Text="CLOUD-SECRET";
@@ -27,9 +28,30 @@ namespace CMCP {
                 card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.CloudActive,"the application dropdown selects CloudCLI without connecting");
                 card.RouteChoice.Choose("ssh");Application.DoEvents();check(card.TunnelActive&&card.ConnectionName=="tunnel:cloudcli:"+card.Target.Name,"CloudCLI can select its own SSH route without a network request");
                 card.AppChoice.Choose("ssh");Application.DoEvents();bool terminalSsh=card.SshActive&&card.RouteChoice.Enabled&&card.RouteChoice.Value=="ssh"&&card.RouteChoice.DisplayOverride=="SSH";card.RouteChoice.Choose("url");Application.DoEvents();check(terminalSsh&&!card.SshActive&&!card.TunnelActive&&card.RouteChoice.Value=="url"&&!card.AppChoice.Choose("ssh"),"Terminal uses SSH but can return to a valid web application through the route menu");
-                card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.TunnelActive,"returning to an application restores its remembered connection route");
+                card.AppChoice.Choose("cloudcli");Application.DoEvents();check(!card.TunnelActive&&card.RouteChoice.Value=="url","switching web applications preserves the currently selected direct URL route");
                 form.OpenEditor(card.Target.Name);form.Editor.ShowWeb();Application.DoEvents();check(form.Editor.CurrentCategory=="网址登录"&&form.Editor.UrlInput.Visible&&form.Editor.CloudUrlInput.Visible,"the URL category holds both WebDesktop and CloudCLI");
                 form.Close();
+            }
+        }
+        static void RouteTransfers(string root,Action<bool,string> check){
+            string state=Path.Combine(root,"route-transfers"),kit=Path.Combine(state,"kit");Directory.CreateDirectory(kit);
+            File.WriteAllText(Path.Combine(state,"cloudpc-targets.json"),"[{\"name\":\"other\",\"url\":\"https://other.example.com\"},{\"name\":\"device\",\"url\":\"https://desktop.example.com\"}]");
+            var cloud=new CloudCliStore();cloud.Put(new CloudCliLogin{name="device",url="https://cli.example.com"});cloud.Save(state);
+            var ssh=new SshStore();ssh.Put(new SshLogin{name="device",host="example.test",username="user",webTunnel=true,cloudcliTunnel=true});ssh.Save(state);
+            using(var form=new Manager(false,state,kit)){
+                form.Show();Application.DoEvents();var card=form.Cards["device"];
+                card.RouteChoice.Choose("ssh");form.RefreshState();
+                bool first=UiPreferences.Load(state).Get("device").webRoute=="ssh";
+                card.AppChoice.Choose("cloudcli");form.RefreshState();var saved=UiPreferences.Load(state).Get("device");
+                check(first&&card.CloudActive&&card.TunnelActive&&card.RouteChoice.Value=="ssh"&&saved.loginMode=="cloudcli"&&saved.cloudcliRoute=="ssh"&&form.Preferences.cards[0].name=="other","selecting SSH before switching WebDesktop to CloudCLI preserves the tunnel, card order and saved preferences");
+                card.AppChoice.Choose("web");bool reverse=card.TunnelActive;card.RouteChoice.Choose("url");card.AppChoice.Choose("cloudcli");bool direct=!card.TunnelActive;card.AppChoice.Choose("web");
+                saved=UiPreferences.Load(state).Get("device");
+                check(reverse&&direct&&!card.TunnelActive&&saved.webRoute=="url"&&saved.cloudcliRoute=="url"&&!File.Exists(Path.Combine(state,"target-controls.json")),"both web applications retain the chosen SSH or URL transport in either direction without starting connections");
+                string before=File.ReadAllText(UiPreferences.PathFor(state));form.Preferences.ReadError=true;card.AppChoice.Choose("cloudcli");form.Preferences.ReadError=false;
+                check(!card.CloudActive&&!card.TunnelActive&&card.AppChoice.Value=="web"&&File.ReadAllText(UiPreferences.PathFor(state))==before,"a failed application save restores the selected application and transport without replacing saved preferences");
+            }
+            using(var form=new Manager(false,state,kit)){
+                form.Show();Application.DoEvents();var card=form.Cards["device"];if(card.CloudActive||card.TunnelActive)throw new InvalidDataException("Route transfer preferences did not survive restart");
             }
         }
     }
