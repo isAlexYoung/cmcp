@@ -82,7 +82,8 @@ export function createToolRegistry({stateDir,providers=[],instructions={},server
   function refreshRequested(){try{const s=fs.statSync(refreshFile(stateDir));const value=s.mtimeMs+':'+s.size;if(refreshStamp!==null&&value!==refreshStamp){refreshStamp=value;return true;}refreshStamp=value;}catch{}return false;}
   function onFiles(){
     clearTimeout(timer);timer=setTimeout(()=>{
-      if(refreshRequested()){for(const p of proxies.values())if(!p.tripped()||true){p.failures=[];warm(p);}}
+      // A manual refresh also gives tools suspended after repeated failures another chance.
+      if(refreshRequested())for(const p of proxies.values()){p.failures=[];warm(p);}
       check();
     },300);timer.unref?.();
   }

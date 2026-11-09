@@ -132,9 +132,13 @@ try{
   const removed=await call(instance,'/api/uninstall',{appPid:owner});
   check('uninstall is accepted',removed.status===200);
   check('uninstall reports no cloud failure',(await removed.json()).cloudFailed===0);
-  await waitFor('app and data removal',()=>!fs.existsSync(app)&&!fs.existsSync(state),90000);
+  // The data folder goes, except the user's local MCP tools (mcp-tools), which uninstalling keeps.
+  const dataGone=()=>{try{const names=fs.readdirSync(state);return names.length===1&&names[0]==='mcp-tools';}catch(error){return error.code==='ENOENT';}};
+  await waitFor('app and data removal',()=>!fs.existsSync(app)&&dataGone(),90000);
   await waitFor('app exit after uninstall',()=>!alive(owner)&&!alive(instance.pid),60000);
-  check('uninstall removes the app and its data',!fs.existsSync(app)&&!fs.existsSync(state));
+  check('uninstall removes the app and its data',!fs.existsSync(app)&&dataGone());
+  check('uninstall keeps the local MCP tools folder with its AGENT.md',fs.existsSync(path.join(state,'mcp-tools','AGENT.md')));
+  fs.rmSync(state,{recursive:true,force:true});
   check('uninstall removes stray update copies',!fs.existsSync(stray)&&leftovers('/Applications').length===0);
   check('uninstall stops the app',!alive(owner)&&!alive(instance.pid));
   check('uninstall leaves nothing beside the app',!fs.existsSync('/Applications/user'));
