@@ -72,6 +72,8 @@ chinesesimplified.UninstallCleaning=正在断开连接，并移除云电脑上�
 english.UninstallCleaning=Disconnecting and removing the configuration from cloud PCs...
 chinesesimplified.UninstallPartial=部分内容未能清理，例如某台云电脑上的配置或本机设置。程序文件仍会继续删除。
 english.UninstallPartial=Some items could not be cleaned up, such as configuration on a cloud PC or local settings. Program files will still be removed.
+chinesesimplified.UninstallKeptTools=已保留你的本机工具文件夹：%1%n不需要时可以手动删除。
+english.UninstallKeptTools=Your local tools folder was kept: %1%nDelete it yourself if you no longer need it.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:TaskDesktop}"; GroupDescription: "{cm:GroupShortcuts}"
@@ -97,9 +99,8 @@ Name: "{userprograms}\CMCP\{cm:UninstallLink}"; Filename: "{uninstallexe}"; Task
 [Run]
 Filename: "{app}\CMCP.exe"; Description: "{cm:LaunchNow}"; Flags: nowait postinstall skipifsilent
 
-[UninstallDelete]
-; Self-update adds files the install log does not know about. PrepareToInstall vetted this folder.
-Type: filesandordirs; Name: "{app}"
+; [UninstallDelete] is not used: self-update adds files the install log does not know about, so
+; RemoveProgramFolder deletes everything in the vetted folder except the user's mcp-tools.
 
 [Code]
 const
@@ -125,6 +126,7 @@ begin
   Result := CompareText(Copy(AddBackslash(Child), 1, Length(Prefix)), Prefix) = 0;
 end;
 
+// mcp-tools is the user's own folder of local MCP tools, which uninstalling keeps.
 function HasEntries(Dir: String): Boolean;
 var
   Found: TFindRec;
@@ -133,7 +135,7 @@ begin
   if FindFirst(AddBackslash(Dir) + '*', Found) then
   try
     repeat
-      if (Found.Name <> '.') and (Found.Name <> '..') then
+      if (Found.Name <> '.') and (Found.Name <> '..') and (CompareText(Found.Name, 'mcp-tools') <> 0) then
       begin
         Result := True;
         Exit;
@@ -238,11 +240,42 @@ begin
     SuppressibleMsgBox(CustomMessage('ChoicesFailed'), mbInformation, MB_OK, IDOK);
 end;
 
+procedure RemoveProgramFolder(App: String);
+var
+  Found: TFindRec;
+  Item: String;
+begin
+  if FindFirst(App + '\*', Found) then
+  try
+    repeat
+      Item := App + '\' + Found.Name;
+      if (Found.Name = '.') or (Found.Name = '..') or (CompareText(Found.Name, 'mcp-tools') = 0) then
+        Continue;
+      if Found.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
+        DelTree(Item, True, True, True)
+      else
+        DeleteFile(Item);
+    until not FindNext(Found);
+  finally
+    FindClose(Found);
+  end;
+  // Only succeeds when nothing was kept.
+  RemoveDir(App);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Code: Integer;
   App, Arguments, Value: String;
 begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    App := ExpandConstant('{app}');
+    RemoveProgramFolder(App);
+    if DirExists(App + '\mcp-tools') and not UninstallSilent() then
+      MsgBox(FmtMessage(CustomMessage('UninstallKeptTools'), [App + '\mcp-tools']), mbInformation, MB_OK);
+    Exit;
+  end;
   if CurUninstallStep <> usUninstall then Exit;
   App := ExpandConstant('{app}');
   Exec(App + '\CMCP.exe', '--exit', ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);

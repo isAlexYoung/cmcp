@@ -48,6 +48,12 @@ TRANSFER_TOOLS = [{"name": name, "description": description,
         ("mac_download_to_cloud", "Copy any binary file from Mac to an absolute path on this cloud computer (Linux). Streams 1 MiB chunks internally; returns size and SHA-256 without putting file bytes in chat."),
         ("mac_upload_from_cloud", "Copy any binary file from an absolute path on this cloud computer (Linux) to Mac. Supports MP4, audio, images, PDF, Office and archives. Validates SHA-256 before publishing."))]
 TRANSFER_NAMES = {tool["name"] for tool in TRANSFER_TOOLS}
+# Built-in tools that must be present, by the group that can switch them off on the PC.
+REQUIRED_TOOLS = {"read_text_file": "files", "write_file": "files", "list_allowed_directories": "files",
+                  "mac_execute": "commands", "mac_run_program": "commands", "mac_start_process": "processes",
+                  "mac_stop_process": "processes", "mac_toolchain_info": "toolchains", "mac_adb": "toolchains",
+                  "mac_screenshot": "desktop", "mac_binary_info": "files", "mac_binary_begin": "files",
+                  "mac_binary_write": "files", "mac_binary_finish": "files"}
 
 
 class Offline(Exception):
@@ -334,13 +340,17 @@ class Link:
                 if dialect.rstrip("#") != "https://json-schema.org/draft/2020-12/schema":
                     raise ValueError("Incompatible tool schema for %s.%s: %s" % (tool["name"], field, dialect))
         names = {tool["name"] for tool in tools}
-        required = {"read_text_file", "write_file", "list_allowed_directories", "mac_execute", "mac_run_program",
-                    "mac_start_process", "mac_stop_process", "mac_toolchain_info", "mac_adb",
-                    "mac_screenshot", "mac_binary_info", "mac_binary_begin", "mac_binary_write",
-                    "mac_binary_finish"}
+        meta = (second.get("result", {}).get("_meta") or {}).get("cmcp/catalog")
+        required = set(REQUIRED_TOOLS)
+        if isinstance(meta, dict) and meta.get("schema") == 1 and isinstance(meta.get("groups"), list):
+            # A PC with switchable tool groups: only the groups switched on must be complete.
+            required = {name for name, group in REQUIRED_TOOLS.items() if group in meta["groups"]}
         if not required.issubset(names):
             raise ValueError("The Mac runs an old tool version; missing: " + ", ".join(sorted(required - names)))
-        return {"instructions": first.get("result", {}).get("instructions") or DEFAULT_INSTRUCTIONS, "tools": tools}
+        catalog = {"instructions": first.get("result", {}).get("instructions") or DEFAULT_INSTRUCTIONS, "tools": tools}
+        if isinstance(meta, dict) and isinstance(meta.get("revision"), str):
+            catalog["revision"] = meta["revision"][:128]
+        return catalog
 
 
 def transfer_file(link, name, args):
@@ -432,7 +442,7 @@ def run_server(private):
         catalog = read_json(cache_file)
     except (OSError, ValueError):
         catalog = {"instructions": DEFAULT_INSTRUCTIONS, "tools": []}
-    state = {"catalog": catalog, "initialized": False, "refreshing": False}
+    state = {"catalog": catalog, "initialized": False, "refreshing": False, "again": False}
     output_lock = threading.Lock()
     state_lock = threading.Lock()
     slots = threading.BoundedSemaphore(8)
@@ -444,26 +454,67 @@ def run_server(private):
                 sys.stdout.flush()
 
     def tool_list():
-        return state["catalog"]["tools"] + TRANSFER_TOOLS
+        tools = state["catalog"]["tools"]
+        # File transfers run on the PC's binary tools, which go away with the files group.
+        if any(tool.get("name") == "mac_binary_info" for tool in tools):
+            return tools + TRANSFER_TOOLS
+        return tools
 
     def refresh():
-        # Keep the cached list current; tell Claude when the PC's tools changed.
+        # Keep the cached list current; tell Claude when the PC's tools changed. A change
+        # announced while a refresh runs makes it run once more.
         with state_lock:
             if state["refreshing"]:
+                state["again"] = True
                 return
             state["refreshing"] = True
         try:
-            fresh = link.fetch_catalog(wait=0)
-            if fresh != state["catalog"]:
-                changed = fresh["tools"] != state["catalog"]["tools"]
-                state["catalog"] = fresh
-                atomic_write(cache_file, encoded_json(fresh))
-                if changed and state["initialized"]:
-                    output({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
-        except Exception:
-            pass
+            while True:
+                state["again"] = False
+                try:
+                    fresh = link.fetch_catalog(wait=0)
+                    if fresh != state["catalog"]:
+                        changed = fresh["tools"] != state["catalog"]["tools"]
+                        state["catalog"] = fresh
+                        atomic_write(cache_file, encoded_json(fresh))
+                        if changed and state["initialized"]:
+                            output({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+                except Exception:
+                    pass
+                if not state["again"]:
+                    break
         finally:
             state["refreshing"] = False
+
+    def watch():
+        # The relay announces each change of the PC's tool catalog. An older relay does not
+        # know this request; the list then refreshes only when Claude connects or lists tools.
+        pause = 1
+        while True:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                sock.settimeout(60)
+                sock.connect(str(LINK_SOCKET))
+                sock.sendall((json.dumps({"id": 1, "op": "watch", "since": state["catalog"].get("revision")}) + "\n").encode())
+                stream = sock.makefile("rb")
+                first = json.loads(stream.readline(4096) or b"null")
+                if not isinstance(first, dict) or (not first.get("ok") and first.get("code") != "busy"):
+                    return
+                if first.get("ok"):
+                    pause = 1
+                    while True:
+                        raw = stream.readline(4096)
+                        if not raw:
+                            break
+                        event = json.loads(raw)
+                        if isinstance(event, dict) and event.get("event") == "catalog" and event.get("revision") != state["catalog"].get("revision"):
+                            threading.Thread(target=refresh, daemon=True).start()
+            except (OSError, ValueError):
+                pass
+            finally:
+                sock.close()
+            time.sleep(pause)
+            pause = min(pause * 2, 30)
 
     def process(message):
         method = message["method"]
@@ -476,6 +527,9 @@ def run_server(private):
                 "serverInfo": {"name": "mac-pc-files", "version": VERSION},
                 "instructions": state["catalog"].get("instructions") or DEFAULT_INSTRUCTIONS}})
             threading.Thread(target=refresh, daemon=True).start()
+            if not state.get("watching"):
+                state["watching"] = True
+                threading.Thread(target=watch, daemon=True).start()
             if not state.get("reported"):
                 state["reported"] = True
                 with contextlib.suppress(Exception):

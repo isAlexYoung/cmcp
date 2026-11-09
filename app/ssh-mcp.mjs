@@ -82,7 +82,7 @@ export class SshPipe extends EventEmitter {
   terminate(){this.close();}
 }
 
-export async function startSshMcp({key,login,ssh,env,forward,catalog,signal,status=()=>{},transport, retryDelay, heartbeatMs=5000, silenceMs=45000}) {
+export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,signal,status=()=>{},transport, retryDelay, heartbeatMs=5000, silenceMs=45000}) {
   const recovery=new RequestRecovery({limit:16384});
   let active=null,attempt=0,closed=false;
   const close=()=>{
@@ -97,8 +97,8 @@ export async function startSshMcp({key,login,ssh,env,forward,catalog,signal,stat
       const pipe=transport ? transport() : new SshPipe({ssh,login,env,payload:bootstrapPayload(key,catalog)});
       const link=active=new TerminalLink(null,{transport:pipe,startupTimeout:180000,relayErrorCode:'SSH_SETUP'});
       const failure=await new Promise(resolve=>{
-        let error,pending=0,lastPong=Date.now(),heartbeat;
-        const finish=()=>{clearInterval(heartbeat);resolve(error);};
+        let error,pending=0,lastPong=Date.now(),heartbeat,unsubscribe;
+        const finish=()=>{clearInterval(heartbeat);unsubscribe?.();resolve(error);};
         link.on('error',e=>{error=e;});
         link.once('close',code=>{if(code===4002)error=Object.assign(Error('SSH connection replaced'),{code:'SSH_REPLACED'});finish();});
         link.once('open',()=>link.send(JSON.stringify({t:'hello',machine:key,name:os.hostname(),version:'ssh-1',recovery:{protocol:1,epoch:recovery.epoch}})));
@@ -107,6 +107,8 @@ export async function startSshMcp({key,login,ssh,env,forward,catalog,signal,stat
           let message;try{message=JSON.parse(data);}catch{return;}
           if(message.t==='welcome') {
             attempt=0;lastPong=Date.now();status('ready','本机 MCP 已就绪；进入终端后输入 claude 即可使用');
+            // The relay passes catalog changes on to the cloud connector, which refreshes its list.
+            if(changes){const announce=revision=>{try{if(link.readyState===1)link.send(JSON.stringify({t:'catalog',revision}));}catch{}};announce(changes.revision());unsubscribe=changes.on('changed',announce);}
             heartbeat=setInterval(()=>{if(Date.now()-lastPong>silenceMs){link.terminate();return;}try{link.ping();}catch{link.terminate();}},heartbeatMs);
             return;
           }

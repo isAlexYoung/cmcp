@@ -38,3 +38,5 @@ node-extra-args.txt
 *.p12
 *.lnk
 /user/
+# The user's local MCP tools (beside user/ when running from source).
+/mcp-tools/

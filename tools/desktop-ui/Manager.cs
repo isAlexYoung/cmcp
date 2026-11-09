@@ -352,6 +352,7 @@ namespace CMCP {
                 DashboardTests.Run(temp, check);
                 BackendRestart.Test(temp,check);
                 SettingsTests.Run(temp,check);
+                ToolsPageTests.Run(temp,check);
                 TrayTests.Run(temp,check);
                 UpdateProgressTests.Run(temp,check);
                 CloudCliTests.Run(temp,check);SshWebTests.Run(temp,check);CloudCliSetupTests.Run(temp,check);

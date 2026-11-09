@@ -17,8 +17,13 @@ export function checkInstallation(bundle){
 export function removeInstallation({bundle,state,defaultState=DEFAULT_STATE,home=os.homedir()}){
   if(!path.isAbsolute(bundle)||!bundle.endsWith('.app'))throw Error('Application directory required');
   const failures=[],remove=file=>{try{fs.rmSync(file,{recursive:true,force:true});}catch(error){failures.push(error);}};
-  // CMCP_STATE_DIR may name a folder that also holds other files, so only the default folder is removed.
-  if(state===defaultState)remove(state);
+  // CMCP_STATE_DIR may name a folder that also holds other files, so only the default folder is
+  // emptied. The user's local MCP tools (mcp-tools) stay; the folder goes only when nothing is kept.
+  if(state===defaultState){
+    let names=[];try{names=fs.readdirSync(state);}catch{}
+    if(!names.includes('mcp-tools'))remove(state);
+    else for(const name of names)if(name!=='mcp-tools')remove(path.join(state,name));
+  }
   for(const name of ['Caches/'+identifier,'HTTPStorages/'+identifier,'HTTPStorages/'+identifier+'.binarycookies','WebKit/'+identifier,'Preferences/'+identifier+'.plist','Saved Application State/'+identifier+'.savedState'])remove(path.join(home,'Library',name));
   const shortcut=path.join(home,'Desktop','CMCP.app');
   try{if(fs.readlinkSync(shortcut)===bundle)fs.unlinkSync(shortcut);}catch{}

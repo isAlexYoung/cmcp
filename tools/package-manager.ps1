@@ -26,6 +26,7 @@ $required += @('app\request-recovery.mjs','app\manager-exit.ps1')
 $required += @('app\ssh-terminal.mjs','app\ssh-mcp.mjs','app\ssh-local-tools.mjs','app\ssh-bootstrap.py')
 $required += @('tools\desktop-ui\LocalToolTip.cs','tools\desktop-ui\ToolTipTests.cs')
 $required += @('tools\desktop-ui\UpdateProgress.cs','tools\desktop-ui\UpdateProgressTests.cs')
+$required += @('app\tool-registry.mjs','app\mcp-tools.mjs','app\mcp-proxy.mjs','app\mcp-tools-cli.mjs','app\mcp-tools-template\AGENT.md','app\mcp-tools-template\cmcp-tool.schema.json','tools\desktop-ui\ToolsPage.cs')
 foreach ($item in $required) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot $item))) { throw "缺少打包文件：$item" } }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($item in $items) { Copy-Item -LiteralPath (Join-Path $projectRoot $item) -Destination $destination -Recurse }

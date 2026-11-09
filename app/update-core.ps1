@@ -58,6 +58,8 @@ function Get-CmcpFiles([string]$Root,[bool]$SkipUser=$true) {
     $stack=New-Object 'Collections.Generic.Stack[string]';$stack.Push($Root)
     while ($stack.Count -gt 0) {
         foreach ($item in Get-ChildItem -LiteralPath $stack.Pop() -Force) {
+            # mcp-tools holds the user's own local MCP tools (it may even be a link): never part of the package.
+            if ($SkipUser -and $item.Name -ieq 'mcp-tools' -and $item.PSIsContainer -and [IO.Path]::GetDirectoryName($item.FullName) -ieq [IO.Path]::GetFullPath($Root).TrimEnd('\')) { continue }
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in installation' }
             if ($item.PSIsContainer) { if($item.Name -eq '.git'){throw 'Source checkout is protected'};if($SkipUser -and $item.Name -ieq 'user' -and $item.Parent.FullName -ieq [IO.Path]::GetFullPath($Root).TrimEnd('\')){continue};$stack.Push($item.FullName) } else {$item}
         }
@@ -69,7 +71,7 @@ function Test-CmcpTree([string]$Root,[string]$Version='',[scriptblock]$Progress=
     $data=Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($data.schema -ne 1 -or $data.platform -cne 'windows-x64' -or ($Version -and $data.version -cne $Version)) { throw 'Wrong distribution manifest' }
     $null=Get-CmcpVersion $data.version
-    $inventory=@{};foreach($entry in $data.files){$null=Test-CmcpRelative $entry.path;if($entry.path -match '^(?i:user)(/|$)' -or $entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $inventory.ContainsKey($entry.path)){throw 'Invalid manifest entry'};$inventory[$entry.path]=$entry.sha256}
+    $inventory=@{};foreach($entry in $data.files){$null=Test-CmcpRelative $entry.path;if($entry.path -match '^(?i:user|mcp-tools)(/|$)' -or $entry.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $inventory.ContainsKey($entry.path)){throw 'Invalid manifest entry'};$inventory[$entry.path]=$entry.sha256}
     foreach($required in @('CMCP.exe','app/package.json','app/runtime/node.exe','app/update.ps1','app/update-core.ps1','app/update-apply.ps1','app/manager-restart.ps1')){if(!$inventory.ContainsKey($required)){throw 'Incomplete package'}}
     $seen=@{};$watch=[Diagnostics.Stopwatch]::StartNew();if($Progress){& $Progress 0 $inventory.Count};foreach($item in Get-CmcpFiles $full){$relative=$item.FullName.Substring($full.Length+1).Replace('\','/');if($relative -ceq 'app/distribution-manifest.json'){continue};if(!$inventory.ContainsKey($relative) -or (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inventory[$relative]){throw 'Installation contains unknown or modified files; download manually'};$seen[$relative]=$true;if($Progress -and $watch.ElapsedMilliseconds -ge 250){& $Progress $seen.Count $inventory.Count;$watch.Restart()}}
     if($Progress){& $Progress $seen.Count $inventory.Count}
@@ -86,7 +88,7 @@ function Expand-CmcpPackage([string]$Zip,[string]$Destination,[string]$Version,[
         $prefix='CMCP-'+$Version+'-windows-x64/';$seen=@{};$size=0L
         # Validate every entry before writing any bytes.
         foreach($entry in $archive.Entries){$path=$entry.FullName;if(!$path.StartsWith($prefix,[StringComparison]::Ordinal)){throw 'Wrong ZIP root'};$relative=$path.Substring($prefix.Length).TrimEnd('/');if(!$relative){continue};$null=Test-CmcpRelative $relative;if($seen.ContainsKey($relative)){throw 'Duplicate ZIP path'};$seen[$relative]=$true;$type=($entry.ExternalAttributes -shr 16) -band 0xF000;if($type -eq 0xA000 -or ($entry.ExternalAttributes -band 0x400)){throw 'ZIP links are forbidden'};$size+=$entry.Length;if($entry.Length -gt 268435456 -or $size -gt 1073741824){throw 'Uncompressed package limit'}}
-        foreach($entry in $archive.Entries){if($entry.FullName.Substring($prefix.Length) -match '^(?i:user)(/|$)'){throw 'Package cannot contain user data'}}
+        foreach($entry in $archive.Entries){if($entry.FullName.Substring($prefix.Length) -match '^(?i:user|mcp-tools)(/|$)'){throw 'Package cannot contain user data'}}
         $null=New-Item -ItemType Directory -Path $Destination
         $done=0L;$watch=[Diagnostics.Stopwatch]::StartNew();if($Progress){& $Progress 0 $size}
         foreach($entry in $archive.Entries){$relative=$entry.FullName.Substring($prefix.Length);if(!$relative){continue};$target=Join-Path $Destination $relative.Replace('/','\');if($relative.EndsWith('/')){$null=New-Item -ItemType Directory -Path $target -Force;continue};$null=New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force;$sourceStream=$entry.Open();$output=New-Object IO.FileStream($target,[IO.FileMode]::CreateNew);try{$sourceStream.CopyTo($output)}finally{$output.Dispose();$sourceStream.Dispose()};$done+=$entry.Length;if($Progress -and $watch.ElapsedMilliseconds -ge 250){& $Progress $done $size;$watch.Restart()}}
@@ -114,12 +116,14 @@ function Invoke-CmcpSwap([string]$Install,[string]$Staged,[string]$Backup,[scrip
     # Paths are validated by caller; the backup never overwrites an existing folder.
     if(Test-Path -LiteralPath $Backup){throw 'Backup path already exists'}
     $user=Join-Path $Install 'user';$savedUser=Join-Path $Backup 'user'
-    if(Test-Path -LiteralPath (Join-Path $Staged 'user')){throw 'Staged package contains user data'}
+    # The user's local MCP tools move with the installation exactly like the user folder.
+    $tools=Join-Path $Install 'mcp-tools';$savedTools=Join-Path $Backup 'mcp-tools'
+    if((Test-Path -LiteralPath (Join-Path $Staged 'user')) -or (Test-Path -LiteralPath (Join-Path $Staged 'mcp-tools'))){throw 'Staged package contains user data'}
     if((Test-Path -LiteralPath $user) -and ((Get-Item -LiteralPath $user -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Unsafe user directory'}
     [IO.Directory]::Move($Install,$Backup)
     $placed=$false;$process=$null
-    try{[IO.Directory]::Move($Staged,$Install);$placed=$true;if([IO.Directory]::Exists($savedUser)){[IO.Directory]::Move($savedUser,$user)};$process=& $Start $Install;if(!(& $Healthy $process)){throw 'New application did not become healthy'};return $true}
-    catch{if($process){try{& $StopFailed $process}catch{}};if($placed){if([IO.Directory]::Exists($user)){[IO.Directory]::Move($user,$savedUser)};[IO.Directory]::Move($Install,$Staged)};[IO.Directory]::Move($Backup,$Install);$null=& $Start $Install;throw}
+    try{[IO.Directory]::Move($Staged,$Install);$placed=$true;if([IO.Directory]::Exists($savedUser)){[IO.Directory]::Move($savedUser,$user)};if([IO.Directory]::Exists($savedTools)){[IO.Directory]::Move($savedTools,$tools)};$process=& $Start $Install;if(!(& $Healthy $process)){throw 'New application did not become healthy'};return $true}
+    catch{if($process){try{& $StopFailed $process}catch{}};if($placed){if([IO.Directory]::Exists($user)){[IO.Directory]::Move($user,$savedUser)};if([IO.Directory]::Exists($tools)){[IO.Directory]::Move($tools,$savedTools)};[IO.Directory]::Move($Install,$Staged)};[IO.Directory]::Move($Backup,$Install);$null=& $Start $Install;throw}
 }
 
 function Complete-CmcpUpdate([string]$Install,[string]$Backup,[string]$Transaction) {
@@ -129,12 +133,12 @@ function Complete-CmcpUpdate([string]$Install,[string]$Backup,[string]$Transacti
     $isLegacy=[IO.Path]::GetDirectoryName($Transaction) -ieq $legacyUpdates -and [IO.Path]::GetFileName($Transaction) -cmatch '^[a-f0-9]{32}$'
     if(!$isLegacy -and ([IO.Path]::GetDirectoryName($Transaction) -ine $parent -or [IO.Path]::GetFileName($Transaction) -cnotmatch '^\.cmcp-update-[a-f0-9]{32}$')){throw 'Invalid cleanup transaction'}
     $null=Test-CmcpTree $Backup
-    if(Test-Path -LiteralPath (Join-Path $Backup 'user')){throw 'Backup still contains user data'}
+    if((Test-Path -LiteralPath (Join-Path $Backup 'user')) -or (Test-Path -LiteralPath (Join-Path $Backup 'mcp-tools'))){throw 'Backup still contains user data'}
     $record=Join-Path $installFull 'user\update-backup.json';$previous=$null
     if(Test-Path -LiteralPath $record){try{$previous=Get-Content -LiteralPath $record -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
     if($previous -and $previous.installRoot -ieq $installFull -and $previous.backup -ine $Backup -and [IO.Path]::GetDirectoryName($previous.backup) -ieq $parent -and [IO.Path]::GetFileName($previous.backup) -cmatch '^\.cmcp-backup-[a-f0-9]{32}$' -and (Test-Path -LiteralPath $previous.backup)){
         $null=Test-CmcpTree $previous.backup
-        if(Test-Path -LiteralPath (Join-Path $previous.backup 'user')){throw 'Previous backup contains user data'}
+        if((Test-Path -LiteralPath (Join-Path $previous.backup 'user')) -or (Test-Path -LiteralPath (Join-Path $previous.backup 'mcp-tools'))){throw 'Previous backup contains user data'}
         Remove-Item -LiteralPath $previous.backup -Recurse -Force
     }
     [IO.File]::WriteAllText($record,(@{installRoot=$installFull;backup=$Backup}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))

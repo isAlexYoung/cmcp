@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "name": "Hello (example)",
+  "description": "Example tool: says hello. Copy this folder without the leading underscore to try it.",
+  "version": "1.0.0",
+  "transport": "stdio",
+  "command": "node",
+  "args": ["server.mjs"],
+  "capabilities": [],
+  "lifecycle": "on-demand"
+}

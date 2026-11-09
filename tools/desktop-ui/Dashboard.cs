@@ -75,7 +75,7 @@ namespace CMCP {
             if(!isolated){
                 RunUninstall=()=>{using(var process=Actions.Start(kit,"uninstall","")){process.WaitForExit();return process.ExitCode;}};
             FindUninstaller=isolated?(Func<string>)(()=>null):(()=>Installation.Uninstaller(AppDomain.CurrentDomain.BaseDirectory));
-                ConfirmUninstall=()=>MessageBox.Show(this,L.Text("确定要卸载 CMCP 吗？\r\n\r\n将断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。"),Text,MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)==DialogResult.Yes;
+                ConfirmUninstall=()=>MessageBox.Show(this,L.Text("确定要卸载 CMCP 吗？\r\n\r\n将断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。mcp-tools 文件夹会保留。"),Text,MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)==DialogResult.Yes;
             }
             Options=demo?new AppSettings():AppSettings.Load(isolated?stateDirectory:PortableState.PreferencesPath,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
@@ -95,6 +95,8 @@ namespace CMCP {
             updates=new UpdateController(root,stateDirectory,isolated,SetUpdateStatus,delegate{exiting=true;Close();},SetUpdateProgress,
                 version=>MessageBox.Show(this,String.Format(L.Text("CMCP {0} 已下载并通过校验。\r\n\r\n现在安装并重启吗？安装时会短暂断开全部连接；选择“否”可稍后安装。"),version),"CMCP",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)==DialogResult.Yes);
             updateCheck.Tick+=delegate{updateCheck.Interval=6*60*60*1000;updates.Check(false);};if(!isolated)updateCheck.Start();
+            // Blender is off by default; once the window is on screen, offer it if Blender is installed.
+            if(!isolated){bool offered=false;VisibleChanged+=delegate{if(Visible&&!offered){offered=true;BlenderOffer.Check(this,new CliToolBackend(kit,stateDirectory));}};}
             list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
@@ -147,7 +149,7 @@ namespace CMCP {
             Options=next;Preferences.dark=next.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);L.Set(next.language);
             foreach(var card in Cards.Values)card.RefreshTarget(card.Target);RefreshState();ApplyTheme();
         }
-        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);Settings.AnimateContent=TurnPart;Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion,updates.Prepared,updates.Busy,updates.Checking);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});updates.Check(false);}
+        internal void OpenSettings(){if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;Turn(1,delegate{Settings=new SettingsPage(Options.Copy(),colors,ChangeSettings,SettingsAction);if(!isolated)Settings.Tools=new CliToolBackend(kit,stateDirectory);Settings.AnimateContent=TurnPart;Settings.SetUpdateAvailable(updates.Available,updates.AvailableVersion,updates.Prepared,updates.Busy,updates.Checking);Settings.SetUpdateStatus(updates.Status);Settings.SetUpdateProgress(updates.Progress);Settings.BackRequested+=CloseSettings;content.Visible=toolbar.Visible=false;Controls.Add(Settings);Settings.BringToFront();});updates.Check(false);}
         internal void CloseSettings(){if(Settings==null)return;Turn(-1,delegate{var old=Settings;Settings=null;Controls.Remove(old);old.Dispose();content.Visible=toolbar.Visible=true;Arrange();ScrollOffset=editorScroll;});}
         internal SnapshotOverlay Transition;
         internal Control.ControlCollection ContentControls{get{return content.Controls;}}

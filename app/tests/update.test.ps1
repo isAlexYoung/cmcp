@@ -42,12 +42,15 @@ try{
     $badZip=Join-Path $temporary 'bad.zip';$archive=[IO.Compression.ZipFile]::Open($badZip,[IO.Compression.ZipArchiveMode]::Create);try{$null=$archive.CreateEntry('CMCP-4.2.0-windows-x64/../../escape.txt')}finally{$archive.Dispose()};$badStage=Join-Path $temporary 'bad-stage';Reject {Expand-CmcpPackage $badZip $badStage '4.2.0'} 'ZIP traversal rejected before extraction';Check (!(Test-Path -LiteralPath $badStage)) 'unsafe ZIP never creates extraction directory'
     $duplicateZip=Join-Path $temporary 'duplicate.zip';$archive=[IO.Compression.ZipFile]::Open($duplicateZip,[IO.Compression.ZipArchiveMode]::Create);try{$null=$archive.CreateEntry('CMCP-4.2.0-windows-x64/A.txt');$null=$archive.CreateEntry('CMCP-4.2.0-windows-x64/a.txt')}finally{$archive.Dispose()};Reject {Expand-CmcpPackage $duplicateZip $badStage '4.2.0'} 'case-insensitive duplicate ZIP paths rejected'
     $credentials=Join-Path $temporary 'credential-state.json';[IO.File]::WriteAllText($credentials,'CIPHER-BYTES-UNCHANGED');$credentialHash=(Get-FileHash -LiteralPath $credentials).Hash
+    $tools=Join-Path $install 'mcp-tools\mine';$null=New-Item -ItemType Directory -Path $tools -Force;[IO.File]::WriteAllText((Join-Path $tools 'cmcp-tool.json'),'{"schema":1}');Check ((Test-CmcpTree $install).version -eq '4.1.0') 'the local MCP tools folder never blocks an update check'
     $backup=Join-Path $temporary 'backup';$start={param($path)return $path};$ok={param($process)return $true};$stop={param($process)}
     Check (Invoke-CmcpSwap $install $stage $backup $start $ok $stop) 'verified transaction replaces installation'
     Check ((Test-CmcpTree $install).version -eq '4.2.0' -and (Test-CmcpTree $backup).version -eq '4.1.0') 'successful update retains previous package as backup'
+    Check ((Test-Path -LiteralPath (Join-Path $install 'mcp-tools\mine\cmcp-tool.json')) -and !(Test-Path -LiteralPath (Join-Path $backup 'mcp-tools'))) 'local MCP tools move to the new version, not into the backup'
     $stage2=Join-Path $temporary 'new2';Write-Tree $stage2 '4.3.0';$backup2=Join-Path $temporary 'backup2';$unhealthy={param($process)return $false}
     Reject {Invoke-CmcpSwap $install $stage2 $backup2 $start $unhealthy $stop} 'failed startup triggers rollback'
     Check ((Test-CmcpTree $install).version -eq '4.2.0' -and !(Test-Path -LiteralPath $backup2)) 'rollback restores previous working package'
+    Check (Test-Path -LiteralPath (Join-Path $install 'mcp-tools\mine\cmcp-tool.json')) 'rollback keeps the local MCP tools'
     Check ((Get-FileHash -LiteralPath $credentials).Hash -eq $credentialHash) 'update and rollback preserve per-user credential bytes'
     Reject {Invoke-CmcpSwap $install $stage2 $backup $start $ok $stop} 'existing backup is never overwritten'
     $cleanupError={param($process)throw 'simulated cleanup error'}

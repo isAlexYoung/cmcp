@@ -13,7 +13,10 @@ import {fileURLToPath} from 'node:url';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+// The tool folder of these temporary installs stays inside the test's own folders.
+process.env.CMCP_MCP_TOOLS_DIR=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-blender-tools-'));
 const content=result=>JSON.parse(result.content[0].text);
+const enableBlender=directory=>fs.writeFileSync(path.join(directory,'tool-settings.json'),JSON.stringify({schema:1,groups:{blender:true}}));
 async function addon(t,handle){
   const requests=[],sockets=new Set();
   const server=net.createServer(s=>{sockets.add(s);s.on('close',()=>sockets.delete(s));s.on('error',()=>{});let body='';s.on('data',data=>{
@@ -108,7 +111,7 @@ test('closing the connector aborts sockets and reports uncertain jobs instead of
 
 test('SSH dispatcher exports and calls Blender tools alongside the existing filesystem tools',{skip:!['win32','darwin'].includes(process.platform)},async t=>{
   const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-blender-dispatch-')));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
-  fs.writeFileSync(path.join(directory,process.platform==='darwin'?'targets.json':'config.json'),JSON.stringify({roots:[directory],targets:[]}));
+  fs.writeFileSync(path.join(directory,process.platform==='darwin'?'targets.json':'config.json'),JSON.stringify({roots:[directory],targets:[]}));enableBlender(directory);
   const a=await addon(t,(cmd,s)=>reply(s,{name:'Blender over SSH',type:cmd.type})),dispatcher=await createSshDispatcher(directory);t.after(()=>dispatcher.close());
   const forward=(method,params)=>dispatcher.forward({jsonrpc:'2.0',id:1,method,params});
   const listing=await forward('tools/list');assert.ok(listing.result.tools.some(d=>d.name==='blender_execute_code'));assert.ok(listing.result.tools.some(d=>d.name==='read_text_file'));
@@ -119,7 +122,7 @@ test('SSH dispatcher exports and calls Blender tools alongside the existing file
 
 test('Windows web MCP endpoint routes scene, script jobs and images through the real SDK',{skip:process.platform!=='win32',timeout:25000},async t=>{
   const directory=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-blender-web-'))),token='b'.repeat(64);
-  fs.writeFileSync(path.join(directory,'config.json'),JSON.stringify({roots:[directory],token}));
+  fs.writeFileSync(path.join(directory,'config.json'),JSON.stringify({roots:[directory],token}));enableBlender(directory);
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAZkAAAAASUVORK5CYII=','base64');
   const a=await addon(t,(cmd,s)=>{if(cmd.type==='get_viewport_screenshot'){fs.writeFileSync(cmd.params.filepath,png);reply(s,{});}else reply(s,{name:'Web MCP scene',executed:true,result:cmd.params.code});});
   const child=spawn(process.execPath,[fileURLToPath(new URL('../server.mjs',import.meta.url))],{env:{...process.env,CMCP_STATE_DIR:directory},windowsHide:true,stdio:['ignore','pipe','pipe']});

@@ -12,6 +12,7 @@ import {execFileSync} from 'node:child_process';
 import {sshArguments,sshConnectorName,sshExitCode,SshPipe,startSshMcp,bootstrapPayload,remoteCommand,sharedSessionHandoff} from '../ssh-mcp.mjs';
 import {workerPaths,runWorker,queryWorker,ensureSshWorker,stopSshWorkers,readSshLogin} from '../ssh-terminal.mjs';
 import {sshRoots,createSshDispatcher} from '../ssh-local-tools.mjs';
+process.env.CMCP_MCP_TOOLS_DIR??=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-ssh-tools-'));
 
 const login={host:'203.0.113.2',port:2222,username:'root',method:'password',secret:'ENCRYPTED-PLACEHOLDER'};
 async function until(check){const start=Date.now();while(!await check()){if(Date.now()-start>5000)throw Error('condition timeout');await delay(10);}}

@@ -23,18 +23,21 @@ import {currentInstallation} from './uninstall.mjs';
 import {closeSessions,detectTerminals,openTerminal} from './ssh.mjs';
 import {closePages,detectBrowsers,openPage} from './browsers.mjs';
 import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../app/ssh-terminal.mjs';
+import {status as toolStatus,set as setTools,importText,remove as removeTool} from '../app/mcp-tools-cli.mjs';
+import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
+import {spawn} from 'node:child_process';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate,startChannel,setupCloudcli=runSetup}={}){
+export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate,startChannel,setupCloudcli=runSetup,toolSecrets}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
-  const dispatcher=injected||await createDispatcher({roots:store.config.roots});
+  const dispatcher=injected||await createDispatcher({roots:store.config.roots,stateDir:directory});
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
   let machine;try{machine=fs.readFileSync(machineFile,'utf8').trim();if(!/^[a-f0-9-]{36}$/.test(machine))throw Error();}catch{machine=randomUUID();atomicWrite(machineFile,machine);}
   const status={set(name,state,message){if(state==='password')message='保存的密码不正确或不可用。请停止此连接后编辑密码。';states[name]={state,message,at:new Date().toISOString(),clients:states[name]?.clients};},clients(name,value){if(states[name])states[name].clients=value;}};
   const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);const recovery=/\] ((?:web (?:document|api|asset) (?:(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) attempt=[1-5] code=(?:ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|HTTP_50[234]) tls=(?:true|false)|recovered attempts=[2-5]|cache hit|failed code=NON_TRANSIENT))|heartbeat (?:delayed; retaining connection|recovered without reconnect))$/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+(recovery?recovery[1]:name[2]):'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
   const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
-    create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:webTunnelEnvironment(login,directory)});},proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,
+    create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:webTunnelEnvironment(login,directory)});},proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,catalog:dispatcher.registry,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),onCloudcliKind:(id,kind)=>recordCloudcliKind(directory,id,kind),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   // The device's background SSH channel, as a terminal would start it, but with no window.
@@ -104,6 +107,17 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     // The sudo password goes straight into this run and is not kept once it has been handed on.
     '/api/targets/cloudcli-setup/answer':async input=>{const s=setups.get(input.id);if(s?.phase!=='confirm'||!s.answer)throw Error('没有等待确认的初始化');if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length>1024))throw Error('密码无效');const answer=s.answer;s.answer=null;s.phase=input.ok===true?'running':'checking';answer({ok:input.ok===true,password:input.password});return setupView(input.id);},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
+    // Settings > Tools: one set of switches for this Mac, shared by every connection.
+    '/api/tools':async()=>toolStatus(directory),
+    '/api/tools/set':async input=>{setTools(directory,{group:input.group,tool:input.tool,on:input.on===true,idle:input.idle,'blender-offer-done':input.blenderOfferDone===true});return {saved:true};},
+    '/api/tools/refresh':async()=>{requestRefresh(directory);return {refreshed:true};},
+    '/api/tools/import':async input=>{if(typeof input.text!=='string'||input.text.length>256*1024)throw Error('粘贴的内容无效');return importText(directory,input.text,{apply:input.apply===true,...toolSecrets?{secrets:toolSecrets}:{}});},
+    '/api/tools/remove':input=>removeTool(directory,input.id),
+    '/api/tools/open':async input=>{
+      const target=input.what==='folder'?toolsRoot(directory):typeof input.id==='string'&&ID.test(input.id)?toolLogFile(directory,input.id):null;
+      if(!target||!fs.existsSync(target))throw Error(input.what==='folder'?'mcp-tools 文件夹不存在':'这个工具还没有日志。');
+      spawn('/usr/bin/open',input.what==='folder'?[target]:['-t',target],{stdio:'ignore',detached:true}).on('error',()=>{}).unref();return {opened:true};
+    },
     '/api/update/check':async()=>{
       if(updating)return updates;if(checking)return checking;
       checking=(async()=>{try{
