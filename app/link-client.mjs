@@ -152,7 +152,7 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
-export function startLink({ name, target, machine, version, forward, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={},onHealth,preparationCache }) {
+export function startLink({ name, target, machine, version, forward, catalog, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={},onHealth,preparationCache }) {
   const interval=healthOptions.interval??1000,timeout=healthOptions.timeout??5000,hardTimeout=healthOptions.hardTimeout??30000;
   if(!Number.isFinite(interval)||!Number.isFinite(timeout)||interval<50||timeout<interval*2||timeout>60000||!Number.isFinite(hardTimeout)||hardTimeout<timeout+interval||hardTimeout>120000)throw Error('Invalid connection health policy');
   let stopped = false;
@@ -209,9 +209,11 @@ export function startLink({ name, target, machine, version, forward, askPassword
       let sessionChanged = false;
       let finished = false;
       let pending = 0;
+      let unsubscribe = null;
       const finish = result => {
         if (finished) return;
         finished = true;
+        unsubscribe?.();
         clearInterval(heartbeat);
         clearTimeout(welcomeTimer);
         clearInterval(sessionWatcher);
@@ -256,6 +258,12 @@ export function startLink({ name, target, machine, version, forward, askPassword
         if (m.t === 'welcome') {
           if (welcomed) return;
           welcomed = true; clearTimeout(welcomeTimer);
+          // Only CMCP's own relay knows catalog events; it tells the cloud connector to refresh.
+          if (terminal && catalog) {
+            const announce = revision => { try { if (!finished && !stopped && ws.readyState === 1) ws.send(JSON.stringify({ t: 'catalog', revision })); } catch {} };
+            announce(catalog.revision());
+            unsubscribe = catalog.on('changed', announce);
+          }
           if(onConnected){say('configuring','连接已建立，正在验证工具链路');Promise.resolve().then(()=>onConnected(auth)).then(result=>{
             if(!finished&&!stopped&&result?.statusHandled!==true&&result!==false)say('connected',terminal?'已连接（兼容模式）':'已连接');
           }).catch(()=>{if(!finished&&!stopped)say('config-error','连接已建立，但工具配置未确认');});}

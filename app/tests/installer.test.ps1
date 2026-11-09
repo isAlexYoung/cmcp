@@ -1,4 +1,4 @@
-# Real install, upgrade, refusal and uninstall. Touches the signed-in account, so it only runs on CI machines.
+﻿# Real install, upgrade, refusal and uninstall. Touches the signed-in account, so it only runs on CI machines.
 param([Parameter(Mandatory=$true)][string]$Setup,[Parameter(Mandatory=$true)][string]$Version,[Parameter(Mandatory=$true)][string]$EvidenceDirectory)
 $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true'){throw 'CI machines only: this installs, stops and removes real CMCP processes.'}
@@ -43,9 +43,11 @@ Check ((ShortcutTarget (Join-Path $menu 'CMCP.lnk')) -ieq $exe) 'the Start menu 
 # Upgrade over it with every choice cleared.
 $stale=Join-Path $root 'app\stale.txt';[IO.File]::WriteAllText($stale,'old')
 $kept=Join-Path $root 'user\kept.txt';[IO.File]::WriteAllText($kept,'mine')
+$tool=Join-Path $root 'mcp-tools\mine\cmcp-tool.json';$null=New-Item -ItemType Directory -Path (Split-Path $tool) -Force;[IO.File]::WriteAllText($tool,'{"schema":1}')
 Check ((Install $root '') -eq 0) 'installing over an existing copy succeeds'
 Check (!(Test-Path -LiteralPath $stale)) 'files from the old version do not survive'
 Check ((Test-Path -LiteralPath $kept)) 'user data survives'
+Check ((Test-Path -LiteralPath $tool)) 'the local MCP tools folder survives an upgrade'
 Check ((Test-CmcpTree $root $Version).version -ceq $Version) 'the upgraded folder still matches the manifest'
 Check ($null -eq (StartupValue)) 'clearing the startup choice removes the entry'
 Check ((Preferences).autoStart -eq $false) 'clearing the startup choice reaches the settings page value'
@@ -76,10 +78,19 @@ Check ((Start-Process -FilePath $exe -ArgumentList '--exit' -PassThru -Wait).Exi
 # Uninstall. The uninstaller hands over to a temporary copy of itself, so wait for its result.
 $null=Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
 $deadline=[DateTime]::UtcNow.AddSeconds(180)
-while([DateTime]::UtcNow -lt $deadline -and ((Test-Path -LiteralPath $root) -or (Registered) -or (Test-Path -LiteralPath $uninstaller))){Start-Sleep -Seconds 1}
-Check (!(Test-Path -LiteralPath $root)) 'uninstall removes the program folder and user data'
+$remaining={@(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue|ForEach-Object Name)}
+while([DateTime]::UtcNow -lt $deadline -and ((@(& $remaining) -join '|') -ne 'mcp-tools' -or (Registered) -or (Test-Path -LiteralPath $uninstaller))){Start-Sleep -Seconds 1}
+Check ((@(& $remaining) -join '|') -eq 'mcp-tools') 'uninstall removes the program folder and user data'
+Check ((Test-Path -LiteralPath $tool)) 'uninstall keeps the local MCP tools folder'
 Check ($null -eq (Registered)) 'Windows no longer lists CMCP'
 Check ($null -eq (StartupValue)) 'uninstall removes the startup entry'
 Check (!(Test-Path -LiteralPath $desktop) -and !(Test-Path -LiteralPath $menu)) 'uninstall removes the shortcuts'
 Check (!(Test-Path -LiteralPath $uninstaller)) 'uninstall removes itself'
+# The kept folder does not block installing there again, and is still kept afterwards.
+Check ((Install $root '') -eq 0 -and (Test-Path -LiteralPath $tool)) 'installing into a folder that only holds mcp-tools succeeds'
+$uninstaller=([string](Registered).UninstallString).Trim('"')
+$null=Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
+$deadline=[DateTime]::UtcNow.AddSeconds(180)
+while([DateTime]::UtcNow -lt $deadline -and ((Registered) -or (Test-Path -LiteralPath $uninstaller))){Start-Sleep -Seconds 1}
+Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 [ordered]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks}|ConvertTo-Json

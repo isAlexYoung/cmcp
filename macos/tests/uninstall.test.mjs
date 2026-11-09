@@ -31,6 +31,13 @@ test('uninstall removes the application, its data, earlier update copies and its
   for(const gone of [bundle,state,...copies,...generated,path.join(home,'Desktop/CMCP.app')])assert.equal(fs.existsSync(gone)||fs.lstatSync(gone,{throwIfNoEntry:false})!==undefined,false,gone);
   for(const file of neighbours)assert.equal(fs.existsSync(file),true,file);
 });
+test('uninstall keeps the user\'s local MCP tools and removes everything else of the data folder',t=>{
+  const d=directory(t),{bundle,home,state}=fixture(d);
+  put(path.join(state,'mcp-tools/mine/cmcp-tool.json'),'{"schema":1}');put(path.join(state,'tool-secrets/mine.json'));put(path.join(state,'tool-settings.json'));
+  removeInstallation({bundle,state,defaultState:state,home});
+  assert.deepEqual(fs.readdirSync(state),['mcp-tools']);assert.equal(fs.existsSync(path.join(state,'mcp-tools/mine/cmcp-tool.json')),true);
+  assert.equal(fs.existsSync(bundle),false);
+});
 test('a shortcut to another application and an overridden data folder are left alone',t=>{
   const d=directory(t),{bundle,home,state}=fixture(d),other=path.join(d,'other/CMCP.app');
   put(path.join(other,'file'));fs.mkdirSync(path.join(home,'Desktop'));fs.symlinkSync(other,path.join(home,'Desktop/CMCP.app'));

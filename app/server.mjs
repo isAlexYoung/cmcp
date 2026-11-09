@@ -14,6 +14,7 @@ import { compatibleToolDefinitions } from './tool-schemas.mjs';
 import { createWindowsTools } from './windows-tools.mjs';
 import { createBinaryTools } from './binary-tools.mjs';
 import { createBlenderTools, blenderInstructions } from './blender-tools.mjs';
+import { createToolRegistry } from './tool-registry.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import net from 'node:net';
@@ -92,14 +93,19 @@ try {
   throw error;
 }
 const backendTools = compatibleToolDefinitions(await backend.listTools());
+const instructions = `These tools operate on the user's physical Windows PC. File roots: ${config.roots.join(', ')}. Use absolute Windows paths such as D:\\work\\my-project. To run commands on that Windows PC, use windows_execute (PowerShell/CMD), windows_run_program (an installed executable), or windows_start_process (background work). Read output with windows_process_status and stop managed jobs with windows_stop_process. Use windows_toolchain_info to discover installed C/C++, CMake, Node, Python, Java, Android and other tools. Use windows_adb or windows_adb_devices for Android devices. Use windows_browser_open for local web previews, windows_screenshot for visual checks, and windows_desktop_action for basic interactive Windows GUI input. For MP4, MP3, WAV, PDF, Office, ZIP and other binary files use windows_binary_info plus the chunked windows_binary_begin/write/finish tools; do not put whole files in text or in the cloud computer's Bash. These tools run as the current Windows account without automatic elevation. Bash and terminals built into this cloud computer run on Linux; use the windows_* MCP tools for Windows work. Session IDs belong to the Windows bridge. Other applications' or other agents' private connector tools are not automatically exported.`;
+// Built-in groups and the user's mcp-tools behind one catalog; switches apply to every connection.
+const filesystem = { definitions: backendTools.tools, call: (name, args) => backend.callTool({ name, arguments: args }, undefined, { timeout: 120000 }) };
+const registry = createToolRegistry({ stateDir, providers: [filesystem, windows, binary, blender], serverName: 'windows-pc-files', version: bridgeVersion,
+  instructions: { base: instructions, blender: blenderInstructions }, watch: !selfTest, log: text => log('tools: ' + text) });
 if (selfTest) {
-  const total = backendTools.tools.length + windows.definitions.length + binary.definitions.length + blender.definitions.length;
-  process.stdout.write(`SELFTEST-OK ${total} tools; node ${process.version}\n`);
+  process.stdout.write(`SELFTEST-OK ${registry.list().tools.length} tools; node ${process.version}\n`);
+  await registry.close();
   await blender.close();
   await backend.close().catch(() => {});
   process.exit(0);
 }
-const instructions = `These tools operate on the user's physical Windows PC. File roots: ${config.roots.join(', ')}. Use absolute Windows paths such as D:\\work\\my-project. To run commands on that Windows PC, use windows_execute (PowerShell/CMD), windows_run_program (an installed executable), or windows_start_process (background work). Read output with windows_process_status and stop managed jobs with windows_stop_process. Use windows_toolchain_info to discover installed C/C++, CMake, Node, Python, Java, Android and other tools. Use windows_adb or windows_adb_devices for Android devices. Use windows_browser_open for local web previews, windows_screenshot for visual checks, and windows_desktop_action for basic interactive Windows GUI input. For MP4, MP3, WAV, PDF, Office, ZIP and other binary files use windows_binary_info plus the chunked windows_binary_begin/write/finish tools; do not put whole files in text or in the cloud computer's Bash. These tools run as the current Windows account without automatic elevation. Bash and terminals built into this cloud computer run on Linux; use the windows_* MCP tools for Windows work. Session IDs belong to the Windows bridge. Other applications' or other agents' private connector tools are not automatically exported.`;
+registry.on('changed', revision => log(`tool catalog changed (${revision.slice(0, 12)})`));
 const app = express();
 app.disable('x-powered-by');
 app.use((req, res, next) => {
@@ -117,34 +123,24 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.get('/health', (req, res) => res.json({ ok: true, bridgeVersion, schemaDialect: '2020-12', tools: backendTools.tools.length + windows.definitions.length + binary.definitions.length + blender.definitions.length, roots: config.roots, capabilities: ['files','windows_commands','background_processes','toolchains','browser','desktop','android','binary_transfer','blender'] }));
+app.get('/health', (req, res) => { const view = registry.list(); res.json({ ok: true, bridgeVersion, schemaDialect: '2020-12', tools: view.tools.length, roots: config.roots, groups: view.groups, capabilities: ['files','windows_commands','background_processes','toolchains','browser','desktop','android','binary_transfer','blender','mcp_tools'] }); });
 app.use(express.json({ limit: '8mb' }));
 let active = 0;
 app.post('/mcp', async (req, res) => {
   if (active >= 16) return res.status(429).json({ error: 'Too many concurrent requests' });
   active++;
   const server = new Server({ name: 'windows-pc-files', version: bridgeVersion }, {
-    capabilities: { tools: {} }, instructions: instructions+' '+blenderInstructions,
+    capabilities: { tools: {} }, instructions: registry.instructions(),
   });
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const files = compatibleToolDefinitions(await backend.listTools());
-    return { ...files, tools: [...files.tools, ...windows.definitions, ...binary.definitions, ...blender.definitions] };
+    const view = registry.list();
+    return { tools: view.tools, _meta: { 'cmcp/catalog': { schema: 1, revision: view.revision, groups: view.groups } } };
   });
   server.setRequestHandler(CallToolRequestSchema, async request => {
     log(`tool=${request.params.name}`);
-    if (blender.owns(request.params.name)) {
-      try { return await blender.call(request.params.name, request.params.arguments ?? {}); }
-      catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
-    }
-    if (binary.owns(request.params.name)) {
-      try { return await binary.call(request.params.name, request.params.arguments ?? {}); }
-      catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
-    }
-    if (windows.owns(request.params.name)) {
-      try { return await windows.call(request.params.name, request.params.arguments ?? {}); }
-      catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
-    }
-    return backend.callTool(request.params, undefined, { timeout: 120000 });
+    if (!registry.has(request.params.name)) return { isError: true, content: [{ type: 'text', text: `Tool ${request.params.name} is not available (unknown or turned off in CMCP on this computer)` }] };
+    try { return await registry.call(request.params.name, request.params.arguments ?? {}); }
+    catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
   });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   let closed = false;
@@ -172,7 +168,7 @@ app.use((error, req, res, next) => {
 let localPort = 0;
 const listener = app.listen(0, '127.0.0.1', () => {
   localPort = listener.address().port;
-  log(`Windows MCP ready on 127.0.0.1:${localPort}; ${backendTools.tools.length + windows.definitions.length + binary.definitions.length + blender.definitions.length} tools`);
+  log(`Windows MCP ready on 127.0.0.1:${localPort}; ${registry.list().tools.length} tools`);
   startLinks();
 });
 listener.on('error', async error => { log('listen failed: ' + error.message); await backend.close(); process.exit(1); });
@@ -254,7 +250,7 @@ function startLinks() {
     readControls:() => readTargetControls(path.join(stateDir, 'target-controls.json')),
     status, onChange:writeBrowserEntries,
     create:managedTargetFactory({openTunnel:async(t,signal)=>acquireWebTunnel({directory:stateDir,id:t.tunnel.id,login:readSshLogin(stateDir,t.tunnel.id),signal,env:{...process.env,CMCP_STATE_DIR:stateDir,CMCP_SSH_ASKPASS:t.tunnel.id,SSH_ASKPASS:path.resolve(here,"../CMCP.exe"),SSH_ASKPASS_REQUIRE:"force",DISPLAY:"cmcp"}}),proxyFor, machine:machineId(stateDir), version:bridgeVersion,
-      forward, askPassword, notify, log, session:sessionMode, onReplaced:sessionMode ? () => stop(4) : undefined,
+      forward, catalog: registry, askPassword, notify, log, session:sessionMode, onReplaced:sessionMode ? () => stop(4) : undefined,
       onCloudcliKind:(id,kind) => recordCloudcliKind(stateDir,id,kind),
       passwordFor:async (name,signal) => {
         const r = await powershell('get-password.ps1', ['-Name', name], {capture:true, timeoutMs:45000,signal});
@@ -274,6 +270,7 @@ async function stop(code = 0) {
   try { fs.unlinkSync(entriesFile); } catch {}
   await windows.close().catch(() => {});
   try { binary.close(); } catch {}
+  await registry.close();
   await blender.close();
   await backend.close().catch(() => {});
   staticAssets.clear();

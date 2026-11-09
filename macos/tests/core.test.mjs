@@ -119,14 +119,14 @@ test('POSIX group supervisor cleans children after leader exits', {skip:process.
 });
 test('dispatcher handles invalid JSON-RPC and tool failures',async t=>{
   const dir=folder(t),filesystem={async listTools(){return{tools:[]};},async close(){}};
-  const d=await createDispatcher({roots:[dir],filesystem});t.after(()=>d.close());
+  const d=await createDispatcher({roots:[dir],filesystem,stateDir:dir});t.after(()=>d.close());
   assert.equal((await d.forward([])).error.code,-32600);assert.equal(await d.forward({jsonrpc:'2.0',method:'notifications/initialized'}),null);
   assert.equal((await d.forward({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'unlisted'}})).error.code,-32602);
   assert.equal((await d.forward({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'mac_execute',arguments:{command:3}}})).result.isError,true);
 });
 test('real filesystem SDK integration lists allowed roots and reads files',async t=>{
   const dir=folder(t),file=path.join(dir,'中文.txt');fs.writeFileSync(file,'verified');
-  const d=await createDispatcher({roots:[dir]});t.after(()=>d.close());
+  const d=await createDispatcher({roots:[dir],stateDir:dir});t.after(()=>d.close());
   const r=await d.forward({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'read_text_file',arguments:{path:file}}});assert.ok(r.result.content.some(c=>c.text?.includes('verified')));
   const denied=await d.forward({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'read_text_file',arguments:{path:path.join(os.homedir(),'outside.txt')}}});assert.equal(denied.result.isError,true);
   assert.ok(d.definitions.every(t=>!t.inputSchema.$schema||t.inputSchema.$schema.includes('2020-12')));

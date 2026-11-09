@@ -7,15 +7,15 @@ using System.Windows.Forms;
 namespace CMCP {
     // Categories on the left, grouped rows in a centered column on the right. All row
     // controls stay direct children of one sheet, so wheel and keyboard handling are shared.
-    internal sealed class SettingsPage : UserControl {
+    internal sealed partial class SettingsPage : UserControl {
         sealed class Row { internal Label Title,Description; internal Control Control; internal Func<bool> Dim; }
         sealed class Section { internal Label Heading; internal Control Leading; internal readonly List<Row> Rows=new List<Row>(); }
         const int ColumnWidth=680,RowHeight=56,RowPadding=16,OptionWidth=128;
         internal readonly EditorViewport Viewport=new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
         internal readonly ModernButton Back=new ModernButton{Glyph="back",Text="返回",Nav=true,AccessibleName="返回"};
-        internal readonly ModernButton GeneralTab=new ModernButton{Glyph="sliders",Text="通用",Nav=true},ConnectTab=new ModernButton{Glyph="link",Text="连接",Nav=true},AboutTab=new ModernButton{Glyph="info",Text="关于",Nav=true};
-        const int General=0,Connect=1,About=2;
-        static readonly string[] PageTitles={"通用","连接","关于"},PageGlyphs={"sliders","link","info"};
+        internal readonly ModernButton GeneralTab=new ModernButton{Glyph="sliders",Text="通用",Nav=true},ConnectTab=new ModernButton{Glyph="link",Text="连接",Nav=true},ToolsTab=new ModernButton{Glyph="tools",Text="工具",Nav=true},AboutTab=new ModernButton{Glyph="info",Text="关于",Nav=true};
+        const int General=0,Connect=1,ToolsIndex=2,About=3;
+        static readonly string[] PageTitles={"通用","连接","工具","关于"},PageGlyphs={"sliders","link","tools","info"};
         readonly ResizePanel side=new ResizePanel{Dock=DockStyle.Left,Width=176},top=new ResizePanel{Dock=DockStyle.Top,Height=56};
         readonly Label group=new Label(),version=new Label(),title=new Label{TextAlign=ContentAlignment.MiddleLeft};
         readonly Label feedback=new Label{AutoSize=false};
@@ -36,6 +36,7 @@ namespace CMCP {
         internal Action<Control,int,Action> AnimateContent;
         internal void ShowAbout(){page=About;Build();}
         internal void ShowConnect(){page=Connect;Build();}
+        internal void ShowTools(){page=ToolsIndex;Build();}
         void ShowTab(int to){
             if(page==to)return;
             int direction=to>page?1:-1;
@@ -48,7 +49,7 @@ namespace CMCP {
             side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);version.Font=UiFont.Points(9F);
             title.Font=new Font(UiFont.Points(13F),FontStyle.Bold);
             version.Text="CMCP v"+currentVersion;
-            side.Controls.AddRange(new Control[]{Back,group,GeneralTab,ConnectTab,AboutTab,version});top.Controls.Add(title);Viewport.Controls.Add(sheet);
+            side.Controls.AddRange(new Control[]{Back,group,GeneralTab,ConnectTab,ToolsTab,AboutTab,version});top.Controls.Add(title);Viewport.Controls.Add(sheet);
             Controls.Add(Viewport);Controls.Add(top);Controls.Add(side);
             title.Bounds=new Rectangle(58,0,420,55);
             top.Paint+=delegate(object sender,PaintEventArgs e){
@@ -57,7 +58,7 @@ namespace CMCP {
                 using(var p=new Pen(colors.Border))e.Graphics.DrawLine(p,0,top.Height-1,top.Width,top.Height-1);
             };
             side.Paint+=delegate(object sender,PaintEventArgs e){using(var p=new Pen(colors.Border))e.Graphics.DrawLine(p,side.Width-1,0,side.Width-1,side.Height);};
-            Back.Click+=delegate{if(BackRequested!=null)BackRequested();};GeneralTab.Click+=delegate{ShowTab(General);};ConnectTab.Click+=delegate{ShowTab(Connect);};AboutTab.Click+=delegate{ShowTab(About);};
+            Back.Click+=delegate{if(BackRequested!=null)BackRequested();};GeneralTab.Click+=delegate{ShowTab(General);};ConnectTab.Click+=delegate{ShowTab(Connect);};ToolsTab.Click+=delegate{ShowTab(ToolsIndex);};AboutTab.Click+=delegate{ShowTab(About);};
             side.SizeChanged+=delegate{LayoutSide();};
             Viewport.SizeChanged+=delegate{PlaceSheet();};
             SizeChanged+=delegate{side.Width=Width<800?150:176;};
@@ -67,8 +68,8 @@ namespace CMCP {
         void LayoutSide(){
             int width=side.Width-20;
             Back.Bounds=new Rectangle(10,14,width,36);group.Bounds=new Rectangle(20,60,width-20,20);
-            GeneralTab.Bounds=new Rectangle(10,84,width,38);ConnectTab.Bounds=new Rectangle(10,124,width,38);AboutTab.Bounds=new Rectangle(10,164,width,38);
-            version.Bounds=new Rectangle(20,Math.Max(210,side.Height-38),width-20,22);
+            GeneralTab.Bounds=new Rectangle(10,84,width,38);ConnectTab.Bounds=new Rectangle(10,124,width,38);ToolsTab.Bounds=new Rectangle(10,164,width,38);AboutTab.Bounds=new Rectangle(10,204,width,38);
+            version.Bounds=new Rectangle(20,Math.Max(250,side.Height-38),width-20,22);
             side.Invalidate();
         }
         void PlaceSheet(){
@@ -115,8 +116,8 @@ namespace CMCP {
         void Build(){
             refresh.Clear();sections.Clear();
             sheet.Controls.Remove(feedback);sheet.Controls.Remove(updateView);foreach(Control c in sheet.Controls.Cast<Control>().ToArray())c.Dispose();sheet.Controls.Clear();
-            GeneralTab.Selected=page==General;ConnectTab.Selected=page==Connect;AboutTab.Selected=page==About;feedback.Text="";
-            if(page==About)BuildAbout();else if(page==Connect)BuildConnect();else BuildGeneral();
+            GeneralTab.Selected=page==General;ConnectTab.Selected=page==Connect;ToolsTab.Selected=page==ToolsIndex;AboutTab.Selected=page==About;feedback.Text="";
+            if(page==About)BuildAbout();else if(page==Connect)BuildConnect();else if(page==ToolsIndex)BuildTools();else BuildGeneral();
             sheet.Controls.Add(feedback);
             Viewport.AutoScrollPosition=Point.Empty;PlaceSheet();RefreshControls();
         }
@@ -201,7 +202,7 @@ namespace CMCP {
             AddRow(folders,"程序文件夹",null,Command("打开",delegate{action("program");}));
             AddRow(folders,"日志文件夹",null,Command("打开",delegate{action("logs");}));
             var removal=AddSection("卸载");
-            AddRow(removal,"卸载 CMCP",Installation.Uninstaller(AppDomain.CurrentDomain.BaseDirectory)!=null?"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码、设置和程序文件。":"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。程序文件夹和桌面快捷方式需要之后手动删除。",Danger("卸载",delegate{action("uninstall");}));
+            AddRow(removal,"卸载 CMCP",Installation.Uninstaller(AppDomain.CurrentDomain.BaseDirectory)!=null?"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码、设置和程序文件。mcp-tools 文件夹会保留。":"断开全部连接，移除云电脑上的 Claude 配置，并删除本机保存的地址、密码和设置。程序文件夹和桌面快捷方式需要之后手动删除。mcp-tools 文件夹会保留。",Danger("卸载",delegate{action("uninstall");}));
         }
         void LayoutRows(){
             if(laying)return;
@@ -246,7 +247,7 @@ namespace CMCP {
         internal void Apply(Palette palette){
             colors=palette;BackColor=top.BackColor=Viewport.BackColor=sheet.BackColor=colors.Page;sheet.Colors=colors;title.ForeColor=colors.Text;title.BackColor=colors.Page;
             side.BackColor=group.BackColor=version.BackColor=colors.Side;group.ForeColor=version.ForeColor=colors.Muted;
-            foreach(var b in new[]{Back,GeneralTab,ConnectTab,AboutTab}){b.Colors=colors;b.BackColor=colors.Side;b.Invalidate();}
+            foreach(var b in new[]{Back,GeneralTab,ConnectTab,ToolsTab,AboutTab}){b.Colors=colors;b.BackColor=colors.Side;b.Invalidate();}
             feedback.BackColor=colors.Page;
             foreach(var section in sections){
                 section.Heading.BackColor=colors.Page;section.Heading.ForeColor=colors.Text;
@@ -259,7 +260,8 @@ namespace CMCP {
             Invalidate(true);updateView.Apply(colors);
         }
         void ApplyControl(Control control){
-            var b=control as ModernButton;var track=control as RoundedSheet;var toggle=control as ToggleSwitch;var field=control as DropdownField;
+            var b=control as ModernButton;var track=control as RoundedSheet;var toggle=control as ToggleSwitch;var field=control as DropdownField;var actions=control as ToolRowActions;
+            if(actions!=null){actions.BackColor=colors.Surface;foreach(Control child in actions.Controls)ApplyControl(child);}
             if(b!=null){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}
             if(track!=null){track.Colors=colors;track.BackColor=colors.Surface;foreach(var option in track.Controls.OfType<ModernButton>()){option.Colors=colors;option.BackColor=colors.Surface;option.Invalidate();}}
             if(toggle!=null){toggle.Colors=colors;toggle.BackColor=colors.Surface;toggle.Invalidate();}

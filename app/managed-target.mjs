@@ -13,7 +13,7 @@ export const SELF_HOSTED_DOWN='自行安装的 CloudCLI 暂时无法访问，正
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
-export function managedTargetFactory({proxyFor, machine, version, forward, askPassword, notify, log, deviceName, recoveryOptions, healthOptions,
+export function managedTargetFactory({proxyFor, machine, version, forward, catalog, askPassword, notify, log, deviceName, recoveryOptions, healthOptions,
   openTunnel, passwordFor, session = false, onReplaced, onCloudcliKind = () => {}, selfHostedProbeMs = 15000, install = (t, auth, agent, signal, preparation) => new Cloud(t.url, auth, agent, signal,preparation).install()}) {
   return async (t, {signal, current, status}) => {
     const record = {name:t.name, url:t.url, installed:null, installing:false, retryAt:0, auth:null,connected:false,connectionEpoch:0};
@@ -106,7 +106,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, askPa
         } finally { record.installing = false; }
       };
       const linkStatus={set:(name,state,message)=>{if(['offline','recovering','waiting-login','replaced','stopped'].includes(state)){record.connected=false;record.installed=null;record.connectionEpoch++;}publish(name,state,message);},clients:(name,value)=>status.clients?.(name,value)};
-      record.link = startLink({name:t.name, machine, version, askPassword, notify,status:linkStatus,log, session, onReplaced, deviceName, recoveryOptions, healthOptions,preparationCache,
+      record.link = startLink({name:t.name, machine, version, catalog, askPassword, notify,status:linkStatus,log, session, onReplaced, deviceName, recoveryOptions, healthOptions,preparationCache,
         onHealth:value=>{unstable=value;if(confirmed)publish(confirmed.name,confirmed.state,confirmed.message);},
         forward:msg => { if (!current()) throw Error('Target stopped'); return forward(msg); },
         onConnected:async auth => { if (current()) { record.auth = auth;record.connected=true;record.retryAt=0;await record.setup(); }return {statusHandled:true}; },

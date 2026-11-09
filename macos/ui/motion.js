@@ -3,7 +3,7 @@
 // style.css, whose prefers-reduced-motion rule turns all of it off.
 export const REVEAL_MS=170;
 export const MENU_MS=130;
-const order={home:0,settings:1,connect:2,about:3,editor:4};
+const order={home:0,settings:1,connect:2,tools:3,about:4,editor:5};
 export function pageDirection(from,to){return Math.sign(order[to]-order[from])||0;}
 export function turn(node,direction){node.classList.remove('turn-forward','turn-back');if(!direction)return;void node.offsetWidth;node.classList.add(direction>0?'turn-forward':'turn-back');}
 export function markChosen(group,value){for(const option of group.querySelectorAll('button')){const chosen=option.dataset.value===value;option.classList.toggle('chosen',chosen);option.setAttribute('aria-pressed',String(chosen));}}

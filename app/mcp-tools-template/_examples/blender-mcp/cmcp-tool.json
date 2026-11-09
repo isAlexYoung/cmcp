@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "MCP for Blender",
+  "description": "ahujasid/blender-mcp (package mcp-for-blender): control the open Blender through its add-on.",
+  "homepage": "https://github.com/ahujasid/blender-mcp",
+  "license": "MIT",
+  "version": "2.2.5",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": ["mcp-for-blender==2.2.5"],
+  "env": {"DISABLE_TELEMETRY": "true"},
+  "requires": [{"runtime": "uv"}, {"runtime": "app", "name": "Blender", "hint": "Install the add-on from the project page in Blender and start its server"}],
+  "capabilities": ["files", "python", "network", "gui"],
+  "instructions": "Uses the same Blender add-on port as CMCP's built-in Blender tools; keep only one of them on."
+}

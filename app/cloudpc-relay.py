@@ -61,6 +61,10 @@ class Relay:
         self.socket_inode = None
         self.recovery = None
         self.stop_marker = self.directory / 'manual-stop.json'
+        # Latest tool catalog revision announced by the PC, and the connectors waiting for it.
+        self.catalog = None
+        self.catalog_changed = threading.Condition()
+        self.watchers = 0
 
     def emit(self, message):
         data = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -124,6 +128,9 @@ class Relay:
                     if not raw.endswith(b"\n"):
                         raise ValueError("MCP request exceeds the 8 MiB limit")
                     request = json.loads(raw)
+                    if isinstance(request, dict) and request.get("op") == "watch":
+                        relay.watch(self.connection, self.wfile, request)
+                        return
                     reply = relay.exchange(request)
                     self.wfile.write((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
                 except (OSError, ValueError):
@@ -137,6 +144,39 @@ class Relay:
         self.socket_inode = self.path.stat().st_ino
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
         self.emit({"t": "welcome"})
+
+    def watch(self, connection, output, request):
+        """Hold one connector's connection open and write a line per catalog change."""
+        since = request.get("since")
+        with self.catalog_changed:
+            if self.watchers >= 8:
+                output.write(b'{"ok":false,"code":"busy"}\n')
+                return
+            self.watchers += 1
+        try:
+            connection.settimeout(30)
+            output.write((json.dumps({"id": request.get("id"), "ok": True, "event": "watching"}) + "\n").encode())
+            output.flush()
+            known = since if isinstance(since, str) else None
+            while not self.stop.is_set():
+                with self.catalog_changed:
+                    if self.catalog in (None, known):
+                        self.catalog_changed.wait(25)
+                    current = self.catalog
+                if self.stop.is_set():
+                    break
+                if current is not None and current != known:
+                    known = current
+                    line = {"event": "catalog", "revision": current}
+                else:
+                    line = {"event": "keepalive"}
+                output.write((json.dumps(line) + "\n").encode())
+                output.flush()
+        except (OSError, ValueError):
+            pass
+        finally:
+            with self.catalog_changed:
+                self.watchers -= 1
 
     def exchange(self, request):
         reply = {"id": request.get("id"), "ok": True}
@@ -201,6 +241,12 @@ class Relay:
                 with contextlib.suppress(FileNotFoundError):
                     temporary.unlink()
             self.stop.set()
+        elif message.get('t') == 'catalog' and self.pc is not None:
+            revision = message.get('revision')
+            if isinstance(revision, str) and 0 < len(revision) <= 128:
+                with self.catalog_changed:
+                    self.catalog = revision
+                    self.catalog_changed.notify_all()
         elif message.get("t") == "res":
             with self.pending_lock:
                 entry = self.pending.get(message.get("id"))
@@ -253,6 +299,8 @@ class Relay:
 
     def close(self):
         self.stop.set()
+        with self.catalog_changed:
+            self.catalog_changed.notify_all()
         if self.server:
             self.server.shutdown()
             self.server.server_close()
