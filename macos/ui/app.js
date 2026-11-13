@@ -246,37 +246,50 @@ let patching=null,patchAgain=false;
 async function patchTools(){
   if(patching){patchAgain=true;return patching;}
   patching=(async()=>{
-    let value;try{value=await api('tools',{});}catch(error){toast(error.message);return;}
+    let value;try{value=await api('tools',toolScope?{device:toolScope}:{});}catch(error){toast(error.message);return;}
     const same=toolState&&!toolState.error&&toolState.tools.map(x=>x.id).join('\n')===value.tools.map(x=>x.id).join('\n');
     toolState=value;if(page!=='tools')return;
     const column=root.querySelector('.settings-column');if(!column)return;
     if(!same){const y=window.scrollY;column.replaceWith(settingsColumn());window.scrollTo(0,y);toolRebuilds++;return;}
-    for(const [name] of toolGroups){const box=column.querySelector(`[data-focus-key="tool-group:${name}"]`);if(box&&!toolSwitches.pending('groups',name))box.checked=value.groups[name]===true;}
+    for(const [name] of toolGroups){const box=column.querySelector(`[data-focus-key="tool-group:${name}"]`);if(box&&!toolSwitches.pending('groups',name)){box.checked=value.groups[name]===true;const f=column.querySelector(`[data-follow="groups:${name}"]`);if(f)f.hidden=!(value.overriddenGroups||[]).includes(name);}}
     for(const tool of value.tools){
       const box=column.querySelector(`[data-focus-key="tool:${tool.id}"]`),node=box?.closest('.set-row');if(!box)continue;
-      box.disabled=tool.errors.length>0;if(!toolSwitches.pending('tools',tool.id))box.checked=tool.enabled&&tool.approved;
+      box.disabled=tool.errors.length>0;if(!toolSwitches.pending('tools',tool.id)){box.checked=tool.enabled&&tool.approved;const f=column.querySelector(`[data-follow="tools:${tool.id}"]`);if(f)f.hidden=!tool.overridden;}
       node.querySelector('.row-title').textContent=tool.name+(tool.version?' '+tool.version:'');node.querySelector('.row-detail').textContent=toolDetail(tool);
     }
   })().finally(()=>{patching=null;if(patchAgain){patchAgain=false;patchTools();}});
   return patching;
 }
 let toolRebuilds=0;
-const toolSwitches=createSwitchSaver({save:value=>api('tools/apply',value),onSaved:()=>{toast('已保存，正在通知已连接的 Claude。');patchTools();},onError:error=>{toast(t('操作未完成：')+error.message);patchTools();}});
+// Switches of the scope shown: this computer (\'\') or one device's own settings over it.
+let toolScope='';
+const toolSwitches=createSwitchSaver({save:value=>api('tools/apply',toolScope?{...value,device:toolScope}:value),onSaved:()=>{toast('已保存，正在通知已连接的 Claude。');patchTools();},onError:error=>{toast(t('操作未完成：')+error.message);patchTools();}});
 // One switch on the Tools page: it changes at once, and the save waits for quick clicks to end.
 function toolSwitch(kind,id,checked,label,beforeOn){
   const box=el('input','switch');box.type='checkbox';box.setAttribute('role','switch');box.checked=checked;box.dataset.focusKey=(kind==='groups'?'tool-group:':'tool:')+id;box.setAttribute('aria-label',t(label));
-  box.addEventListener('change',async()=>{const on=box.checked;if(on&&beforeOn&&!await beforeOn()){box.checked=false;return;}toolSwitches.want(kind,id,on);});
+  box.addEventListener('change',async()=>{const on=box.checked;if(on&&beforeOn&&!await beforeOn()){box.checked=false;return;}toolSwitches.want(kind,id,on);
+    if(toolScope){const follow=box.closest('.set-row')?.querySelector('[data-follow]');if(follow)follow.hidden=false;}});
   return box;}
+// In a device's scope: the button that removes the device's own setting for this switch.
+function followButton(kind,id,overridden,global){
+  const b=button('跟随全局',()=>{toolSwitches.want(kind,id,null);b.hidden=true;const box=b.closest('.set-row')?.querySelector('input.switch');if(box)box.checked=global();},{classes:'soft'});
+  b.dataset.follow=kind+':'+id;b.hidden=!overridden;return b;}
 async function toolAction(work,done){try{await work();if(done)toast(done);}catch(error){toast(t('操作未完成：')+error.message);}patchTools();}
 function toolDetail(tool){const parts=[tool.description];const en=data.preferences.language==='en';
   if(tool.errors.length)parts.push(t('无法使用：')+tool.errors.join('; '));else if(tool.runtime)parts.push(en?tool.runtime.en:tool.runtime.zh);else if(tool.missingSecrets.length)parts.push(t('缺少密钥：')+tool.missingSecrets.map(s=>s.slice(s.indexOf(':')+1)).join(', '));
   else if(tool.enabled&&tool.approved)parts.push(tool.tools?t('已开启，{0} 个工具').replace('{0}',tool.tools.length):t('已开启，第一次使用时读取工具列表'));
   if(tool.warnings.some(w=>w.code==='UNPINNED'))parts.push(t('未固定版本：每次启动可能变成新版本。'));return parts.filter(Boolean).join('  ·  ');}
 function toolsColumn(section,row,toggle,open){
-  if(!toolState){section('本机工具',row('正在读取本机工具…','',el('span')));api('tools',{}).then(value=>{toolState=value;},error=>{toolState={error:error.message};}).then(()=>{if(page==='tools')root.querySelector('.settings-column')?.replaceWith(settingsColumn());});return;}
+  if(!toolState){section('本机工具',row('正在读取本机工具…','',el('span')));api('tools',toolScope?{device:toolScope}:{}).then(value=>{toolState=value;},error=>{toolState={error:error.message};}).then(()=>{if(page==='tools')root.querySelector('.settings-column')?.replaceWith(settingsColumn());});return;}
   if(toolState.error){section('本机工具',row('无法读取本机工具',toolState.error,button('重试',reloadTools,{classes:'soft'})));return;}
   const blender=toolState.blender.detected?t('已检测到 Blender：')+toolState.blender.detected:t('没有检测到本机安装的 Blender。');
-  section('内置工具',...toolGroups.map(([name,title,detail])=>row(title,name==='blender'?t(detail)+' '+blender:detail,toolSwitch('groups',name,toolState.groups[name]===true,title))));
+  if(data.targets?.length){
+    const scope=dropdown('适用范围',[['',t('所有设备')],...data.targets.map(x=>[x.id,x.label||x.id])],toolScope,async value=>{await toolSwitches.flush();toolScope=value||'';reloadTools();});
+    section('适用范围',row('适用范围','“所有设备”是这台电脑的开关。选择一台设备后，开关只改这台设备，其余设备不受影响。',scope));
+  }
+  const groupControl=(name,title)=>{const box=toolSwitch('groups',name,toolState.groups[name]===true,title);if(!toolScope)return box;
+    const actions=el('span','tool-actions');actions.append(followButton('groups',name,(toolState.overriddenGroups||[]).includes(name),()=>toolState.globalGroups?.[name]===true),box);return actions;};
+  section('内置工具',...toolGroups.map(([name,title,detail])=>row(title,name==='blender'?t(detail)+' '+blender:detail,groupControl(name,title))));
   const customRows=toolState.tools.map(tool=>{
     const actions=el('span','tool-actions'),en=data.preferences.language==='en';
     const box=toolSwitch('tools',tool.id,tool.enabled&&tool.approved,tool.name,async()=>{
@@ -284,7 +297,7 @@ function toolsColumn(section,row,toggle,open){
       const ok=await native('confirm',{text:(en?current.describe.en:current.describe.zh)+'\n\n'+t('开启这个工具吗？')});if(ok)current.approved=true;return ok;});
     box.disabled=tool.errors.length>0;
     actions.append(button('日志',()=>api('tools/open',{what:'log',id:tool.id}).catch(error=>toast(error.message)),{classes:'soft'}),
-      button('删除',async()=>{if(await native('confirm',{text:t('删除 {0}？\r\n\r\n文件夹会移到 mcp-tools 里以 .removed- 开头的文件夹，可以手动恢复。').replace('{0}',tool.name)}))toolAction(()=>api('tools/remove',{id:tool.id}),'已删除，正在通知已连接的 Claude。');},{classes:'danger-outline'}),box);
+      toolScope?followButton('tools',tool.id,tool.overridden===true,()=>tool.global===true):button('删除',async()=>{if(await native('confirm',{text:t('删除 {0}？\r\n\r\n文件夹会移到 mcp-tools 里以 .removed- 开头的文件夹，可以手动恢复。').replace('{0}',tool.name)}))toolAction(()=>api('tools/remove',{id:tool.id}),'已删除，正在通知已连接的 Claude。');},{classes:'danger-outline'}),box);
     const node=row('','',actions);node.querySelector('.row-title').textContent=tool.name+(tool.version?' '+tool.version:'');node.querySelector('.row-detail').textContent=toolDetail(tool);return node;});
   section('自定义工具',...(customRows.length?customRows:[row('还没有自定义工具','粘贴 GitHub 上 MCP 服务器给出的配置即可添加；也可以照 mcp-tools 文件夹里的 AGENT.md 自己编写。',el('span'))]));
   const idle=dropdown('空闲后停止',[['10','10 分钟'],['30','30 分钟'],['120','2 小时'],['0','从不']],String([10,30,120,0].includes(toolState.idleMinutes)?toolState.idleMinutes:30),value=>toolAction(()=>api('tools/set',{idle:Number(value)}),'设置已保存。'));
@@ -355,3 +368,4 @@ setInterval(()=>{if(!busy.size&&page==='home'&&!dragId)refresh();},2000);
 Object.assign(english,{"工具": "Tools", "内置工具": "Built-in tools", "自定义工具": "Custom tools", "管理": "Manage", "本机工具": "Local tools", "正在读取本机工具…": "Reading local tools…", "无法读取本机工具": "Could not read local tools", "重试": "Retry", "文件读写": "Files", "读写允许的本机文件夹，以及与 VPS 之间传输文件。": "Read and write the allowed local folders and transfer files to and from the VPS.", "命令执行": "Commands", "在本机运行终端命令或程序。": "Run terminal commands or programs on this Mac.", "后台任务": "Background tasks", "启动、查看和停止本机后台进程。": "Start, check and stop background processes on this computer.", "开发工具链": "Toolchains", "查找本机的 C/C++、Android、Web、Python、Java、Git、Docker 等工具。": "Find the C/C++, Android, Web, Python, Java, Git, Docker and other tools on this Mac.", "桌面操作": "Desktop", "截图、打开网页、模拟鼠标键盘。": "Take screenshots, open web pages and use the mouse and keyboard.", "通过 Blender 插件操作本机打开的 Blender。": "Control the Blender open on this computer through its add-on.", "已检测到 Blender：": "Blender found: ", "没有检测到本机安装的 Blender。": "Blender was not found on this computer.", "还没有自定义工具": "No custom tools yet", "粘贴 GitHub 上 MCP 服务器给出的配置即可添加；也可以照 mcp-tools 文件夹里的 AGENT.md 自己编写。": "Paste the configuration an MCP server gives on GitHub, or write one following AGENT.md in the mcp-tools folder.", "日志": "Log", "删除": "Delete", "这个工具还没有日志。": "This tool has no log yet.", "删除 {0}？\r\n\r\n文件夹会移到 mcp-tools 里以 .removed- 开头的文件夹，可以手动恢复。": "Delete {0}?\r\n\r\nIts folder moves to a folder starting with .removed- inside mcp-tools, so it can be restored by hand.", "已删除，正在通知已连接的 Claude。": "Deleted. Telling connected Claude sessions.", "开启这个工具吗？": "Turn this tool on?", "已开启，正在通知已连接的 Claude。": "Turned on. Telling connected Claude sessions.", "已关闭，正在通知已连接的 Claude。": "Turned off. Telling connected Claude sessions.", "添加工具": "Add tool", "粘贴 MCP 服务器的配置（例如 README 里 Claude Desktop 的 mcpServers 片段）。添加后默认关闭。": "Paste an MCP server's configuration, such as the Claude Desktop mcpServers snippet from its README. New tools start off.", "添加到 mcp-tools 文件夹吗？添加后默认关闭。": "Add to the mcp-tools folder? New tools start off.", "已添加。打开开关后 Claude 才能使用。": "Added. Claude can use it once you turn it on.", "刷新工具列表": "Refresh tool list", "重新读取 mcp-tools 文件夹和每个已开启工具的工具列表，并通知已连接的 Claude。": "Read the mcp-tools folder and every enabled tool's list again, and tell connected Claude sessions.", "刷新": "Refresh", "已请求刷新。": "Refresh requested.", "10 分钟": "10 minutes", "30 分钟": "30 minutes", "2 小时": "2 hours", "从不": "Never", "空闲后停止": "Stop when idle", "第三方工具多久没有被调用就停止；下次调用时会自动重新启动。": "How long a third-party tool may go unused before it stops. It starts again on the next call.", "mcp-tools 文件夹": "mcp-tools folder", "每个工具一个子文件夹。更新和卸载 CMCP 都会保留它。": "One subfolder per tool. Updating or uninstalling CMCP keeps it.", "操作未完成：": "Not completed: ", "无法使用：": "Unavailable: ", "缺少密钥：": "Missing secret: ", "已开启，{0} 个工具": "On, {0} tools", "已开启，第一次使用时读取工具列表": "On; the tool list is read on first use", "未固定版本：每次启动可能变成新版本。": "Version not pinned: each start may run a newer version.", "下一步": "Next", "添加": "Add", "检测到这台电脑安装了 Blender。\r\n\r\n要让 VPS 上的 Claude 通过 CMCP 操作本机的 Blender 吗？以后可以在 设置 > 工具 中更改。": "Blender is installed on this computer.\r\n\r\nLet Claude on your VPS control this computer's Blender through CMCP? You can change this later in Settings > Tools."});
 Object.assign(english,{'已保存，正在通知已连接的 Claude。':'Saved. Telling connected Claude sessions.'});
 Object.assign(english,{"市场": "Market", "工具市场": "Tool market", "正在读取工具市场…": "Reading the tool market…", "无法读取工具市场": "Could not read the tool market", "经过审核的预设": "Reviewed presets", "每个预设固定一个版本，只包含配置和项目链接；第一次启动时由 npx 或 uvx 从官方源下载。安装后默认关闭，到“工具”页开启。CMCP 不会自动更新它们。": "Each preset is pinned to one version and holds only a configuration and the project link; npx or uvx download it from the official source on first start. Installed presets start off; turn them on on the Tools page. CMCP never updates them by itself.", "预设": "Presets", "主页": "Homepage", "更新到 {0}": "Update to {0}", "已安装": "Installed", "安装": "Install", "把 {0} 从 {1} 更新到 {2}？": "Update {0} from {1} to {2}?", "你改过这个工具的清单，更新会覆盖这些修改。": "You changed this tool's manifest; the update replaces those changes.", "已更新，正在通知已连接的 Claude。": "Updated. Telling connected Claude sessions.", "已安装。到“工具”页开启后 Claude 才能使用。": "Installed. Claude can use it once you turn it on on the Tools page.", "有新版本 {0}": "New version {0}", "清单已被手动修改": "Manifest changed by hand", "需要：": "Needs: "});
+Object.assign(english,{"适用范围": "Applies to", "所有设备": "All devices", "“所有设备”是这台电脑的开关。选择一台设备后，开关只改这台设备，其余设备不受影响。": "\"All devices\" are this computer's switches. With a device chosen, a switch changes only that device.", "跟随全局": "Follow global"});

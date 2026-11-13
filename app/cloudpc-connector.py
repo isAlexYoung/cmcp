@@ -171,6 +171,8 @@ class Link:
         self.path = str(path)
         self.recovery_wait = recovery_wait
         self.poll = poll
+        # Set by the server: shows a tool's question (elicitation) to Claude and returns the answer.
+        self.on_ask = None
 
     def manually_stopped(self):
         try:
@@ -192,23 +194,27 @@ class Link:
                 raise NotSent("云电脑的连接服务未运行") from None
             try:
                 sock.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-                chunks = []
-                size = 0
-                while True:
+                buffer = b""
+                raw = b""
+                while not raw:
                     data = sock.recv(1048576)
                     if not data:
                         break
-                    chunks.append(data)
-                    size += len(data)
-                    if size > MAX_RESPONSE:
+                    buffer += data
+                    if len(buffer) > MAX_RESPONSE:
                         raise OutcomeUnknown(UNCERTAIN_TEXT)
-                    if data.endswith(b"\n"):
-                        break
+                    while b"\n" in buffer and not raw:
+                        line, buffer = buffer.split(b"\n", 1)
+                        # A tool may ask the user something before the call ends; the reply
+                        # follows on this socket once the answer has been sent back.
+                        if line.startswith(b'{"ask"') and self.on_ask:
+                            self._answer_ask(line, timeout)
+                        else:
+                            raw = line
             except OSError:
                 raise OutcomeUnknown(UNCERTAIN_TEXT) from None
         finally:
             sock.close()
-        raw = b"".join(chunks)
         if not raw:
             raise OutcomeUnknown(UNCERTAIN_TEXT)
         try:
@@ -218,6 +224,21 @@ class Link:
             return result
         except (ValueError, UnicodeError):
             raise OutcomeUnknown(UNCERTAIN_TEXT) from None
+
+    def _answer_ask(self, line, timeout):
+        try:
+            ask = json.loads(line.decode("utf-8"))["ask"]
+            ask_id = ask["id"]
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            return
+        try:
+            answer = self.on_ask(ask.get("msg") or {})
+        except Exception as error:
+            answer = {"error": str(error)}
+        request = {"id": 1, "op": "answer", "ask": ask_id}
+        request.update(answer if isinstance(answer, dict) else {"error": "No answer"})
+        with contextlib.suppress(Offline, OutcomeUnknown, OSError):
+            self._exchange(request, 10)
 
     def status(self):
         try:
@@ -242,6 +263,8 @@ class Link:
             request = {'id': 1, 'op': 'result' if querying else 'call', 'request_id': request_id}
             if not querying:
                 request.update(msg=message, wait=int(wait * 1000))
+                if self.on_ask:
+                    request['asks'] = True
             try:
                 timeout = min(5, max(0.1, gap_deadline - time.monotonic())) if querying else min(200, max(1, overall_deadline - time.monotonic()))
                 reply = self._exchange(request, timeout)
@@ -422,7 +445,33 @@ def run_server(private):
         catalog = read_json(cache_file)
     except (OSError, ValueError):
         catalog = {"instructions": DEFAULT_INSTRUCTIONS, "tools": []}
-    state = {"catalog": catalog, "initialized": False, "refreshing": False, "again": False}
+    state = {"catalog": catalog, "initialized": False, "refreshing": False, "again": False, "can_ask": False}
+    questions = {}
+    questions_lock = threading.Lock()
+
+    def ask_client(msg):
+        # A local tool's question (MCP elicitation) shown by Claude; only when Claude said it can.
+        if msg.get("method") != "elicitation/create" or not isinstance(msg.get("params"), dict):
+            return {"error": "Only questions (elicitation) can be shown"}
+        if not state["can_ask"]:
+            return {"result": {"action": "decline"}}
+        ask_id = "cmcp-ask-" + uuid.uuid4().hex
+        waiting = {"event": threading.Event(), "reply": None}
+        with questions_lock:
+            questions[ask_id] = waiting
+        try:
+            output({"jsonrpc": "2.0", "id": ask_id, "method": "elicitation/create", "params": msg["params"]})
+            if not waiting["event"].wait(600):
+                return {"result": {"action": "cancel"}}
+            reply = waiting["reply"]
+            if isinstance(reply.get("result"), dict):
+                return {"result": reply["result"]}
+            return {"error": str((reply.get("error") or {}).get("message") or "Claude could not show the question")}
+        finally:
+            with questions_lock:
+                questions.pop(ask_id, None)
+
+    link.on_ask = ask_client
     output_lock = threading.Lock()
     state_lock = threading.Lock()
     slots = threading.BoundedSemaphore(8)
@@ -500,6 +549,8 @@ def run_server(private):
         method = message["method"]
         mid = message.get("id")
         if method == "initialize":
+            capabilities = message.get("params", {}).get("capabilities") or {}
+            state["can_ask"] = isinstance(capabilities, dict) and isinstance(capabilities.get("elicitation"), dict)
             asked = str(message.get("params", {}).get("protocolVersion", ""))
             output({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": asked if asked in PROTOCOLS else "2025-03-26",
@@ -568,7 +619,13 @@ def run_server(private):
                 continue
             if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
                 if isinstance(message, dict) and ("result" in message or "error" in message):
-                    continue  # a client response; this server sends no requests, so ignore it
+                    # Claude's answer to a tool's question; anything else is ignored.
+                    with questions_lock:
+                        waiting = questions.get(message.get("id"))
+                    if waiting:
+                        waiting["reply"] = message
+                        waiting["event"].set()
+                    continue
                 output({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid JSON-RPC request"}})
                 continue
             if message["method"] in ("initialize", "ping") or message["method"].startswith("notifications/"):

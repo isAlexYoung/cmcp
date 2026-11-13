@@ -105,7 +105,7 @@ export async function runWorker({directory,id,owner,ssh='ssh',createDispatcher=c
     const catalog={...(await dispatcher.forward({jsonrpc:'2.0',id:1,method:'tools/list'})).result,
       instructions:initialized.result?.instructions};
     const env={...process.env,CMCP_STATE_DIR:directory};
-    task=connect({key:paths.key,login,ssh,env,forward:dispatcher.forward,catalog,changes:dispatcher.registry,signal:controller.signal,status});
+    task=connect({key:paths.key,login,ssh,env,forward:dispatcher.forward,catalog,changes:dispatcher.registry,device:id,signal:controller.signal,status});
     await task;
     // Keep a fixed failure visible to terminal launchers; no automatic auth retry.
     if(state.state==='failed'&&!controller.signal.aborted)await new Promise(resolve=>controller.signal.addEventListener('abort',resolve,{once:true}));

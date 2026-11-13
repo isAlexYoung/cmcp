@@ -67,8 +67,30 @@ export function readSettings(stateDir){
   const acknowledged={};for(const [id,value] of Object.entries(saved.acknowledged||{}))if(ID.test(id)&&/^[a-f0-9]{64}$/.test(value))acknowledged[id]=value;
   const idle=saved.idleMinutes;
   return {schema:1,groups,tools,acknowledged,idleMinutes:Number.isInteger(idle)&&idle>=0&&idle<=1440?idle:DEFAULT_IDLE_MINUTES,
-    blenderOffer:{done:saved.blenderOffer?.done===true},targets:saved.targets&&typeof saved.targets==='object'&&!Array.isArray(saved.targets)?saved.targets:{}};
+    blenderOffer:{done:saved.blenderOffer?.done===true},targets:readOverrides(saved.targets)};
 }
+// Per-device overrides on top of the switches for this computer: {device: {groups, tools}}.
+// A missing entry follows the global switch. Approval (acknowledged) stays per computer.
+export const DEVICE=/^[^\x00-\x1f]{1,480}$/;
+function readOverrides(value){
+  const result={};if(!value||typeof value!=='object'||Array.isArray(value))return result;
+  for(const [device,entry] of Object.entries(value)){
+    if(!DEVICE.test(device)||!entry||typeof entry!=='object')continue;
+    const groups={},tools={};
+    for(const [name,on] of Object.entries(entry.groups||{}))if(GROUPS.includes(name)&&typeof on==='boolean')groups[name]=on;
+    for(const [id,on] of Object.entries(entry.tools||{}))if(ID.test(id)&&typeof on==='boolean')tools[id]=on;
+    if(Object.keys(groups).length||Object.keys(tools).length)result[device]={groups,tools};
+  }
+  return result;
+}
+// The switches as one device sees them.
+export function effectiveSwitches(settings,device){
+  const own=device&&settings.targets[device]||{groups:{},tools:{}};
+  return {groups:{...settings.groups,...own.groups},tools:{...settings.tools,...own.tools},overrides:own};
+}
+// A backend connection name (web: <id>, CloudCLI: cloudcli:<id>, SSH web tunnel: tunnel:<app>:<id>)
+// and the SSH channel's id all name the same device card.
+export const deviceOf=name=>typeof name==='string'&&name?name.replace(/^tunnel:[a-z]+:/,'').replace(/^cloudcli:/,''):null;
 export function writeSettings(stateDir,settings){atomicWrite(settingsFile(stateDir),JSON.stringify(settings,null,2)+'\n');}
 export function updateSettings(stateDir,edit){const settings=readSettings(stateDir);edit(settings);writeSettings(stateDir,settings);return settings;}
 // Every running CMCP process watches this file: a manual refresh re-reads tools and caches.
@@ -179,6 +201,8 @@ export function scanTools(root,{platform=process.platform}={}){
 export function fingerprint(stateDir,root){
   const parts=[];
   for(const file of [settingsFile(stateDir),refreshFile(stateDir)]){try{const s=fs.statSync(file);parts.push(file+':'+s.mtimeMs+':'+s.size);}catch{parts.push(file+':-');}}
+  // Tool lists read by another CMCP process (the tool host) count as a change too.
+  try{const cache=path.join(stateDir,'tool-cache');for(const name of fs.readdirSync(cache).sort()){const s=fs.statSync(path.join(cache,name));parts.push('cache/'+name+':'+s.mtimeMs+':'+s.size);}}catch{}
   try{for(const entry of fs.readdirSync(root,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
     if(!entry.isDirectory())continue;
     try{const s=fs.statSync(path.join(root,entry.name,'cmcp-tool.json'));parts.push(entry.name+':'+s.mtimeMs+':'+s.size);}catch{parts.push(entry.name+':-');}

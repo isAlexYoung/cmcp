@@ -48,7 +48,7 @@ test('turning a local tool on notifies the cloud client through the real relay, 
   const send=message=>client.stdin.write(JSON.stringify(message)+'\n');
   const reply=id=>until(()=>lines.find(m=>m.id===id));
   const names=async id=>{send({jsonrpc:'2.0',id,method:'tools/list'});return (await reply(id)).result.tools.map(x=>x.name);};
-  send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',clientInfo:{name:'claude-code'}}});await reply(1);
+  send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',clientInfo:{name:'claude-code'},capabilities:{elicitation:{form:{}}}}});await reply(1);
   send({jsonrpc:'2.0',method:'notifications/initialized'});
   const first=await names(2);
   assert.ok(first.includes('read_text_file')&&first.includes('windows_download_to_cloud'),'files group with transfers, other groups off: '+first+stderr);
@@ -62,10 +62,49 @@ test('turning a local tool on notifies the cloud client through the real relay, 
   const after=await names(3);assert.ok(after.includes('fx__echo'),after.join(','));
   send({jsonrpc:'2.0',id:4,method:'tools/call',params:{name:'fx__echo',arguments:{text:'through the chain'}}});
   assert.equal((await reply(4)).result.content[0].text,'through the chain');
+  // A tool's question reaches the client as elicitation/create and the answer goes back to it.
+  send({jsonrpc:'2.0',id:6,method:'tools/call',params:{name:'fx__ask',arguments:{}}});
+  const question=await until(()=>lines.find(m=>m.method==='elicitation/create'));
+  assert.equal(question.params.message,'Name?');assert.match(String(question.id),/^cmcp-ask-/);
+  send({jsonrpc:'2.0',id:question.id,result:{action:'accept',content:{name:'Ada'}}});
+  assert.deepEqual(JSON.parse((await reply(6)).result.content[0].text),{action:'accept',content:{name:'Ada'}});
   // Turning the files group off removes it and its transfers on the next notification.
   const count=lines.filter(m=>m.method==='notifications/tools/list_changed').length;
   updateSettings(state,s=>{s.groups.files=false;});
   await until(()=>lines.filter(m=>m.method==='notifications/tools/list_changed').length>count);
   const last=await names(5);assert.ok(!last.includes('read_text_file')&&!last.includes('windows_download_to_cloud')&&last.includes('fx__echo'),last.join(','));
+  client.stdin.end();await once(client,'exit');
+});
+
+test('a client that cannot show questions gets them declined at once',{skip:process.platform!=='linux',timeout:60000},async t=>{
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'cmcpQ-')),pc=fs.mkdtempSync(path.join(os.tmpdir(),'cmcpR-')),state=path.join(pc,'user'),root=path.join(pc,'mcp-tools');
+  fs.mkdirSync(state);fs.writeFileSync(path.join(home,'.claude.json'),'{}');
+  const manifest={schema:1,name:'Fixture',description:'Test',transport:'stdio',command:'node',args:[fixture],capabilities:[]};
+  fs.mkdirSync(path.join(root,'fx'),{recursive:true});fs.writeFileSync(path.join(root,'fx','cmcp-tool.json'),JSON.stringify(manifest));
+  updateSettings(state,s=>{for(const g of ['files','commands','processes','toolchains','desktop'])s.groups[g]=false;s.tools.fx=true;s.acknowledged.fx=approvalKey(manifest);});
+  const registry=createToolRegistry({stateDir:state,root,providers:[],serverName:'windows-pc-files',version:'test',instructions:{base:'Fixture PC.'},secrets:null});
+  await until(()=>registry.has('fx__ask'));
+  const init=await registry.forward({jsonrpc:'2.0',id:0,method:'initialize',params:{}}),listed=await registry.forward({jsonrpc:'2.0',id:1,method:'tools/list'});
+  const catalog={...listed.result,instructions:init.result.instructions};
+  const controller=new AbortController(),children=[],states=[],key='questions-device';
+  const bootstrap=fileURLToPath(new URL('../ssh-bootstrap.py',import.meta.url));
+  const task=startSshMcp({key,signal:controller.signal,catalog,changes:registry,login:{},retryDelay:50,status:s=>states.push(s),forward:registry.forward,
+    transport:()=>new SshPipe({login:{host:'fixture.invalid',username:'fixture',port:22,method:'password'},payload:bootstrapPayload(key,catalog),
+      spawnProcess:(_file,_args,options)=>{const child=spawn('python3',['-I','-B','-u',bootstrap],{...options,env:{...options.env,HOME:home}});children.push(child);return child;}})});
+  let client;
+  t.after(async()=>{controller.abort();await task;if(client&&client.exitCode===null)client.kill();await registry.close();
+    for(const child of children)if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');
+    fs.rmSync(home,{recursive:true,force:true});fs.rmSync(pc,{recursive:true,force:true});});
+  await until(()=>states.includes('ready'));
+  const entry=JSON.parse(fs.readFileSync(path.join(home,'.claude.json'),'utf8')).mcpServers[sshConnectorName(key)];
+  client=spawn(entry.command,['-B',...entry.args],{env:{...process.env,HOME:home,...entry.env},stdio:['pipe','pipe','pipe']});
+  const lines=[];let buffer='';client.stdout.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){lines.push(JSON.parse(buffer.slice(0,i)));buffer=buffer.slice(i+1);}});
+  const send=message=>client.stdin.write(JSON.stringify(message)+'\n');
+  send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',clientInfo:{name:'claude-desktop'}}});await until(()=>lines.find(m=>m.id===1));
+  send({jsonrpc:'2.0',method:'notifications/initialized'});
+  send({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'fx__ask',arguments:{}}});
+  const result=await until(()=>lines.find(m=>m.id===2));
+  assert.deepEqual(JSON.parse(result.result.content[0].text),{action:'decline'});
+  assert.ok(!lines.some(m=>m.method==='elicitation/create'));
   client.stdin.end();await once(client,'exit');
 });

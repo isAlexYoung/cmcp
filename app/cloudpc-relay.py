@@ -65,6 +65,8 @@ class Relay:
         self.catalog = None
         self.catalog_changed = threading.Condition()
         self.watchers = 0
+        # Questions a tool asks during a call (MCP elicitation), by question ID -> call key.
+        self.asks = {}
 
     def emit(self, message):
         data = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -131,7 +133,14 @@ class Relay:
                     if isinstance(request, dict) and request.get("op") == "watch":
                         relay.watch(self.connection, self.wfile, request)
                         return
-                    reply = relay.exchange(request)
+                    lock = threading.Lock()
+
+                    def interim(value):
+                        # A tool's question for the user, written ahead of the final reply.
+                        with lock:
+                            self.wfile.write((json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"))
+                            self.wfile.flush()
+                    reply = relay.exchange(request, interim)
                     self.wfile.write((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
                 except (OSError, ValueError):
                     pass
@@ -178,9 +187,11 @@ class Relay:
             with self.catalog_changed:
                 self.watchers -= 1
 
-    def exchange(self, request):
+    def exchange(self, request, interim=None):
         reply = {"id": request.get("id"), "ok": True}
         op = request.get("op")
+        if op == "answer":
+            return self.answer(request, reply)
         if op == "status":
             return dict(reply, connected=not self.stop.is_set(), pc=self.pc, recovery=self.recovery)
         if op == "replace":
@@ -202,7 +213,9 @@ class Relay:
         # Each socket exchange has its own wire ID, even concurrent result queries.
         key = uuid.uuid4().hex
         event = threading.Event()
-        entry = {"event": event}
+        # Only a connector that says it can relay questions gets them, on this same socket.
+        entry = {"event": event, "touched": time.monotonic(),
+                 "interim": interim if op == "call" and request.get("asks") is True else None}
         with self.pending_lock:
             if self.stop.is_set():
                 return dict(reply, ok=False, code="offline", delivery="not_sent", error="本地电脑当前未连接")
@@ -214,11 +227,13 @@ class Relay:
             if self.recovery and request_id:
                 packet['recovery'] = {'protocol': 1, 'requestId': request_id, 'action': 'query' if op == 'result' else 'execute'}
             self.emit(packet)
-            deadline = time.monotonic() + (5 if op == 'result' else 180)
+            limit = 5 if op == 'result' else 180
             while not event.wait(0.2):
                 if self.stop.is_set():
                     return dict(reply, ok=False, code="disconnected", error="执行期间连接断开，结果尚未确认")
-                if time.monotonic() >= deadline:
+                # The deadline counts from the last question or answer, so a user who takes a
+                # while to answer does not time the call out.
+                if time.monotonic() >= entry["touched"] + limit:
                     return dict(reply, ok=False, code="timeout", error="本地电脑没有在规定时间内响应")
             response = entry["response"]
             if response.get("error"):
@@ -227,6 +242,45 @@ class Relay:
         finally:
             with self.pending_lock:
                 self.pending.pop(key, None)
+
+    def ask(self, message):
+        ask_id, parent = message.get('id'), message.get('parent')
+        if not isinstance(ask_id, str) or not 0 < len(ask_id) <= 64:
+            return
+        with self.pending_lock:
+            entry = self.pending.get(parent) if isinstance(parent, str) else None
+            if entry and entry.get('interim') and len(self.asks) < 64:
+                self.asks[ask_id] = entry
+                entry['touched'] = time.monotonic() + 600
+            else:
+                entry = None
+        if entry is None:
+            self.emit({'t': 'answer', 'id': ask_id, 'error': 'No connected client can show this question'})
+            return
+        try:
+            entry['interim']({'ask': {'id': ask_id, 'msg': message.get('msg')}})
+        except (OSError, ValueError):
+            with self.pending_lock:
+                self.asks.pop(ask_id, None)
+            self.emit({'t': 'answer', 'id': ask_id, 'error': 'The client went away before the question was shown'})
+
+    def answer(self, request, reply):
+        ask_id = request.get('ask')
+        if not isinstance(ask_id, str) or not 0 < len(ask_id) <= 64:
+            return dict(reply, ok=False, code='error', error='Invalid question ID')
+        with self.pending_lock:
+            entry = self.asks.pop(ask_id, None)
+            if entry:
+                entry['touched'] = time.monotonic()
+        if entry is None:
+            return dict(reply, ok=False, code='error', error='Unknown question')
+        packet = {'t': 'answer', 'id': ask_id}
+        if isinstance(request.get('result'), dict):
+            packet['result'] = request['result']
+        else:
+            packet['error'] = str(request.get('error') or 'No answer')[:1000]
+        self.emit(packet)
+        return reply
 
     def message(self, message):
         if message.get("t") == "hello" and self.pc is None:
@@ -247,6 +301,8 @@ class Relay:
                 with self.catalog_changed:
                     self.catalog = revision
                     self.catalog_changed.notify_all()
+        elif message.get('t') == 'ask' and self.pc is not None:
+            self.ask(message)
         elif message.get("t") == "res":
             with self.pending_lock:
                 entry = self.pending.get(message.get("id"))

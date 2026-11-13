@@ -41,6 +41,14 @@ test('manager routes list, import, switch, refresh and remove tools inside the M
   await call('tools/apply',{groups:{desktop:true},tools:{fixture:true}});
   const reread=(await call('tools')).data;assert.equal(reread.groups.desktop,true);assert.equal(reread.tools[0].enabled&&reread.tools[0].approved,true);
   assert.equal((await call('tools/apply',{groups:{blender:'yes'}})).status,400);assert.equal((await call('tools/apply',{tools:{missing:true}})).status,400);
+  // One device's own switch, then back to following this Mac's switch.
+  await call('tools/apply',{device:'vps-1',groups:{files:false},tools:{fixture:false}});
+  const device=(await call('tools',{device:'vps-1'})).data;
+  assert.equal(device.groups.files,false);assert.equal(device.globalGroups.files,true);assert.deepEqual(device.overriddenGroups,['files']);
+  assert.equal(device.tools[0].enabled,false);assert.equal(device.tools[0].overridden,true);assert.equal(device.tools[0].global,true);
+  assert.equal((await call('tools')).data.groups.files,true,'the Mac\'s own switch is unchanged');
+  await call('tools/apply',{device:'vps-1',groups:{files:null},tools:{fixture:null}});
+  assert.deepEqual((await call('tools',{device:'vps-1'})).data.overriddenGroups,[]);
   await call('tools/set',{group:'blender',on:true});
   assert.equal((await call('tools/refresh')).data.refreshed,true);assert.ok(fs.existsSync(path.join(directory,'tool-refresh.json')));
   assert.equal((await call('tools/open',{what:'log',id:'fixture'})).status,400,'no log yet');
