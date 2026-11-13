@@ -8,7 +8,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {McpError,ErrorCode,ToolListChangedNotificationSchema} from '@modelcontextprotocol/sdk/types.js';
+import {McpError,ErrorCode,ToolListChangedNotificationSchema,ElicitRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {appendLog,loadSecrets,resolveLaunch,atomicWrite} from './mcp-tools.mjs';
 
 export const UNCERTAIN='The call was sent but its result was not confirmed; it may still be running or may have finished. It was not retried. Check the actual state before trying again. (操作已发送但结果未确认，未重试；请先检查实际状态。)';
@@ -23,7 +23,7 @@ function writeToolCache(stateDir,id,hash,tools){atomicWrite(cacheFile(stateDir,i
 export class ProxyServer {
   constructor({id,manifest,hash,dir,stateDir,platform=process.platform,env=process.env,secrets,idleMs=30*60000,onToolsChanged=()=>{},launch=resolveLaunch,breaker={failures:3,windowMs:10*60000}}){
     Object.assign(this,{id,manifest,hash,dir,stateDir,platform,env,secrets,idleMs,onToolsChanged,launch,breaker});
-    this.client=null;this.starting=null;this.active=0;this.waiting=[];this.failures=[];this.state='stopped';this.error=null;this.idleTimer=null;this.redact=[];this.child=null;this.closed=false;
+    this.client=null;this.starting=null;this.active=0;this.calls=[];this.waiting=[];this.failures=[];this.state='stopped';this.error=null;this.idleTimer=null;this.redact=[];this.child=null;this.closed=false;
   }
   log(text){appendLog(this.stateDir,this.id,text,this.redact);}
   cachedTools(){return readToolCache(this.stateDir,this.id,this.hash);}
@@ -65,8 +65,17 @@ export class ProxyServer {
   }
   async connect(){
     const m=this.manifest,{env,headers}=await this.environment(),cwd=path.resolve(this.dir,m.cwd||'.');
-    const client=new Client({name:'cmcp-proxy',version:'1'},{capabilities:{}});
-    // Questions during a call (elicitation), sampling and roots are not forwarded in phase 1.
+    const client=new Client({name:'cmcp-proxy',version:'1'},{capabilities:{elicitation:{}}});
+    // A question during a call (elicitation) goes to the user of the latest running call, through
+    // the channel it came from; where that channel cannot carry it, the question is declined.
+    client.setRequestHandler(ElicitRequestSchema,async request=>{
+      const ctx=this.calls.at(-1);
+      if(!ctx?.ask){this.log('question declined: this connection cannot show it');return {action:'decline'};}
+      this.log('question forwarded to the cloud user');
+      try{const answer=await ctx.ask(request.params);this.log('question answered: '+(answer?.action||'?'));return answer&&typeof answer==='object'?answer:{action:'cancel'};}
+      catch(error){this.log('question not answered: '+error.message);return {action:'cancel'};}
+    });
+    // Sampling and roots are not forwarded yet.
     client.fallbackRequestHandler=async request=>{throw new McpError(ErrorCode.MethodNotFound,'CMCP does not support '+request.method+' from local tools yet; continue without it or report a clear error');};
     client.setNotificationHandler(ToolListChangedNotificationSchema,()=>{this.refresh().catch(()=>{});});
     let transport;
@@ -117,11 +126,11 @@ export class ProxyServer {
   }
   async acquire(){const limit=this.manifest.maxConcurrency||4;if(this.active<limit){this.active++;return;}await new Promise(resolve=>this.waiting.push(resolve));this.active++;}
   release(){this.active--;const next=this.waiting.shift();if(next)next();else this.armIdle();}
-  async call(name,args){
+  async call(name,args,ctx={}){
     let client;
     try{client=await this.start();}catch(error){return {isError:true,content:[{type:'text',text:'Local tool '+this.id+' could not start: '+error.message}]};}
     await this.acquire();clearTimeout(this.idleTimer);
-    const started=Date.now();
+    const started=Date.now(),entry=ctx||{};this.calls.push(entry);
     try{
       const result=await client.callTool({name,arguments:args},undefined,{timeout:this.manifest.timeouts?.callMs||120000,resetTimeoutOnProgress:true});
       this.log('call '+name+' '+(Date.now()-started)+'ms'+(result.isError?' error':''));
@@ -132,7 +141,7 @@ export class ProxyServer {
       // the request may have left is reported as an unknown outcome and never resent.
       if(error instanceof McpError&&[ErrorCode.InvalidParams,ErrorCode.MethodNotFound,ErrorCode.InvalidRequest].includes(error.code))return {isError:true,content:[{type:'text',text:error.message}]};
       return {isError:true,content:[{type:'text',text:UNCERTAIN+' ('+error.message+')'}]};
-    }finally{this.release();}
+    }finally{this.calls.splice(this.calls.indexOf(entry),1);this.release();}
   }
   stopChild(){if(this.child){try{this.child.kill();}catch{}this.child=null;}}
   async stop(reason='stop'){

@@ -26,6 +26,7 @@ import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../ap
 import {status as toolStatus,set as setTools,applySwitches,importText,remove as removeTool} from '../app/mcp-tools-cli.mjs';
 import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
 import {marketView,installPreset,updatePreset} from '../app/mcp-market.mjs';
+import {startToolHost} from '../app/tool-host.mjs';
 import {spawn} from 'node:child_process';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
@@ -33,6 +34,8 @@ const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength
 export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate,startChannel,setupCloudcli=runSetup,toolSecrets}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
   const dispatcher=injected||await createDispatcher({roots:store.config.roots,stateDir:directory});
+  // SSH channel workers use this process's third-party tools instead of starting their own copies.
+  const toolHost=dispatcher.registry?await startToolHost({stateDir:directory,registry:dispatcher.registry}).catch(()=>null):null;
   const machineFile=path.join(directory,'machine-id');safeFile(machineFile);
   let machine;try{machine=fs.readFileSync(machineFile,'utf8').trim();if(!/^[a-f0-9-]{36}$/.test(machine))throw Error();}catch{machine=randomUUID();atomicWrite(machineFile,machine);}
   const status={set(name,state,message){if(state==='password')message='保存的密码不正确或不可用。请停止此连接后编辑密码。';states[name]={state,message,at:new Date().toISOString(),clients:states[name]?.clients};},clients(name,value){if(states[name])states[name].clients=value;}};
@@ -87,7 +90,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     installation.launch([process.pid,process.ppid,appPid]);
     return {uninstalled:true,cloudFailed};
   }
-  async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await Promise.all([connections.close(),stopSshWorkers(directory)]);staticAssets.clear();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
+  async function close({disable=false}={}){if(closing)return;closing=true;if(disable)await store.serial(()=>store.setEnabled(null,false));clearInterval(publish);await Promise.all([connections.close(),stopSshWorkers(directory)]);staticAssets.clear();await toolHost?.close();await dispatcher.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
   const routes={
     '/api/state':async()=>snapshot(),
     '/api/tray':async()=>({targets:store.view(states).targets.map(t=>{const v=t.route==='ssh'&&t.loginMode!=='ssh'?t.tunnels[t.loginMode]:t.loginMode==='cloudcli'?t.cloudcli:t;return {id:t.id,label:t.label,state:v?.state||'stopped',enabled:v?.enabled===true,loginMode:t.loginMode,...t.loginMode==='ssh'?{ssh:true}:{}};}),language:store.preferences.language,updating}),
@@ -109,9 +112,9 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/targets/cloudcli-setup/answer':async input=>{const s=setups.get(input.id);if(s?.phase!=='confirm'||!s.answer)throw Error('没有等待确认的初始化');if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length>1024))throw Error('密码无效');const answer=s.answer;s.answer=null;s.phase=input.ok===true?'running':'checking';answer({ok:input.ok===true,password:input.password});return setupView(input.id);},
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     // Settings > Tools: one set of switches for this Mac, shared by every connection.
-    '/api/tools':async()=>toolStatus(directory),
+    '/api/tools':async input=>toolStatus(directory,{device:typeof input?.device==='string'&&input.device?input.device:null}),
     '/api/tools/set':async input=>{setTools(directory,{group:input.group,tool:input.tool,on:input.on===true,idle:input.idle,'blender-offer-done':input.blenderOfferDone===true});return {saved:true};},
-    '/api/tools/apply':async input=>{const s=applySwitches(directory,{groups:input.groups||{},tools:input.tools||{}});return {saved:true,groups:s.groups,tools:s.tools};},
+    '/api/tools/apply':async input=>{const s=applySwitches(directory,{groups:input.groups||{},tools:input.tools||{},device:typeof input.device==='string'&&input.device?input.device:null});return {saved:true,groups:s.groups,tools:s.tools};},
     // Settings > Market: reviewed presets; install writes the tool folder, update needs a confirmation.
     '/api/market':async()=>({presets:marketView(directory)}),
     '/api/market/install':async input=>{const r=installPreset(directory,input.id);requestRefresh(directory);return r;},

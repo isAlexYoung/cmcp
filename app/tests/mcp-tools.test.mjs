@@ -153,7 +153,11 @@ test('proxy: environment and secrets reach the tool, CMCP variables do not; cras
   assert.equal(fs.readFileSync(marker,'utf8').trim().split('\n').length,1,'a crashed call is never resent');
   assert.equal(text(await proxy.call('echo',{text:'again'})),'again');
   const log=fs.readFileSync(path.join(f.state,'tool-logs','fx.log'),'utf8');assert.match(log,/call echo/);assert.ok(!log.includes('s3cret-value'));
-  const asked=JSON.parse(text(await proxy.call('ask',{})));assert.match(asked.message,/does not support elicitation/);
+  // Without a channel that can show it, a tool's question is declined, never left hanging.
+  assert.deepEqual(JSON.parse(text(await proxy.call('ask',{}))),{action:'decline'});
+  const shown=[];const answered=JSON.parse(text(await proxy.call('ask',{},{ask:async params=>{shown.push(params.message);return {action:'accept',content:{name:'Ada'}};}})));
+  assert.deepEqual(shown,['Name?']);assert.deepEqual(answered,{action:'accept',content:{name:'Ada'}});
+  assert.deepEqual(JSON.parse(text(await proxy.call('ask',{},{ask:async()=>{throw Error('gone');}}))),{action:'cancel'});
 });
 
 test('proxy: idle processes stop and restart on the next call; repeated failures suspend the tool',async t=>{

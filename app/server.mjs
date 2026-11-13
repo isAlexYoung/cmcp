@@ -15,6 +15,7 @@ import { createWindowsTools } from './windows-tools.mjs';
 import { createBinaryTools } from './binary-tools.mjs';
 import { createBlenderTools, blenderInstructions } from './blender-tools.mjs';
 import { createToolRegistry } from './tool-registry.mjs';
+import { startToolHost } from './tool-host.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import net from 'node:net';
@@ -105,7 +106,9 @@ if (selfTest) {
   await backend.close().catch(() => {});
   process.exit(0);
 }
-registry.on('changed', revision => log(`tool catalog changed (${revision.slice(0, 12)})`));
+registry.on('changed', () => log('tool catalog changed'));
+// SSH channel workers use this process's third-party tools instead of starting their own copies.
+const toolHost = await startToolHost({ stateDir, registry, log: text => log('tools: ' + text) }).catch(error => { log('tool host unavailable: ' + error.message); return null; });
 const app = express();
 app.disable('x-powered-by');
 app.use((req, res, next) => {
@@ -213,18 +216,11 @@ function powershell(script, args, { capture = false, timeoutMs = 60000, signal }
   });
 }
 
-async function forward(msg) {
-  const res = await fetch(`http://127.0.0.1:${localPort}/mcp`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json',
-      accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-03-26' },
-    body: JSON.stringify(msg),
-    signal: AbortSignal.timeout(170000),
-  });
-  const text = await res.text();
-  if (!('id' in msg)) return null;
-  if (!text) throw new Error(`Windows MCP returned HTTP ${res.status} without a body`);
-  return JSON.parse(text);
+// The cloud connector's requests go straight to the catalog, with the device they came from
+// (its own switches) and, where the channel carries it, a way to ask that device's user.
+async function forward(msg, ctx) {
+  if (msg?.method === 'tools/call') log(`tool=${msg.params?.name}`);
+  return registry.forward(msg, ctx);
 }
 
 // One dialog per cloud computer at a time; resolves true when a new password was verified and saved.
@@ -270,6 +266,7 @@ async function stop(code = 0) {
   try { fs.unlinkSync(entriesFile); } catch {}
   await windows.close().catch(() => {});
   try { binary.close(); } catch {}
+  await toolHost?.close();
   await registry.close();
   await blender.close();
   await backend.close().catch(() => {});

@@ -108,7 +108,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
       const linkStatus={set:(name,state,message)=>{if(['offline','recovering','waiting-login','replaced','stopped'].includes(state)){record.connected=false;record.installed=null;record.connectionEpoch++;}publish(name,state,message);},clients:(name,value)=>status.clients?.(name,value)};
       record.link = startLink({name:t.name, machine, version, catalog, askPassword, notify,status:linkStatus,log, session, onReplaced, deviceName, recoveryOptions, healthOptions,preparationCache,
         onHealth:value=>{unstable=value;if(confirmed)publish(confirmed.name,confirmed.state,confirmed.message);},
-        forward:msg => { if (!current()) throw Error('Target stopped'); return forward(msg); },
+        forward:(msg, ctx) => { if (!current()) throw Error('Target stopped'); return forward(msg, ctx); },
         onConnected:async auth => { if (current()) { record.auth = auth;record.connected=true;record.retryAt=0;await record.setup(); }return {statusHandled:true}; },
         target:() => current() ? {
           url:record.url, stamp:t.stamp, authMode:shared ? 'shared-browser' : 'legacy',

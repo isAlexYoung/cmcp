@@ -14,13 +14,14 @@ namespace CMCP {
     // the tools in the mcp-tools folder. One set of switches applies to every connection.
     internal sealed class ToolInfo {
         internal string Id,Name,Description,Version,Homepage,Log,DescribeZh,DescribeEn,RuntimeZh,RuntimeEn;
-        internal bool Enabled,Approved;
+        internal bool Enabled,Approved,Overridden,Global;
         internal string[] Errors=new string[0],Warnings=new string[0],MissingSecrets=new string[0],Tools,Recent=new string[0];
         internal string Describe{get{return L.Language=="en"?DescribeEn:DescribeZh;}}
         internal string Runtime{get{return L.Language=="en"?RuntimeEn:RuntimeZh;}}
     }
     internal sealed class ToolSnapshot {
-        internal readonly Dictionary<string,bool> Groups=new Dictionary<string,bool>();
+        internal readonly Dictionary<string,bool> Groups=new Dictionary<string,bool>(),GlobalGroups=new Dictionary<string,bool>();
+        internal readonly HashSet<string> OverriddenGroups=new HashSet<string>();internal string Device;
         internal readonly List<ToolInfo> Tools=new List<ToolInfo>();
         internal string Root,Blender,Error;internal bool BlenderOfferDone;internal int IdleMinutes=30;
         static string S(IDictionary<string,object> d,string key){object v;return d!=null&&d.TryGetValue(key,out v)&&v!=null?Convert.ToString(v):null;}
@@ -33,12 +34,14 @@ namespace CMCP {
             if(S(data,"error")!=null){snapshot.Error=S(data,"error");return snapshot;}
             snapshot.Root=S(data,"root");object idle;if(data.TryGetValue("idleMinutes",out idle)&&idle is int)snapshot.IdleMinutes=(int)idle;
             var groups=O(data,"groups");if(groups!=null)foreach(var pair in groups)if(pair.Value is bool)snapshot.Groups[pair.Key]=(bool)pair.Value;
+            var global=O(data,"globalGroups");foreach(var pair in global??groups??new Dictionary<string,object>())if(pair.Value is bool)snapshot.GlobalGroups[pair.Key]=(bool)pair.Value;
+            foreach(var name in A(data,"overriddenGroups",Convert.ToString)??new string[0])snapshot.OverriddenGroups.Add(name);snapshot.Device=S(data,"device");
             var blender=O(data,"blender");snapshot.Blender=S(blender,"detected");snapshot.BlenderOfferDone=B(blender,"offerDone");
             object[] tools=null;object raw;if(data.TryGetValue("tools",out raw))tools=raw as object[];
             foreach(var item in tools??new object[0]){
                 var t=item as IDictionary<string,object>;if(t==null)continue;var describe=O(t,"describe");var runtime=O(t,"runtime");
                 snapshot.Tools.Add(new ToolInfo{Id=S(t,"id"),Name=S(t,"name")??S(t,"id"),Description=S(t,"description")??"",Version=S(t,"version"),Homepage=S(t,"homepage"),Log=S(t,"log"),
-                    Enabled=B(t,"enabled"),Approved=B(t,"approved"),Errors=A(t,"errors",Convert.ToString)??new string[0],
+                    Enabled=B(t,"enabled"),Approved=B(t,"approved"),Overridden=B(t,"overridden"),Global=t.ContainsKey("global")?B(t,"global"):B(t,"enabled"),Errors=A(t,"errors",Convert.ToString)??new string[0],
                     Warnings=A(t,"warnings",w=>{var d=w as IDictionary<string,object>;return d==null?null:S(d,"code");})??new string[0],
                     MissingSecrets=A(t,"missingSecrets",Convert.ToString)??new string[0],Tools=A(t,"tools",Convert.ToString),Recent=A(t,"recent",Convert.ToString)??new string[0],
                     DescribeZh=S(describe,"zh"),DescribeEn=S(describe,"en"),RuntimeZh=S(runtime,"zh"),RuntimeEn=S(runtime,"en")});
@@ -47,10 +50,11 @@ namespace CMCP {
         }
     }
     internal interface IToolBackend {
-        ToolSnapshot Status();
+        ToolSnapshot Status(string device);
         void SetGroup(string group,bool on);
         void SetTool(string id,bool on);
-        void Apply(IDictionary<string,bool> groups,IDictionary<string,bool> tools);
+        // device null: the switches for this computer; a device: its overrides (null value = follow).
+        void Apply(IDictionary<string,bool?> groups,IDictionary<string,bool?> tools,string device);
         void SetIdle(int minutes);
         void BlenderOfferDone();
         void Refresh();
@@ -77,10 +81,10 @@ namespace CMCP {
                 return line;
             }
         }
-        public ToolSnapshot Status(){return ToolSnapshot.Parse(Run(null,"status"));}
+        public ToolSnapshot Status(string device){return ToolSnapshot.Parse(String.IsNullOrEmpty(device)?Run(null,"status"):Run(null,"status","--device",device));}
         public void SetGroup(string group,bool on){Run(null,"set","--group",group,on?"--on":"--off");}
         public void SetTool(string id,bool on){Run(null,"set","--tool",id,on?"--on":"--off");}
-        public void Apply(IDictionary<string,bool> groups,IDictionary<string,bool> tools){Run(new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"groups",groups},{"tools",tools}}),"apply");}
+        public void Apply(IDictionary<string,bool?> groups,IDictionary<string,bool?> tools,string device){Run(new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"groups",groups},{"tools",tools},{"device",String.IsNullOrEmpty(device)?null:device}}),"apply");}
         public void SetIdle(int minutes){Run(null,"set","--idle",minutes.ToString());}
         public void BlenderOfferDone(){Run(null,"set","--blender-offer-done");}
         public void Refresh(){Run(null,"refresh");}
@@ -107,11 +111,11 @@ namespace CMCP {
         internal void LoadTools(){
             if(Tools==null)return;
             if(toolsLoading){reloadAgain=true;return;}
-            toolsLoading=true;var backend=Tools;
+            toolsLoading=true;var backend=Tools;var scope=toolScope;
             ThreadPool.QueueUserWorkItem(delegate{
-                ToolSnapshot snapshot;try{snapshot=backend.Status();}catch(Exception e){snapshot=new ToolSnapshot{Error=e.Message};}
+                ToolSnapshot snapshot;try{snapshot=backend.Status(scope);}catch(Exception e){snapshot=new ToolSnapshot{Error=e.Message};}
                 try{BeginInvoke((Action)delegate{
-                    toolsLoading=false;var previous=toolSnapshot;toolSnapshot=snapshot;
+                    toolsLoading=false;if(scope!=toolScope){LoadTools();return;}var previous=toolSnapshot;toolSnapshot=snapshot;
                     if(page==ToolsIndex){if(SameShape(previous,snapshot)){RefreshControls();}else RebuildKeepingScroll();}
                     if(reloadAgain){reloadAgain=false;LoadTools();}
                 });}catch{toolsLoading=false;}
@@ -128,10 +132,20 @@ namespace CMCP {
         bool reloadAgain;
         ToolSwitchSaver switches;
         ToolSwitchSaver Switches{get{
-            if(switches==null)switches=new ToolSwitchSaver(this,()=>Tools,error=>SetFeedback(L.Text("操作未完成：")+error,true),delegate{SetFeedback("已保存，正在通知已连接的 Claude。",false);LoadTools();});
+            if(switches==null)switches=new ToolSwitchSaver(this,()=>Tools,()=>toolScope,error=>SetFeedback(L.Text("操作未完成：")+error,true),delegate{SetFeedback("已保存，正在通知已连接的 Claude。",false);LoadTools();});
             return switches;}}
         ToolInfo CurrentTool(string id){return toolSnapshot==null?null:toolSnapshot.Tools.FirstOrDefault(t=>t.Id==id);}
         bool GroupOn(string group){bool on;return toolSnapshot!=null&&toolSnapshot.Groups.TryGetValue(group,out on)&&on;}
+        bool GlobalOn(string group){bool on;return toolSnapshot!=null&&toolSnapshot.GlobalGroups.TryGetValue(group,out on)&&on;}
+        // Device cards (id, name) whose switches can differ from this computer's; set by the window.
+        internal List<KeyValuePair<string,string>> Devices=new List<KeyValuePair<string,string>>();
+        string toolScope;
+        internal string ToolScope{get{return toolScope;}}
+        internal void ChooseScope(string device){
+            device=String.IsNullOrEmpty(device)?null:device;if(device==toolScope)return;
+            if(switches!=null)switches.Drain();toolScope=device;toolSnapshot=null;int y=-Viewport.AutoScrollPosition.Y;Build();Viewport.AutoScrollPosition=new Point(0,y);
+        }
+        string FollowNote(bool overridden,bool global){return toolScope==null?"":"  ·  "+(overridden?String.Format(L.Text("这台设备单独设置（全局：{0}）"),L.Text(global?"开":"关")):L.Text("跟随全局"));}
         // The command runs off the window thread; the page reloads when it has finished.
         void ToolAction(Action work,string done){
             if(Tools==null)return;
@@ -144,14 +158,26 @@ namespace CMCP {
             if(Tools==null){var none=AddSection("本机工具");AddRow(none,"预览模式","预览模式下不读取本机工具。",null);return;}
             if(toolSnapshot==null){var waiting=AddSection("本机工具");AddRow(waiting,"正在读取本机工具…",null,null);LoadTools();return;}
             if(toolSnapshot.Error!=null){var failed=AddSection("本机工具");AddRow(failed,()=>L.Text("无法读取本机工具"),()=>toolSnapshot.Error,Command("重试",delegate{toolSnapshot=null;Build();}));return;}
+            if(Devices.Count>0){
+                var scopeSection=AddSection("适用范围");
+                var choices=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("",L.Text("所有设备"))};choices.AddRange(Devices);
+                var scopeField=new DropdownField(choices.ToArray()){Font=sheet.Font,Size=new Size(216,36),Colors=colors};
+                scopeField.Chosen+=key=>ChooseScope(key);
+                refresh.Add(delegate{scopeField.Value=toolScope??"";scopeField.AccessibleName=L.Text("适用范围");scopeField.Invalidate();});
+                AddRow(scopeSection,"适用范围","“所有设备”是这台电脑的开关。选择一台设备后，开关只改这台设备，其余设备不受影响。",scopeField);
+            }
             var builtin=AddSection("内置工具");
             foreach(var row in GroupRows){
                 string group=row[0];
-                var toggle=new ToggleSwitch{Text=L.Text(row[1]),Checked=GroupOn(group),Colors=colors,Size=new Size(48,30)};
+                var actions=new ToolRowActions();
+                actions.Toggle=new ToggleSwitch{Text=L.Text(row[1]),Checked=GroupOn(group),Colors=colors,Size=new Size(48,30)};
+                var toggle=actions.Toggle;
                 // Only this switch changes now; quick clicks are merged and saved once, as the last state.
-                toggle.Click+=delegate{Switches.Want(true,group,toggle.Checked);};
-                refresh.Add(delegate{if(!Switches.Pending(true,group))toggle.Checked=GroupOn(group);});
-                AddRow(builtin,()=>L.Text(row[1]),()=>group=="blender"?L.Text(row[2])+" "+(toolSnapshot.Blender!=null?L.Text("已检测到 Blender：")+toolSnapshot.Blender:L.Text("没有检测到本机安装的 Blender。")):L.Text(row[2]),toggle);
+                toggle.Click+=delegate{Switches.Want(true,group,toggle.Checked);if(toolScope!=null){toolSnapshot.OverriddenGroups.Add(group);actions.ShowFollow(true);}};
+                if(toolScope!=null)actions.Follow=Command("跟随全局",delegate{Switches.Want(true,group,null);toolSnapshot.OverriddenGroups.Remove(group);toolSnapshot.Groups[group]=GlobalOn(group);toggle.Checked=GlobalOn(group);actions.ShowFollow(false);RefreshControls();});
+                refresh.Add(delegate{if(!Switches.Pending(true,group)){toggle.Checked=GroupOn(group);actions.ShowFollow(toolSnapshot.OverriddenGroups.Contains(group));}});
+                actions.Arrange();
+                AddRow(builtin,()=>L.Text(row[1]),()=>(group=="blender"?L.Text(row[2])+" "+(toolSnapshot.Blender!=null?L.Text("已检测到 Blender：")+toolSnapshot.Blender:L.Text("没有检测到本机安装的 Blender。")):L.Text(row[2]))+FollowNote(toolSnapshot.OverriddenGroups.Contains(group),GlobalOn(group)),actions);
             }
             var custom=AddSection("自定义工具");
             if(toolSnapshot.Tools.Count==0)AddRow(custom,"还没有自定义工具","粘贴 GitHub 上 MCP 服务器给出的配置即可添加；也可以照 mcp-tools 文件夹里的 AGENT.md 自己编写。",null);
@@ -159,7 +185,8 @@ namespace CMCP {
                 string id=tool.Id;
                 var actions=new ToolRowActions();
                 actions.Log=Command("日志",delegate{var item=CurrentTool(id);if(item!=null&&File.Exists(item.Log))OpenPath(item.Log);else SetFeedback("这个工具还没有日志。",false);});
-                actions.Remove=Danger("删除",delegate{
+                if(toolScope!=null)actions.Follow=Command("跟随全局",delegate{var item=CurrentTool(id);if(item==null)return;Switches.Want(false,id,null);item.Overridden=false;item.Enabled=item.Global;actions.Toggle.Checked=item.Global&&item.Approved;actions.ShowFollow(false);RefreshControls();});
+                else actions.Remove=Danger("删除",delegate{
                     var item=CurrentTool(id);if(item==null)return;
                     if(!ConfirmTool(String.Format(L.Text("删除 {0}？\r\n\r\n文件夹会移到 mcp-tools 里以 .removed- 开头的文件夹，可以手动恢复。"),item.Name)))return;
                     ToolAction(()=>Tools.Remove(id),"已删除，正在通知已连接的 Claude。");});
@@ -171,10 +198,10 @@ namespace CMCP {
                         if(!ConfirmTool(item.Describe+"\r\n\r\n"+L.Text("开启这个工具吗？"))){toggle.Checked=false;return;}
                         item.Approved=true;
                     }
-                    Switches.Want(false,id,next);};
-                refresh.Add(delegate{var item=CurrentTool(id);if(item==null)return;toggle.Enabled=item.Errors.Length==0;if(!Switches.Pending(false,id))toggle.Checked=item.Enabled&&item.Approved;});
+                    Switches.Want(false,id,next);if(toolScope!=null){item.Overridden=true;actions.ShowFollow(true);}};
+                refresh.Add(delegate{var item=CurrentTool(id);if(item==null)return;toggle.Enabled=item.Errors.Length==0;if(!Switches.Pending(false,id)){toggle.Checked=item.Enabled&&item.Approved;actions.ShowFollow(item.Overridden);}});
                 actions.Arrange();
-                AddRow(custom,()=>{var item=CurrentTool(id);return item==null?"":item.Name+(item.Version!=null?" "+item.Version:"");},()=>{var item=CurrentTool(id);return item==null?"":ToolDetail(item);},actions);
+                AddRow(custom,()=>{var item=CurrentTool(id);return item==null?"":item.Name+(item.Version!=null?" "+item.Version:"");},()=>{var item=CurrentTool(id);return item==null?"":ToolDetail(item)+FollowNote(item.Overridden,item.Global);},actions);
             }
             var manage=AddSection("管理");
             AddRow(manage,"添加工具","粘贴 MCP 服务器的配置（例如 README 里 Claude Desktop 的 mcpServers 片段）。添加后默认关闭。",Command("添加",delegate{
@@ -215,49 +242,54 @@ namespace CMCP {
     }
     // Collects quick switch clicks and saves only the last state of each switch, one save at a time.
     internal sealed class ToolSwitchSaver : IDisposable {
-        readonly Dictionary<string,bool> groups=new Dictionary<string,bool>(),tools=new Dictionary<string,bool>();
-        Dictionary<string,bool> sendingGroups=new Dictionary<string,bool>(),sendingTools=new Dictionary<string,bool>();
+        readonly Dictionary<string,bool?> groups=new Dictionary<string,bool?>(),tools=new Dictionary<string,bool?>();
+        Dictionary<string,bool?> sendingGroups=new Dictionary<string,bool?>(),sendingTools=new Dictionary<string,bool?>();
         readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=350};
-        readonly Control owner;readonly Func<IToolBackend> backend;readonly Action<string> failed;readonly Action saved;
+        readonly Control owner;readonly Func<IToolBackend> backend;readonly Func<string> device;readonly Action<string> failed;readonly Action saved;
         internal volatile bool Busy;internal int Saves;
-        internal ToolSwitchSaver(Control owner,Func<IToolBackend> backend,Action<string> failed,Action saved){this.owner=owner;this.backend=backend;this.failed=failed;this.saved=saved;timer.Tick+=delegate{Flush();};}
+        internal ToolSwitchSaver(Control owner,Func<IToolBackend> backend,Func<string> device,Action<string> failed,Action saved){this.owner=owner;this.backend=backend;this.device=device;this.failed=failed;this.saved=saved;timer.Tick+=delegate{Flush();};}
         internal bool Pending(bool group,string id){return group?groups.ContainsKey(id)||sendingGroups.ContainsKey(id):tools.ContainsKey(id)||sendingTools.ContainsKey(id);}
-        internal void Want(bool group,string id,bool on){(group?groups:tools)[id]=on;timer.Stop();timer.Start();}
+        // on null: this device follows the computer's switch again.
+        internal void Want(bool group,string id,bool? on){(group?groups:tools)[id]=on;timer.Stop();timer.Start();}
         internal void Flush(){
             timer.Stop();
             if(Busy||groups.Count+tools.Count==0)return;
             var target=backend();if(target==null)return;
-            sendingGroups=new Dictionary<string,bool>(groups);sendingTools=new Dictionary<string,bool>(tools);groups.Clear();tools.Clear();Busy=true;Saves++;
-            var g=sendingGroups;var t=sendingTools;
+            sendingGroups=new Dictionary<string,bool?>(groups);sendingTools=new Dictionary<string,bool?>(tools);groups.Clear();tools.Clear();Busy=true;Saves++;
+            var g=sendingGroups;var t=sendingTools;var d=device();
             ThreadPool.QueueUserWorkItem(delegate{
-                string error=null;try{target.Apply(g,t);}catch(Exception e){error=e.Message;}
+                string error=null;try{target.Apply(g,t,d);}catch(Exception e){error=e.Message;}
                 Busy=false;
                 try{owner.BeginInvoke((Action)delegate{
-                    sendingGroups=new Dictionary<string,bool>();sendingTools=new Dictionary<string,bool>();
+                    sendingGroups=new Dictionary<string,bool?>();sendingTools=new Dictionary<string,bool?>();
                     if(error!=null)failed(error);
                     if(groups.Count+tools.Count>0)Flush();else saved();
                 });}catch{}
             });
         }
-        // The page is closing: whatever is still waiting is saved after the save in flight.
+        // The page is closing or the scope changes: what is still waiting is saved after the save in flight.
         internal void Drain(){
             timer.Stop();
             if(groups.Count+tools.Count==0)return;
             var target=backend();if(target==null)return;
-            var g=new Dictionary<string,bool>(groups);var t=new Dictionary<string,bool>(tools);groups.Clear();tools.Clear();Saves++;
-            ThreadPool.QueueUserWorkItem(delegate{var clock=Stopwatch.StartNew();while(Busy&&clock.ElapsedMilliseconds<30000)Thread.Sleep(20);try{target.Apply(g,t);}catch{}});
+            var g=new Dictionary<string,bool?>(groups);var t=new Dictionary<string,bool?>(tools);var d=device();groups.Clear();tools.Clear();Saves++;
+            ThreadPool.QueueUserWorkItem(delegate{var clock=Stopwatch.StartNew();while(Busy&&clock.ElapsedMilliseconds<30000)Thread.Sleep(20);try{target.Apply(g,t,d);}catch{}});
         }
         public void Dispose(){timer.Dispose();}
     }
     // Log and delete buttons beside a tool's switch, laid out as one row control.
     internal sealed class ToolRowActions : Panel {
-        internal ModernButton Log,Remove;internal ToggleSwitch Toggle;
+        internal ModernButton Log,Remove,Follow;internal ToggleSwitch Toggle;
+        // Buttons left of the switch; the width stays fixed, so a Follow button that comes and
+        // goes never moves the row's text.
         internal void Arrange(){
-            Controls.AddRange(new Control[]{Log,Remove,Toggle});
-            foreach(var b in new[]{Log,Remove})b.Size=new Size(Math.Max(64,TextRenderer.MeasureText(L.Text(b.Text),b.Font).Width+28),34);
-            Log.Location=new Point(0,2);Remove.Location=new Point(Log.Right+8,2);Toggle.Location=new Point(Remove.Right+12,4);
-            Size=new Size(Toggle.Right,38);
+            var buttons=new[]{Log,Remove,Follow}.Where(b=>b!=null).ToList();
+            Controls.AddRange(buttons.Cast<Control>().Concat(new Control[]{Toggle}).ToArray());
+            foreach(var b in buttons)b.Size=new Size(Math.Max(64,TextRenderer.MeasureText(L.Text(b.Text),b.Font).Width+28),34);
+            int x=0;foreach(var b in buttons){b.Location=new Point(x,2);x=b.Right+8;}
+            Toggle.Location=new Point(x+4,4);Size=new Size(Toggle.Right,38);
         }
+        internal void ShowFollow(bool shown){if(Follow!=null&&Follow.Visible!=shown)Follow.Visible=shown;}
     }
     // The paste box for a server's Claude Desktop snippet.
     internal static class ToolImportDialog {
@@ -277,7 +309,7 @@ namespace CMCP {
         internal static void Check(Control owner,IToolBackend backend){
             if(backend==null)return;
             ThreadPool.QueueUserWorkItem(delegate{
-                ToolSnapshot snapshot;try{snapshot=backend.Status();}catch{return;}
+                ToolSnapshot snapshot;try{snapshot=backend.Status(null);}catch{return;}
                 bool on;snapshot.Groups.TryGetValue("blender",out on);
                 if(snapshot.Error!=null||snapshot.Blender==null||snapshot.BlenderOfferDone||on)return;
                 try{owner.BeginInvoke((Action)delegate{
@@ -293,19 +325,27 @@ namespace CMCP {
         internal readonly ToolSnapshot State=new ToolSnapshot{Root=Path.Combine(Path.GetTempPath(),"cmcp-fake-mcp-tools")};
         internal readonly List<string> Calls=new List<string>();
         internal FakeToolBackend(){foreach(var g in new[]{"files","commands","processes","toolchains","desktop"})State.Groups[g]=true;State.Groups["blender"]=false;}
-        // A new copy each time, as the command line returns.
-        public ToolSnapshot Status(){Calls.Add("status");lock(State){
-            var copy=new ToolSnapshot{Root=State.Root,Blender=State.Blender,BlenderOfferDone=State.BlenderOfferDone,IdleMinutes=State.IdleMinutes};
-            foreach(var g in State.Groups)copy.Groups[g.Key]=g.Value;
-            foreach(var t in State.Tools)copy.Tools.Add(new ToolInfo{Id=t.Id,Name=t.Name,Description=t.Description,Version=t.Version,Log=t.Log,DescribeZh=t.DescribeZh,DescribeEn=t.DescribeEn,Enabled=t.Enabled,Approved=t.Approved,Errors=t.Errors,Warnings=t.Warnings,MissingSecrets=t.MissingSecrets,Tools=t.Tools});
+        internal readonly Dictionary<string,Dictionary<string,bool>> GroupOverrides=new Dictionary<string,Dictionary<string,bool>>(),ToolOverrides=new Dictionary<string,Dictionary<string,bool>>();
+        // A new copy each time, as the command line returns; a device sees its overrides.
+        public ToolSnapshot Status(string device){Calls.Add("status"+(device==null?"":"@"+device));lock(State){
+            var copy=new ToolSnapshot{Root=State.Root,Blender=State.Blender,BlenderOfferDone=State.BlenderOfferDone,IdleMinutes=State.IdleMinutes,Device=device};
+            Dictionary<string,bool> groups=null,tools=null;if(device!=null){GroupOverrides.TryGetValue(device,out groups);ToolOverrides.TryGetValue(device,out tools);}
+            foreach(var g in State.Groups){bool own;bool has=groups!=null&&groups.TryGetValue(g.Key,out own);copy.GlobalGroups[g.Key]=g.Value;copy.Groups[g.Key]=has?groups[g.Key]:g.Value;if(has)copy.OverriddenGroups.Add(g.Key);}
+            foreach(var t in State.Tools){bool has=tools!=null&&tools.ContainsKey(t.Id);
+                copy.Tools.Add(new ToolInfo{Id=t.Id,Name=t.Name,Description=t.Description,Version=t.Version,Log=t.Log,DescribeZh=t.DescribeZh,DescribeEn=t.DescribeEn,Enabled=has?tools[t.Id]:t.Enabled,Global=t.Enabled,Overridden=has,Approved=t.Approved,Errors=t.Errors,Warnings=t.Warnings,MissingSecrets=t.MissingSecrets,Tools=t.Tools});}
             return copy;}}
         public void SetGroup(string group,bool on){Calls.Add("group "+group+" "+on);State.Groups[group]=on;}
         public void SetTool(string id,bool on){Calls.Add("tool "+id+" "+on);var t=State.Tools.First(x=>x.Id==id);t.Enabled=on;if(on)t.Approved=true;}
         internal int Delay;
-        public void Apply(IDictionary<string,bool> groups,IDictionary<string,bool> tools){
-            Calls.Add("apply "+String.Join(",",groups.Select(p=>p.Key+"="+p.Value).Concat(tools.Select(p=>p.Key+"="+p.Value))));
+        public void Apply(IDictionary<string,bool?> groups,IDictionary<string,bool?> tools,string device){
+            Calls.Add("apply"+(device==null?"":"@"+device)+" "+String.Join(",",groups.Select(p=>p.Key+"="+(p.Value.HasValue?p.Value.ToString():"null")).Concat(tools.Select(p=>p.Key+"="+(p.Value.HasValue?p.Value.ToString():"null")))));
             if(Delay>0)Thread.Sleep(Delay);
-            lock(State){foreach(var p in groups)State.Groups[p.Key]=p.Value;foreach(var p in tools){var t=State.Tools.First(x=>x.Id==p.Key);t.Enabled=p.Value;if(p.Value)t.Approved=true;}}
+            lock(State){
+                if(device==null){foreach(var p in groups)State.Groups[p.Key]=p.Value.Value;foreach(var p in tools){var t=State.Tools.First(x=>x.Id==p.Key);t.Enabled=p.Value.Value;if(p.Value.Value)t.Approved=true;}return;}
+                if(!GroupOverrides.ContainsKey(device))GroupOverrides[device]=new Dictionary<string,bool>();if(!ToolOverrides.ContainsKey(device))ToolOverrides[device]=new Dictionary<string,bool>();
+                foreach(var p in groups){if(p.Value.HasValue)GroupOverrides[device][p.Key]=p.Value.Value;else GroupOverrides[device].Remove(p.Key);}
+                foreach(var p in tools){if(p.Value.HasValue){ToolOverrides[device][p.Key]=p.Value.Value;if(p.Value.Value)State.Tools.First(x=>x.Id==p.Key).Approved=true;}else ToolOverrides[device].Remove(p.Key);}
+            }
         }
         public void SetIdle(int minutes){Calls.Add("idle "+minutes);State.IdleMinutes=minutes;}
         public void BlenderOfferDone(){Calls.Add("offer");State.BlenderOfferDone=true;}
@@ -369,6 +409,18 @@ namespace CMCP {
                 foreach(bool dark in new[]{true,false}){form.SetTheme(dark);Application.DoEvents();}
                 check(!page.Viewport.NativeBarsVisible&&page.Viewport.Controls[0].Controls.OfType<ToolRowActions>().All(a=>a.Right<=page.Viewport.Controls[0].Width),"tool rows fit the page in both themes");
                 L.Set("en");page.ShowTools();Application.DoEvents();check(page.Viewport.Controls[0].Controls.OfType<Label>().Any(l=>l.Text=="Built-in tools"),"the tools page is translated");L.Set("zh-CN");
+                // One device's own switches on top of this computer's.
+                page.Devices=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("work-vps","工作 VPS")};page.ShowTools();Pump(idle);Application.DoEvents();sheet=page.Viewport.Controls[0];
+                var scopeField=sheet.Controls.OfType<DropdownField>().FirstOrDefault(d=>d.AccessibleName=="适用范围");
+                check(scopeField!=null&&scopeField.Value=="","the scope list offers this computer and every device card");
+                scopeField.Choose("work-vps");Pump(()=>page.ToolScope=="work-vps"&&page.ToolState!=null&&!page.ToolsLoading);Application.DoEvents();sheet=page.Viewport.Controls[0];
+                bool globalBlender=fake.State.Groups["blender"];var deviceBlender=toggle("Blender");var row=sheet.Controls.OfType<ToolRowActions>().First(a=>a.Toggle==deviceBlender);
+                check(fake.Calls.Contains("status@work-vps")&&deviceBlender.Checked==globalBlender&&(row.Follow==null||!row.Follow.Visible),"a device first follows this computer's switches");
+                deviceBlender.AccessibilityObject.DoDefaultAction();settle();
+                check(fake.Calls.Any(c=>c=="apply@work-vps blender="+(!globalBlender))&&fake.State.Groups["blender"]==globalBlender&&deviceBlender.Checked==!globalBlender&&row.Follow.Visible,"switching in a device's scope changes only that device and offers Follow global");
+                row.Follow.AccessibilityObject.DoDefaultAction();settle();
+                check(fake.Calls.Any(c=>c=="apply@work-vps blender=null")&&!fake.GroupOverrides["work-vps"].ContainsKey("blender")&&deviceBlender.Checked==globalBlender&&!row.Follow.Visible,"Follow global removes the device's own setting");
+                page.ChooseScope(null);Pump(idle);
             }
             using(var preview=new Manager(true)){
                 preview.Show();Application.DoEvents();preview.OpenSettings();Application.DoEvents();preview.Settings.ShowTools();Application.DoEvents();

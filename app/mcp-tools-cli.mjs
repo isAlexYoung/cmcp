@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {GROUPS,INTERFACE,ID,toolsRoot,readSettings,updateSettings,requestRefresh,scanTools,parseManifest,approvalKey,describeTool,parseImport,installImported,
+import {GROUPS,INTERFACE,ID,DEVICE,effectiveSwitches,toolsRoot,readSettings,updateSettings,requestRefresh,scanTools,parseManifest,approvalKey,describeTool,parseImport,installImported,
   ensureToolsFolder,secretNames,toolLogFile,detectBlender,resolveLaunch,exposedName,defaultSecretStore,RuntimeMissing,runtimeOf} from './mcp-tools.mjs';
 import {ProxyServer,readToolCache} from './mcp-proxy.mjs';
 import {marketView,installPreset,updatePreset,checkPresets} from './mcp-market.mjs';
@@ -37,20 +37,20 @@ function runtimeProblem(m,dir){
   return null;
 }
 
-export function status(state,{platform=process.platform}={}){
+export function status(state,{platform=process.platform,device=null}={}){
   const root=toolsRoot(state,platform);try{ensureToolsFolder(root);}catch{}
-  const settings=readSettings(state);
+  const settings=readSettings(state),on=effectiveSwitches(settings,device);
   const tools=scanTools(root,{platform}).map(tool=>{
     const m=tool.manifest,cached=m?readToolCache(state,tool.id,tool.hash):null;
     const needed=m?[...Object.entries(m.env||{}),...Object.entries(m.headers||{})].filter(([,v])=>v&&typeof v==='object').map(([k])=>(m.env?.[k]?'env:':'header:')+k):[];
     const stored=secretNames(state,tool.id);
     return {id:tool.id,name:m?.name||tool.id,description:m?.description||'',version:m?.version||null,homepage:m?.homepage||null,
-      enabled:settings.tools[tool.id]===true,approved:!!m&&settings.acknowledged[tool.id]===approvalKey(m),
+      enabled:on.tools[tool.id]===true,global:settings.tools[tool.id]===true,overridden:Object.hasOwn(on.overrides.tools,tool.id),approved:!!m&&settings.acknowledged[tool.id]===approvalKey(m),
       errors:tool.errors,warnings:tool.warnings,capabilities:m?.capabilities||[],describe:m?describeTool(m):null,
       missingSecrets:needed.filter(k=>!stored.includes(k)),runtime:m?runtimeProblem(m,tool.dir):null,
       tools:cached?cached.map(t=>exposedName(tool.id,t.name)):null,log:toolLogFile(state,tool.id),recent:lastLines(toolLogFile(state,tool.id),3)};
   });
-  return {interface:INTERFACE,root,groups:settings.groups,idleMinutes:settings.idleMinutes,
+  return {interface:INTERFACE,root,device,groups:on.groups,globalGroups:settings.groups,overriddenGroups:Object.keys(on.overrides.groups),devices:Object.keys(settings.targets),idleMinutes:settings.idleMinutes,
     blender:{detected:detectBlender(platform),offerDone:settings.blenderOffer.done,enabled:settings.groups.blender},tools};
 }
 export function set(state,o){
@@ -71,19 +71,26 @@ export function set(state,o){
 }
 // Several switches in one write: the settings pages collect quick clicks and save only the last
 // state of each switch, so other CMCP processes see one change instead of a burst.
-export function applySwitches(state,{groups={},tools={}}={}){
+export function applySwitches(state,{groups={},tools={},device=null}={}){
   if(!groups||typeof groups!=='object'||Array.isArray(groups)||!tools||typeof tools!=='object'||Array.isArray(tools))throw Error('Invalid switches');
-  for(const [name,on] of Object.entries(groups))if(!GROUPS.includes(name)||typeof on!=='boolean')throw Error('Unknown group');
-  for(const [id,on] of Object.entries(tools))if(!ID.test(id)||typeof on!=='boolean')throw Error('Unknown tool');
-  const scanned=Object.values(tools).some(Boolean)?scanTools(toolsRoot(state)):[];
+  if(device!==null&&!(typeof device==='string'&&DEVICE.test(device)))throw Error('Invalid device');
+  // For a device, null removes its override so it follows this computer's switch again.
+  const allowed=on=>typeof on==='boolean'||(device!==null&&on===null);
+  for(const [name,on] of Object.entries(groups))if(!GROUPS.includes(name)||!allowed(on))throw Error('Unknown group');
+  for(const [id,on] of Object.entries(tools))if(!ID.test(id)||!allowed(on))throw Error('Unknown tool');
+  const scanned=Object.values(tools).some(on=>on===true)?scanTools(toolsRoot(state)):[];
   return updateSettings(state,s=>{
-    for(const [name,on] of Object.entries(groups))s.groups[name]=on;
+    const own=device===null?null:(s.targets[device]||={groups:{},tools:{}});
+    const target=kind=>own?own[kind]:s[kind];
+    for(const [name,on] of Object.entries(groups)){if(on===null)delete own.groups[name];else target('groups')[name]=on;}
     for(const [id,on] of Object.entries(tools)){
-      if(!on){s.tools[id]=false;continue;}
+      if(on===null){delete own.tools[id];continue;}
+      if(!on){target('tools')[id]=false;continue;}
       const tool=scanned.find(t=>t.id===id);
       if(!tool?.manifest)throw Error(tool?tool.errors.join('; '):'Unknown tool');
-      s.tools[id]=true;s.acknowledged[id]=approvalKey(tool.manifest);
+      target('tools')[id]=true;s.acknowledged[id]=approvalKey(tool.manifest);
     }
+    if(own&&!Object.keys(own.groups).length&&!Object.keys(own.tools).length)delete s.targets[device];
   });
 }
 export async function importText(state,text,{apply=false,secrets=defaultSecretStore()}={}){
@@ -130,7 +137,7 @@ if(process.argv[1]&&fs.realpathSync(process.argv[1])===fileURLToPath(import.meta
   const [command,...rest]=process.argv.slice(2),o=options(rest);
   const print=value=>process.stdout.write(JSON.stringify(value)+'\n');
   try{
-    if(command==='status')print(status(stateOf(o)));
+    if(command==='status')print(status(stateOf(o),{device:o.device??null}));
     else if(command==='set'){set(stateOf(o),o);print({saved:true});}
     else if(command==='apply'){const s=applySwitches(stateOf(o),JSON.parse(await stdin()||'{}'));print({saved:true,groups:s.groups,tools:s.tools});}
     else if(command==='refresh'){requestRefresh(stateOf(o));print({refreshed:true});}
