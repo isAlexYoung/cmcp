@@ -97,7 +97,7 @@ const backendTools = compatibleToolDefinitions(await backend.listTools());
 const instructions = `These tools operate on the user's physical Windows PC. File roots: ${config.roots.join(', ')}. Use absolute Windows paths such as D:\\work\\my-project. To run commands on that Windows PC, use windows_execute (PowerShell/CMD), windows_run_program (an installed executable), or windows_start_process (background work). Read output with windows_process_status and stop managed jobs with windows_stop_process. Use windows_toolchain_info to discover installed C/C++, CMake, Node, Python, Java, Android and other tools. Use windows_adb or windows_adb_devices for Android devices. Use windows_browser_open for local web previews, windows_screenshot for visual checks, and windows_desktop_action for basic interactive Windows GUI input. For MP4, MP3, WAV, PDF, Office, ZIP and other binary files use windows_binary_info plus the chunked windows_binary_begin/write/finish tools; do not put whole files in text or in the cloud computer's Bash. These tools run as the current Windows account without automatic elevation. Bash and terminals built into this cloud computer run on Linux; use the windows_* MCP tools for Windows work. Session IDs belong to the Windows bridge. Other applications' or other agents' private connector tools are not automatically exported.`;
 // Built-in groups and the user's mcp-tools behind one catalog; switches apply to every connection.
 const filesystem = { definitions: backendTools.tools, call: (name, args) => backend.callTool({ name, arguments: args }, undefined, { timeout: 120000 }) };
-const registry = createToolRegistry({ stateDir, providers: [filesystem, windows, binary, blender], serverName: 'windows-pc-files', version: bridgeVersion,
+const registry = createToolRegistry({ stateDir, roots: config.roots, providers: [filesystem, windows, binary, blender], serverName: 'windows-pc-files', version: bridgeVersion,
   instructions: { base: instructions, blender: blenderInstructions }, watch: !selfTest, log: text => log('tools: ' + text) });
 if (selfTest) {
   process.stdout.write(`SELFTEST-OK ${registry.list().tools.length} tools; node ${process.version}\n`);
@@ -137,7 +137,7 @@ app.post('/mcp', async (req, res) => {
   });
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const view = registry.list();
-    return { tools: view.tools, _meta: { 'cmcp/catalog': { schema: 1, revision: view.revision, groups: view.groups } } };
+    return { tools: view.tools, _meta: { 'cmcp/catalog': { schema: 1, revision: view.revision, groups: view.groups, exposure: view.exposure } } };
   });
   server.setRequestHandler(CallToolRequestSchema, async request => {
     log(`tool=${request.params.name}`);

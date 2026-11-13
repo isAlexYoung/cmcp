@@ -62,6 +62,12 @@ test('turning a local tool on notifies the cloud client through the real relay, 
   const after=await names(3);assert.ok(after.includes('fx__echo'),after.join(','));
   send({jsonrpc:'2.0',id:4,method:'tools/call',params:{name:'fx__echo',arguments:{text:'through the chain'}}});
   assert.equal((await reply(4)).result.content[0].text,'through the chain');
+  // Resources and prompts of the tool reach the client the same way.
+  await until(async()=>{send({jsonrpc:'2.0',id:20,method:'resources/list'});const r=await reply(20);lines.splice(lines.indexOf(r),1);return r.result.resources.length===1;});
+  send({jsonrpc:'2.0',id:21,method:'resources/read',params:{uri:'fixture://note'}});assert.equal((await reply(21)).result.contents[0].text,'note text');
+  send({jsonrpc:'2.0',id:22,method:'prompts/list'});assert.deepEqual((await reply(22)).result.prompts.map(x=>x.name),['fx__greet']);
+  send({jsonrpc:'2.0',id:23,method:'prompts/get',params:{name:'fx__greet',arguments:{who:'Ada'}}});assert.equal((await reply(23)).result.messages[0].content.text,'Say hello to Ada');
+  assert.ok(lines.find(m=>m.id===1).result.capabilities.resources&&lines.find(m=>m.id===1).result.capabilities.prompts);
   // A tool's question reaches the client as elicitation/create and the answer goes back to it.
   send({jsonrpc:'2.0',id:6,method:'tools/call',params:{name:'fx__ask',arguments:{}}});
   const question=await until(()=>lines.find(m=>m.method==='elicitation/create'));

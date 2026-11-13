@@ -23,7 +23,7 @@ import {currentInstallation} from './uninstall.mjs';
 import {closeSessions,detectTerminals,openTerminal} from './ssh.mjs';
 import {closePages,detectBrowsers,openPage} from './browsers.mjs';
 import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../app/ssh-terminal.mjs';
-import {status as toolStatus,set as setTools,applySwitches,importText,remove as removeTool} from '../app/mcp-tools-cli.mjs';
+import {status as toolStatus,set as setTools,applySwitches,importText,remove as removeTool,signIn as toolSignIn} from '../app/mcp-tools-cli.mjs';
 import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
 import {marketView,installPreset,updatePreset} from '../app/mcp-market.mjs';
 import {startToolHost} from '../app/tool-host.mjs';
@@ -113,7 +113,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/settings':input=>store.serial(()=>{store.settings(input);return {saved:true};}),
     // Settings > Tools: one set of switches for this Mac, shared by every connection.
     '/api/tools':async input=>toolStatus(directory,{device:typeof input?.device==='string'&&input.device?input.device:null}),
-    '/api/tools/set':async input=>{setTools(directory,{group:input.group,tool:input.tool,on:input.on===true,idle:input.idle,'blender-offer-done':input.blenderOfferDone===true});return {saved:true};},
+    '/api/tools/set':async input=>{setTools(directory,{group:input.group,tool:input.tool,on:input.on===true,idle:input.idle,exposure:input.exposure,'blender-offer-done':input.blenderOfferDone===true});return {saved:true};},
     '/api/tools/apply':async input=>{const s=applySwitches(directory,{groups:input.groups||{},tools:input.tools||{},device:typeof input.device==='string'&&input.device?input.device:null});return {saved:true,groups:s.groups,tools:s.tools};},
     // Settings > Market: reviewed presets; install writes the tool folder, update needs a confirmation.
     '/api/market':async()=>({presets:marketView(directory)}),
@@ -122,6 +122,8 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/tools/refresh':async()=>{requestRefresh(directory);return {refreshed:true};},
     '/api/tools/import':async input=>{if(typeof input.text!=='string'||input.text.length>256*1024)throw Error('粘贴的内容无效');return importText(directory,input.text,{apply:input.apply===true,...toolSecrets?{secrets:toolSecrets}:{}});},
     '/api/tools/remove':input=>removeTool(directory,input.id),
+    // Opens the provider's sign-in page in the browser and waits (at most 5 minutes) for the answer.
+    '/api/tools/login':input=>toolSignIn(directory,String(input.id||''),toolSecrets?{secrets:toolSecrets}:{}),
     '/api/tools/open':async input=>{
       const target=input.what==='folder'?toolsRoot(directory):typeof input.id==='string'&&ID.test(input.id)?toolLogFile(directory,input.id):null;
       if(!target||!fs.existsSync(target))throw Error(input.what==='folder'?'mcp-tools 文件夹不存在':'这个工具还没有日志。');

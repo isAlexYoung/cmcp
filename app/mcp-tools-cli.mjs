@@ -10,13 +10,16 @@
 //   market  --state DIR                    (presets with requirements, installed and newer versions)
 //   install --state DIR --preset ID        (writes mcp-tools/ID; the tool stays off)
 //   update  --state DIR --preset ID --confirmed   (only after the user confirmed the new version)
+//   login   --state DIR --tool ID          (browser sign-in for a remote server with "auth": oauth)
+//   logout  --state DIR --tool ID
 //   presets-check [--online]               (CI: every preset valid, pinned, published)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {GROUPS,INTERFACE,ID,DEVICE,effectiveSwitches,toolsRoot,readSettings,updateSettings,requestRefresh,scanTools,parseManifest,approvalKey,describeTool,parseImport,installImported,
-  ensureToolsFolder,secretNames,toolLogFile,detectBlender,resolveLaunch,exposedName,defaultSecretStore,RuntimeMissing,runtimeOf} from './mcp-tools.mjs';
+  ensureToolsFolder,secretNames,toolLogFile,detectBlender,resolveLaunch,exposedName,defaultSecretStore,RuntimeMissing,runtimeOf,isRemote} from './mcp-tools.mjs';
+import {login,logout,loginNeeded,signedIn} from './mcp-oauth.mjs';
 import {ProxyServer,readToolCache} from './mcp-proxy.mjs';
 import {marketView,installPreset,updatePreset,checkPresets} from './mcp-market.mjs';
 
@@ -48,9 +51,10 @@ export function status(state,{platform=process.platform,device=null}={}){
       enabled:on.tools[tool.id]===true,global:settings.tools[tool.id]===true,overridden:Object.hasOwn(on.overrides.tools,tool.id),approved:!!m&&settings.acknowledged[tool.id]===approvalKey(m),
       errors:tool.errors,warnings:tool.warnings,capabilities:m?.capabilities||[],describe:m?describeTool(m):null,
       missingSecrets:needed.filter(k=>!stored.includes(k)),runtime:m?runtimeProblem(m,tool.dir):null,
-      tools:cached?cached.map(t=>exposedName(tool.id,t.name)):null,log:toolLogFile(state,tool.id),recent:lastLines(toolLogFile(state,tool.id),3)};
+      tools:cached?cached.map(t=>exposedName(tool.id,t.name)):null,log:toolLogFile(state,tool.id),recent:lastLines(toolLogFile(state,tool.id),3),
+      remote:!!m&&isRemote(m),auth:m?.auth?.type==='oauth'?{type:'oauth',signedIn:signedIn(stored),needed:loginNeeded(state,tool.id)}:null};
   });
-  return {interface:INTERFACE,root,device,groups:on.groups,globalGroups:settings.groups,overriddenGroups:Object.keys(on.overrides.groups),devices:Object.keys(settings.targets),idleMinutes:settings.idleMinutes,
+  return {interface:INTERFACE,root,device,groups:on.groups,globalGroups:settings.groups,overriddenGroups:Object.keys(on.overrides.groups),devices:Object.keys(settings.targets),idleMinutes:settings.idleMinutes,exposure:settings.exposure,
     blender:{detected:detectBlender(platform),offerDone:settings.blenderOffer.done,enabled:settings.groups.blender},tools};
 }
 export function set(state,o){
@@ -67,6 +71,7 @@ export function set(state,o){
     }
     if(o.idle!==undefined){const n=Number(o.idle);if(!Number.isInteger(n)||n<0||n>1440)throw Error('Idle minutes must be 0-1440');s.idleMinutes=n;}
     if(o['blender-offer-done'])s.blenderOffer.done=true;
+    if(o.exposure!==undefined){if(!['auto','full','compact'].includes(o.exposure))throw Error('Exposure must be auto, full or compact');s.exposure=o.exposure;}
   });
 }
 // Several switches in one write: the settings pages collect quick clicks and save only the last
@@ -117,6 +122,19 @@ export async function remove(state,id,{waitMs=15000}={}){
   return {removed:id,keptAt:target};
 }
 // Validate, start once, list the names Claude will see, optionally call one tool, stop.
+function oauthTool(state,id){
+  const tool=scanTools(toolsRoot(state)).find(t=>t.id===id);
+  if(!tool)throw Error('Unknown tool');if(!tool.manifest)throw Error(tool.errors.join('; '));
+  if(tool.manifest.auth?.type!=='oauth')throw Error('This tool has no sign-in');
+  return tool;
+}
+export async function signIn(state,id,options={}){
+  const tool=oauthTool(state,id);
+  const result=await login(state,id,{manifest:tool.manifest,secrets:defaultSecretStore(),...options});
+  requestRefresh(state);return result;
+}
+export async function signOut(state,id){oauthTool(state,id);const result=await logout(state,id,{secrets:defaultSecretStore()});requestRefresh(state);return result;}
+
 export async function check(folder,{call,args,state,secrets=defaultSecretStore()}={}){
   const dir=path.resolve(folder),id=path.basename(dir),file=path.join(dir,'cmcp-tool.json');
   const text=fs.readFileSync(file,'utf8'),parsed=parseManifest(text,{id,dir});
@@ -144,6 +162,8 @@ if(process.argv[1]&&fs.realpathSync(process.argv[1])===fileURLToPath(import.meta
     else if(command==='import')print(await importText(stateOf(o),await stdin(),{apply:o.apply===true}));
     else if(command==='remove')print(await remove(stateOf(o),o.tool));
     else if(command==='market')print({presets:marketView(stateOf(o))});
+    else if(command==='login')print(await signIn(stateOf(o),o.tool,{onUrl:url=>process.stderr.write('Sign-in page: '+url+'\n')}));
+    else if(command==='logout')print(await signOut(stateOf(o),o.tool));
     else if(command==='install'){const r=installPreset(stateOf(o),o.preset);requestRefresh(stateOf(o));print(r);}
     else if(command==='update'){const r=updatePreset(stateOf(o),o.preset,{confirmed:o.confirmed===true});requestRefresh(stateOf(o));print(r);}
     else if(command==='presets-check'){const r=await checkPresets({online:o.online===true});

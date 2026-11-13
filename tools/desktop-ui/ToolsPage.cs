@@ -15,6 +15,8 @@ namespace CMCP {
     internal sealed class ToolInfo {
         internal string Id,Name,Description,Version,Homepage,Log,DescribeZh,DescribeEn,RuntimeZh,RuntimeEn;
         internal bool Enabled,Approved,Overridden,Global;
+        // A remote server with a browser sign-in: whether it is signed in and whether it asked again.
+        internal bool Remote,SignIn,SignedIn,SignInNeeded;
         internal string[] Errors=new string[0],Warnings=new string[0],MissingSecrets=new string[0],Tools,Recent=new string[0];
         internal string Describe{get{return L.Language=="en"?DescribeEn:DescribeZh;}}
         internal string Runtime{get{return L.Language=="en"?RuntimeEn:RuntimeZh;}}
@@ -23,7 +25,7 @@ namespace CMCP {
         internal readonly Dictionary<string,bool> Groups=new Dictionary<string,bool>(),GlobalGroups=new Dictionary<string,bool>();
         internal readonly HashSet<string> OverriddenGroups=new HashSet<string>();internal string Device;
         internal readonly List<ToolInfo> Tools=new List<ToolInfo>();
-        internal string Root,Blender,Error;internal bool BlenderOfferDone;internal int IdleMinutes=30;
+        internal string Root,Blender,Error,Exposure="auto";internal bool BlenderOfferDone;internal int IdleMinutes=30;
         static string S(IDictionary<string,object> d,string key){object v;return d!=null&&d.TryGetValue(key,out v)&&v!=null?Convert.ToString(v):null;}
         static bool B(IDictionary<string,object> d,string key){object v;return d!=null&&d.TryGetValue(key,out v)&&v is bool&&(bool)v;}
         static IDictionary<string,object> O(IDictionary<string,object> d,string key){object v;return d!=null&&d.TryGetValue(key,out v)?v as IDictionary<string,object>:null;}
@@ -32,19 +34,20 @@ namespace CMCP {
             var snapshot=new ToolSnapshot();var data=new JavaScriptSerializer{MaxJsonLength=8*1024*1024}.DeserializeObject(json) as IDictionary<string,object>;
             if(data==null)throw new FormatException("Invalid tool status");
             if(S(data,"error")!=null){snapshot.Error=S(data,"error");return snapshot;}
-            snapshot.Root=S(data,"root");object idle;if(data.TryGetValue("idleMinutes",out idle)&&idle is int)snapshot.IdleMinutes=(int)idle;
+            snapshot.Root=S(data,"root");snapshot.Exposure=S(data,"exposure")??"auto";object idle;if(data.TryGetValue("idleMinutes",out idle)&&idle is int)snapshot.IdleMinutes=(int)idle;
             var groups=O(data,"groups");if(groups!=null)foreach(var pair in groups)if(pair.Value is bool)snapshot.Groups[pair.Key]=(bool)pair.Value;
             var global=O(data,"globalGroups");foreach(var pair in global??groups??new Dictionary<string,object>())if(pair.Value is bool)snapshot.GlobalGroups[pair.Key]=(bool)pair.Value;
             foreach(var name in A(data,"overriddenGroups",Convert.ToString)??new string[0])snapshot.OverriddenGroups.Add(name);snapshot.Device=S(data,"device");
             var blender=O(data,"blender");snapshot.Blender=S(blender,"detected");snapshot.BlenderOfferDone=B(blender,"offerDone");
             object[] tools=null;object raw;if(data.TryGetValue("tools",out raw))tools=raw as object[];
             foreach(var item in tools??new object[0]){
-                var t=item as IDictionary<string,object>;if(t==null)continue;var describe=O(t,"describe");var runtime=O(t,"runtime");
+                var t=item as IDictionary<string,object>;if(t==null)continue;var describe=O(t,"describe");var runtime=O(t,"runtime");var auth=O(t,"auth");
                 snapshot.Tools.Add(new ToolInfo{Id=S(t,"id"),Name=S(t,"name")??S(t,"id"),Description=S(t,"description")??"",Version=S(t,"version"),Homepage=S(t,"homepage"),Log=S(t,"log"),
                     Enabled=B(t,"enabled"),Approved=B(t,"approved"),Overridden=B(t,"overridden"),Global=t.ContainsKey("global")?B(t,"global"):B(t,"enabled"),Errors=A(t,"errors",Convert.ToString)??new string[0],
                     Warnings=A(t,"warnings",w=>{var d=w as IDictionary<string,object>;return d==null?null:S(d,"code");})??new string[0],
                     MissingSecrets=A(t,"missingSecrets",Convert.ToString)??new string[0],Tools=A(t,"tools",Convert.ToString),Recent=A(t,"recent",Convert.ToString)??new string[0],
-                    DescribeZh=S(describe,"zh"),DescribeEn=S(describe,"en"),RuntimeZh=S(runtime,"zh"),RuntimeEn=S(runtime,"en")});
+                    DescribeZh=S(describe,"zh"),DescribeEn=S(describe,"en"),RuntimeZh=S(runtime,"zh"),RuntimeEn=S(runtime,"en"),
+                    Remote=B(t,"remote"),SignIn=auth!=null,SignedIn=B(auth,"signedIn"),SignInNeeded=B(auth,"needed")});
             }
             return snapshot;
         }
@@ -56,16 +59,20 @@ namespace CMCP {
         // device null: the switches for this computer; a device: its overrides (null value = follow).
         void Apply(IDictionary<string,bool?> groups,IDictionary<string,bool?> tools,string device);
         void SetIdle(int minutes);
+        void SetExposure(string exposure);
         void BlenderOfferDone();
         void Refresh();
         string Import(string text,bool apply);
         void Remove(string id);
+        // Opens the provider's page in the browser and waits for the sign-in (at most 5 minutes).
+        void SignIn(string id);
     }
     // Runs app/mcp-tools-cli.mjs with the bundled node; pasted text goes through stdin only.
     internal sealed partial class CliToolBackend : IToolBackend {
         readonly string kit,state;
         internal CliToolBackend(string kit,string state){this.kit=kit;this.state=state;}
-        string Run(string input,params string[] args){
+        string Run(string input,params string[] args){return RunFor(60000,input,args);}
+        string RunFor(int timeoutMs,string input,params string[] args){
             var start=new ProcessStartInfo(Path.Combine(kit,"runtime","node.exe")){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=kit,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8};
             start.Arguments=String.Join(" ",new[]{Path.Combine(kit,"mcp-tools-cli.mjs")}.Concat(args).Concat(new[]{"--state",state}).Select(SshChannel.Quote));
             start.EnvironmentVariables["CMCP_STATE_DIR"]=state;
@@ -73,7 +80,7 @@ namespace CMCP {
                 var error=new StringBuilder();process.ErrorDataReceived+=delegate(object s,DataReceivedEventArgs e){if(e.Data!=null&&error.Length<4096)error.AppendLine(e.Data);};process.BeginErrorReadLine();
                 var bytes=new UTF8Encoding(false).GetBytes(input??"");process.StandardInput.BaseStream.Write(bytes,0,bytes.Length);process.StandardInput.Close();
                 string output=process.StandardOutput.ReadToEnd();
-                if(!process.WaitForExit(60000)){try{process.Kill();}catch{}throw new TimeoutException("Tool command timed out");}
+                if(!process.WaitForExit(timeoutMs)){try{process.Kill();}catch{}throw new TimeoutException("Tool command timed out");}
                 var line=output.Split('\n').Select(l=>l.Trim()).LastOrDefault(l=>l.StartsWith("{"));
                 if(line==null)throw new InvalidOperationException(error.Length>0?error.ToString():"No reply from the tool command");
                 var data=new JavaScriptSerializer{MaxJsonLength=8*1024*1024}.DeserializeObject(line) as IDictionary<string,object>;object message;
@@ -86,10 +93,12 @@ namespace CMCP {
         public void SetTool(string id,bool on){Run(null,"set","--tool",id,on?"--on":"--off");}
         public void Apply(IDictionary<string,bool?> groups,IDictionary<string,bool?> tools,string device){Run(new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"groups",groups},{"tools",tools},{"device",String.IsNullOrEmpty(device)?null:device}}),"apply");}
         public void SetIdle(int minutes){Run(null,"set","--idle",minutes.ToString());}
+        public void SetExposure(string exposure){Run(null,"set","--exposure",exposure);}
         public void BlenderOfferDone(){Run(null,"set","--blender-offer-done");}
         public void Refresh(){Run(null,"refresh");}
         public string Import(string text,bool apply){return apply?Run(text,"import","--apply"):Run(text,"import");}
         public void Remove(string id){Run(null,"remove","--tool",id);}
+        public void SignIn(string id){RunFor(330000,null,"login","--tool",id);}
     }
 
     internal sealed partial class SettingsPage {
@@ -123,7 +132,7 @@ namespace CMCP {
         }
         static bool SameShape(ToolSnapshot a,ToolSnapshot b){
             if(a==null||b==null||a.Error!=null||b.Error!=null)return false;
-            return a.Tools.Select(t=>t.Id).SequenceEqual(b.Tools.Select(t=>t.Id));
+            return a.Tools.Select(t=>t.Id+(t.SignIn?"+signin":"")).SequenceEqual(b.Tools.Select(t=>t.Id+(t.SignIn?"+signin":"")));
         }
         void RebuildKeepingScroll(){int y=-Viewport.AutoScrollPosition.Y;ToolRebuilds++;Build();Viewport.AutoScrollPosition=new Point(0,y);}
         internal int ToolRebuilds;
@@ -190,6 +199,10 @@ namespace CMCP {
                     var item=CurrentTool(id);if(item==null)return;
                     if(!ConfirmTool(String.Format(L.Text("删除 {0}？\r\n\r\n文件夹会移到 mcp-tools 里以 .removed- 开头的文件夹，可以手动恢复。"),item.Name)))return;
                     ToolAction(()=>Tools.Remove(id),"已删除，正在通知已连接的 Claude。");});
+                if(tool.SignIn)actions.SignIn=Command("登录账号",delegate{
+                    var item=CurrentTool(id);if(item==null)return;
+                    SetFeedback(String.Format(L.Text("正在浏览器里打开 {0} 的登录页面，请在 5 分钟内完成。"),item.Name),false);
+                    ToolAction(()=>Tools.SignIn(id),"已登录，正在通知已连接的 Claude。");});
                 actions.Toggle=new ToggleSwitch{Text=tool.Name,Checked=tool.Enabled&&tool.Approved,Colors=colors,Size=new Size(48,30),Enabled=tool.Errors.Length==0};
                 var toggle=actions.Toggle;
                 toggle.Click+=delegate{
@@ -216,6 +229,10 @@ namespace CMCP {
             idle.Chosen+=key=>ToolAction(()=>Tools.SetIdle(Int32.Parse(key)),"设置已保存。");
             refresh.Add(delegate{idle.Value=new[]{10,30,120,0}.Contains(toolSnapshot.IdleMinutes)?toolSnapshot.IdleMinutes.ToString():"30";idle.AccessibleName=L.Text("空闲后停止");idle.Invalidate();});
             AddRow(manage,"空闲后停止","第三方工具多久没有被调用就停止；下次调用时会自动重新启动。",idle);
+            var exposure=new DropdownField(new[]{new KeyValuePair<string,string>("auto","自动"),new KeyValuePair<string,string>("full","完整"),new KeyValuePair<string,string>("compact","紧凑")}){Font=sheet.Font,Size=new Size(150,36),Colors=colors};
+            exposure.Chosen+=key=>ToolAction(()=>Tools.SetExposure(key),"设置已保存。");
+            refresh.Add(delegate{exposure.Value=toolSnapshot.Exposure;exposure.AccessibleName=L.Text("工具展示方式");exposure.Invalidate();});
+            AddRow(manage,"工具展示方式","紧凑：第三方工具和 Blender 只以 3 个工具（列出、查看、调用）出现，适合不能按需加载工具的客户端。自动：Claude Desktop，以及在代理后面、没有工具搜索的 Claude Code 使用紧凑方式。",exposure);
             AddRow(manage,"mcp-tools 文件夹","每个工具一个子文件夹。更新和卸载 CMCP 都会保留它。",Command("打开",delegate{if(toolSnapshot.Root!=null){Directory.CreateDirectory(toolSnapshot.Root);OpenPath(toolSnapshot.Root);}}));
         }
         static string ToolDetail(ToolInfo t){
@@ -223,6 +240,7 @@ namespace CMCP {
             if(t.Errors.Length>0)parts.Add(L.Text("无法使用：")+String.Join("；",t.Errors));
             else if(t.Runtime!=null)parts.Add(t.Runtime);
             else if(t.MissingSecrets.Length>0)parts.Add(L.Text("缺少密钥：")+String.Join(", ",t.MissingSecrets.Select(s=>s.Substring(s.IndexOf(':')+1))));
+            else if(t.SignIn&&(t.SignInNeeded||!t.SignedIn))parts.Add(L.Text(t.SignedIn?"需要重新登录：点“登录账号”。":"需要登录：点“登录账号”在浏览器里完成。"));
             else if(t.Enabled&&t.Approved)parts.Add(t.Tools!=null?String.Format(L.Text("已开启，{0} 个工具"),t.Tools.Length):L.Text("已开启，第一次使用时读取工具列表"));
             if(t.Warnings.Contains("UNPINNED"))parts.Add(L.Text("未固定版本：每次启动可能变成新版本。"));
             if(t.Warnings.Contains("SECRET_IN_MANIFEST"))parts.Add(L.Text("清单里可能写了密钥，请改为 {\"secret\": true}。"));
@@ -279,11 +297,11 @@ namespace CMCP {
     }
     // Log and delete buttons beside a tool's switch, laid out as one row control.
     internal sealed class ToolRowActions : Panel {
-        internal ModernButton Log,Remove,Follow;internal ToggleSwitch Toggle;
+        internal ModernButton Log,SignIn,Remove,Follow;internal ToggleSwitch Toggle;
         // Buttons left of the switch; the width stays fixed, so a Follow button that comes and
         // goes never moves the row's text.
         internal void Arrange(){
-            var buttons=new[]{Log,Remove,Follow}.Where(b=>b!=null).ToList();
+            var buttons=new[]{Log,SignIn,Remove,Follow}.Where(b=>b!=null).ToList();
             Controls.AddRange(buttons.Cast<Control>().Concat(new Control[]{Toggle}).ToArray());
             foreach(var b in buttons)b.Size=new Size(Math.Max(64,TextRenderer.MeasureText(L.Text(b.Text),b.Font).Width+28),34);
             int x=0;foreach(var b in buttons){b.Location=new Point(x,2);x=b.Right+8;}
@@ -332,7 +350,7 @@ namespace CMCP {
             Dictionary<string,bool> groups=null,tools=null;if(device!=null){GroupOverrides.TryGetValue(device,out groups);ToolOverrides.TryGetValue(device,out tools);}
             foreach(var g in State.Groups){bool own;bool has=groups!=null&&groups.TryGetValue(g.Key,out own);copy.GlobalGroups[g.Key]=g.Value;copy.Groups[g.Key]=has?groups[g.Key]:g.Value;if(has)copy.OverriddenGroups.Add(g.Key);}
             foreach(var t in State.Tools){bool has=tools!=null&&tools.ContainsKey(t.Id);
-                copy.Tools.Add(new ToolInfo{Id=t.Id,Name=t.Name,Description=t.Description,Version=t.Version,Log=t.Log,DescribeZh=t.DescribeZh,DescribeEn=t.DescribeEn,Enabled=has?tools[t.Id]:t.Enabled,Global=t.Enabled,Overridden=has,Approved=t.Approved,Errors=t.Errors,Warnings=t.Warnings,MissingSecrets=t.MissingSecrets,Tools=t.Tools});}
+                copy.Tools.Add(new ToolInfo{Id=t.Id,Name=t.Name,Description=t.Description,Version=t.Version,Log=t.Log,DescribeZh=t.DescribeZh,DescribeEn=t.DescribeEn,Enabled=has?tools[t.Id]:t.Enabled,Global=t.Enabled,Overridden=has,Approved=t.Approved,Errors=t.Errors,Warnings=t.Warnings,MissingSecrets=t.MissingSecrets,Tools=t.Tools,Remote=t.Remote,SignIn=t.SignIn,SignedIn=t.SignedIn,SignInNeeded=t.SignInNeeded});}
             return copy;}}
         public void SetGroup(string group,bool on){Calls.Add("group "+group+" "+on);State.Groups[group]=on;}
         public void SetTool(string id,bool on){Calls.Add("tool "+id+" "+on);var t=State.Tools.First(x=>x.Id==id);t.Enabled=on;if(on)t.Approved=true;}
@@ -348,10 +366,12 @@ namespace CMCP {
             }
         }
         public void SetIdle(int minutes){Calls.Add("idle "+minutes);State.IdleMinutes=minutes;}
+        public void SetExposure(string exposure){Calls.Add("exposure "+exposure);State.Exposure=exposure;}
         public void BlenderOfferDone(){Calls.Add("offer");State.BlenderOfferDone=true;}
         public void Refresh(){Calls.Add("refresh");}
         public string Import(string text,bool apply){Calls.Add("import "+apply);if(apply)lock(State)State.Tools.Add(new ToolInfo{Id="added",Name="Added",Description="new",DescribeZh="新",DescribeEn="new"});return "{\"items\":[{\"id\":\"blender_mcp\",\"describe\":{\"zh\":\"运行 uvx\",\"en\":\"runs uvx\"},\"errors\":[],\"warnings\":[]}]}";}
         public void Remove(string id){Calls.Add("remove "+id);State.Tools.RemoveAll(t=>t.Id==id);}
+        public void SignIn(string id){Calls.Add("login "+id);lock(State){var t=State.Tools.First(x=>x.Id==id);t.SignedIn=true;t.SignInNeeded=false;}}
     }
     internal static class ToolsPageTests {
         static void Pump(Func<bool> done){var clock=Stopwatch.StartNew();while(!done()&&clock.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(5);}}
@@ -359,10 +379,13 @@ namespace CMCP {
             var parsed=ToolSnapshot.Parse("{\"root\":\"F:\\\\CMCP\\\\mcp-tools\",\"groups\":{\"files\":true,\"blender\":false},\"idleMinutes\":0,\"blender\":{\"detected\":\"C:\\\\Blender\\\\blender.exe\",\"offerDone\":false},\"tools\":[{\"id\":\"gh\",\"name\":\"GitHub\",\"enabled\":true,\"approved\":true,\"errors\":[],\"warnings\":[{\"code\":\"UNPINNED\"}],\"missingSecrets\":[\"env:TOKEN\"],\"tools\":[\"gh__a\",\"gh__b\"],\"describe\":{\"zh\":\"中\",\"en\":\"en\"},\"runtime\":null}]}");
             check(parsed.Groups["files"]&&!parsed.Groups["blender"]&&parsed.IdleMinutes==0&&parsed.Blender==@"C:\Blender\blender.exe"&&parsed.Tools[0].Tools.Length==2&&parsed.Tools[0].Warnings.Contains("UNPINNED")&&parsed.Tools[0].MissingSecrets[0]=="env:TOKEN","tool status from the command line parses groups, tools, secrets and warnings");
             check(ToolSnapshot.Parse("{\"error\":\"broken\"}").Error=="broken","a tool command error is reported, not thrown");
+            var remote=ToolSnapshot.Parse("{\"tools\":[{\"id\":\"linear\",\"remote\":true,\"auth\":{\"type\":\"oauth\",\"signedIn\":false,\"needed\":true},\"errors\":[],\"warnings\":[]}]}").Tools[0];
+            check(remote.Remote&&remote.SignIn&&!remote.SignedIn&&remote.SignInNeeded,"a remote tool's sign-in state is read from the command line");
             using(var form=new Manager(true)){
                 form.ClientSize=new Size(760,460);form.Show();Application.DoEvents();form.OpenSettings();Application.DoEvents();
                 var fake=new FakeToolBackend();fake.State.Tools.Add(new ToolInfo{Id="blender_mcp",Name="MCP for Blender",Description="Blender",DescribeZh="会运行 uvx",DescribeEn="runs uvx"});
                 fake.State.Tools.Add(new ToolInfo{Id="broken",Name="Broken",Description="x",Errors=new[]{"schema must be 1"}});
+                fake.State.Tools.Add(new ToolInfo{Id="linear",Name="Linear",Description="Remote",Remote=true,SignIn=true,SignInNeeded=true,DescribeZh="远程",DescribeEn="remote"});
                 var page=form.Settings;page.Tools=fake;var asked=new List<string>();bool answer=false;page.ConfirmTool=text=>{asked.Add(text);return answer;};
                 Func<bool> idle=()=>page.ToolState!=null&&!page.ToolsLoading;
                 Action settle=()=>{var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(10);if(idle()&&clock.ElapsedMilliseconds>700)break;}};
@@ -394,6 +417,10 @@ namespace CMCP {
                 for(int i=0;i<4;i++){toggle("MCP for Blender").AccessibilityObject.DoDefaultAction();Application.DoEvents();}settle();
                 check(asked.Count==2&&fake.State.Tools.First(t=>t.Id=="blender_mcp").Enabled&&page.ToolRebuilds==rebuilds,"an approved tool switches quickly without asking again");
                 check(!toggle("Broken").Enabled&&sheet.Controls.OfType<Label>().Any(l=>l.Text.Contains("schema must be 1")),"a tool with errors cannot be switched on and shows why");
+                var linear=sheet.Controls.OfType<ToolRowActions>().First(a=>a.Toggle.Text=="Linear");
+                check(linear.SignIn!=null&&sheet.Controls.OfType<Label>().Any(l=>l.Text.Contains("需要登录"))&&sheet.Controls.OfType<ToolRowActions>().Where(a=>a.Toggle.Text!="Linear").All(a=>a.SignIn==null),"only a remote tool with a sign-in has the Sign in button and says it needs one");
+                linear.SignIn.PerformClick();Pump(()=>fake.Calls.Contains("login linear")&&idle());settle();
+                check(fake.Calls.Contains("login linear")&&!sheet.Controls.OfType<Label>().Any(l=>l.Text.Contains("需要登录"))&&page.Viewport.Controls[0]==sheet,"signing in runs the sign-in and updates the row in place");
                 page.AskImport=()=>"{\"mcpServers\":{\"blender\":{\"command\":\"uvx\",\"args\":[\"mcp-for-blender\"]}}}";
                 page.Viewport.AutoScrollPosition=new Point(0,80);Application.DoEvents();scrolled=-page.Viewport.AutoScrollPosition.Y;
                 sheet.Controls.OfType<ModernButton>().First(b=>b.Text=="添加").AccessibilityObject.DoDefaultAction();Pump(()=>fake.Calls.Contains("import True"));settle();

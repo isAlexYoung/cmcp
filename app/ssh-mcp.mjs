@@ -119,10 +119,10 @@ export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,dev
           if(pending>=16){link.send(JSON.stringify({t:'res',id:message.id,error:'Too many requests'}));return;}
           pending++;
           try {
-            const ask=params=>new Promise((resolve,reject)=>{
+            const ask=(params,method='elicitation/create')=>new Promise((resolve,reject)=>{
               const id=randomBytes(16).toString('hex'),timer=setTimeout(()=>{questions.delete(id);reject(Error('No answer within 10 minutes'));},610000);
               questions.set(id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:e=>{clearTimeout(timer);reject(e);}});
-              try{link.send(JSON.stringify({t:'ask',id,parent:message.id,msg:{method:'elicitation/create',params}}));}catch(e){questions.delete(id);clearTimeout(timer);reject(e);}
+              try{link.send(JSON.stringify({t:'ask',id,parent:message.id,msg:{method,params}}));}catch(e){questions.delete(id);clearTimeout(timer);reject(e);}
             });
             const call=msg=>forward(msg,{device:device||'',ask});
             const reply=message.recovery?.protocol===1

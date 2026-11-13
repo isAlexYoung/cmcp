@@ -24,7 +24,7 @@ const shared=['link-client.mjs','connection-transport.mjs','terminal-link.mjs','
 shared.push('ssh-terminal.mjs','ssh-mcp.mjs','ssh-local-tools.mjs','ssh-bootstrap.py','cloudpc-connector.py','tool-schemas.mjs','cloudcli.mjs','ssh-web.mjs');
 shared.push('blender-tools.mjs');
 shared.push('cloudcli-setup.mjs','cloudcli-setup.py');
-shared.push('tool-registry.mjs','mcp-tools.mjs','mcp-proxy.mjs','mcp-tools-cli.mjs','mcp-market.mjs','tool-host.mjs');
+shared.push('tool-registry.mjs','mcp-tools.mjs','mcp-proxy.mjs','mcp-tools-cli.mjs','mcp-market.mjs','tool-host.mjs','mcp-oauth.mjs');
 for(const name of shared)fs.copyFileSync(path.join(root,'app',name),path.join(resources,'app',name));
 // AGENT.md, the manifest schema and examples copied into the user's mcp-tools folder.
 fs.cpSync(path.join(root,'app/mcp-tools-template'),path.join(resources,'app/mcp-tools-template'),{recursive:true});

@@ -94,3 +94,15 @@ test('market routes list the reviewed presets, install one that stays off, and r
   assert.equal((await call('market/install',{id:'nope'})).status,400);
   assert.ok(fs.existsSync(path.join(directory,'tool-refresh.json')),'installing tells running CMCP processes');
 });
+
+test('a remote tool reports its sign-in, and only a tool with a sign-in can start one',async t=>{
+  const directory=folder(t);
+  const m=await createManager({directory,secrets:async()=>{},proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}},toolSecrets:plainStore});
+  t.after(()=>m.close());
+  const call=async(route,body={})=>{const r=await fetch(m.origin+'/api/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:JSON.stringify(body)});return {status:r.status,data:await r.json()};};
+  await call('tools/import',{text:JSON.stringify({mcpServers:{linear:{type:'http',url:'https://mcp.linear.app/mcp'},local:{command:'node',args:[fixture]}}}),apply:true});
+  const tools=(await call('tools')).data.tools,linear=tools.find(x=>x.id==='linear');
+  assert.deepEqual([linear.remote,linear.auth],[true,{type:'oauth',signedIn:false,needed:false}]);assert.equal(tools.find(x=>x.id==='local').auth,null);
+  const refused=await call('tools/login',{id:'local'});assert.equal(refused.status,400);assert.match(refused.data.error,/no sign-in/);
+  assert.equal((await call('tools/login',{id:'missing'})).status,400);
+});
