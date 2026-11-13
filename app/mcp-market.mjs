@@ -14,7 +14,11 @@ export const CATEGORIES=['3d','browser','web','memory','developer','design','dat
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const text=(value,max)=>typeof value==='string'&&value.trim().length>0&&value.length<=max;
 const bilingual=(value,max)=>value&&typeof value==='object'&&text(value.zh,max)&&text(value.en,max);
-export const cmcpVersion=()=>JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
+// The Windows package keeps its version in app/package.json; the Mac bundle in macos/package.json.
+export function cmcpVersion(){
+  for(const file of [path.join(here,'package.json'),path.join(here,'..','macos','package.json')]){try{return JSON.parse(fs.readFileSync(file,'utf8')).version;}catch{}}
+  return '0.0.0';
+}
 
 // Numeric comparison of dotted versions; works for semver (1.12.0) and calendar versions (2026.10.28).
 export function compareVersions(a,b){

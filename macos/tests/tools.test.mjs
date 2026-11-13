@@ -61,6 +61,16 @@ test('the Mac dispatcher exposes an enabled third-party tool with its prefix and
   const r=await d.forward({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'fx__echo',arguments:{text:'mac'}}});assert.equal(r.result.content[0].text,'mac');
 });
 
+test('the market reads the CMCP version where the Mac bundle keeps it',async t=>{
+  // The bundle has Resources/app without package.json and Resources/macos/package.json.
+  const bundle=folder(t),app=path.join(bundle,'app'),mac=path.join(bundle,'macos');fs.mkdirSync(app);fs.mkdirSync(mac);
+  fs.copyFileSync(new URL('../../app/mcp-market.mjs',import.meta.url),path.join(app,'mcp-market.mjs'));
+  fs.writeFileSync(path.join(mac,'package.json'),JSON.stringify({version:'9.8.7'}));
+  fs.writeFileSync(path.join(app,'mcp-tools.mjs'),"export const ID=/x/,RESERVED=new Set(),toolsRoot=()=>'',ensureToolsFolder=()=>{},parseManifest=()=>({}),approvalKey=()=>'',describeTool=()=>({}),readSettings=()=>({}),updateSettings=()=>{},resolveLaunch=()=>{},RuntimeMissing=Error,runtimeOf=x=>x,detectApp=()=>null,atomicWrite=()=>{};");
+  const {cmcpVersion}=await import(new URL('file://'+path.join(app,'mcp-market.mjs')).href);
+  assert.equal(cmcpVersion(),'9.8.7');
+});
+
 test('market routes list the reviewed presets, install one that stays off, and refuse an unconfirmed update',async t=>{
   const directory=folder(t);
   const m=await createManager({directory,secrets:async()=>{},proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}}});t.after(()=>m.close());
