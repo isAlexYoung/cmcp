@@ -268,7 +268,7 @@ namespace CMCP {
             if(field!=null){field.Colors=colors;field.BackColor=colors.Surface;field.Invalidate();}
         }
         protected override bool ProcessCmdKey(ref Message m,Keys keys){if(keys==Keys.Escape){if(BackRequested!=null)BackRequested();return true;}return base.ProcessCmdKey(ref m,keys);}
-        protected override void Dispose(bool disposing){if(disposing)updateView.Dispose();base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing){updateView.Dispose();if(switches!=null){switches.Drain();switches.Dispose();}}base.Dispose(disposing);}
     }
     // Paints the rounded row groups behind the controls.
     internal sealed class SettingsSheet : ResizePanel {

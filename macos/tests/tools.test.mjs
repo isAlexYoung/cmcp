@@ -35,6 +35,13 @@ test('manager routes list, import, switch, refresh and remove tools inside the M
   const after=(await call('tools')).data;listed=after.tools[0];
   assert.equal(listed.enabled&&listed.approved,true);assert.equal(after.groups.blender,true);assert.equal(after.idleMinutes,0);assert.equal(after.blender.offerDone,true);
   assert.equal((await call('tools/set',{group:'nonsense',on:true})).status,400);
+  // Quick clicks arrive as one batch: one write, last states only, the tool's approval recorded.
+  const batch=(await call('tools/apply',{groups:{blender:false,desktop:false},tools:{fixture:false}})).data;
+  assert.equal(batch.groups.blender,false);assert.equal(batch.groups.desktop,false);assert.equal(batch.tools.fixture,false);
+  await call('tools/apply',{groups:{desktop:true},tools:{fixture:true}});
+  const reread=(await call('tools')).data;assert.equal(reread.groups.desktop,true);assert.equal(reread.tools[0].enabled&&reread.tools[0].approved,true);
+  assert.equal((await call('tools/apply',{groups:{blender:'yes'}})).status,400);assert.equal((await call('tools/apply',{tools:{missing:true}})).status,400);
+  await call('tools/set',{group:'blender',on:true});
   assert.equal((await call('tools/refresh')).data.refreshed,true);assert.ok(fs.existsSync(path.join(directory,'tool-refresh.json')));
   assert.equal((await call('tools/open',{what:'log',id:'fixture'})).status,400,'no log yet');
   const removed=(await call('tools/remove',{id:'fixture'})).data;assert.ok(removed.keptAt.includes('.removed-fixture-'));

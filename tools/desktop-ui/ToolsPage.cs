@@ -50,6 +50,7 @@ namespace CMCP {
         ToolSnapshot Status();
         void SetGroup(string group,bool on);
         void SetTool(string id,bool on);
+        void Apply(IDictionary<string,bool> groups,IDictionary<string,bool> tools);
         void SetIdle(int minutes);
         void BlenderOfferDone();
         void Refresh();
@@ -79,6 +80,7 @@ namespace CMCP {
         public ToolSnapshot Status(){return ToolSnapshot.Parse(Run(null,"status"));}
         public void SetGroup(string group,bool on){Run(null,"set","--group",group,on?"--on":"--off");}
         public void SetTool(string id,bool on){Run(null,"set","--tool",id,on?"--on":"--off");}
+        public void Apply(IDictionary<string,bool> groups,IDictionary<string,bool> tools){Run(new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"groups",groups},{"tools",tools}}),"apply");}
         public void SetIdle(int minutes){Run(null,"set","--idle",minutes.ToString());}
         public void BlenderOfferDone(){Run(null,"set","--blender-offer-done");}
         public void Refresh(){Run(null,"refresh");}
@@ -100,17 +102,36 @@ namespace CMCP {
             new[]{"desktop","桌面操作","截图、打开网页、模拟鼠标键盘。"},
             new[]{"blender","Blender","通过 Blender 插件操作本机打开的 Blender。"},
         };
-        // Reads the tool state off the window thread, then rebuilds this page if it is still shown.
+        // Reads the tool state off the window thread. When the same tools are listed again, the rows
+        // are updated in place (no rebuild, scroll and focus stay); only a changed list rebuilds.
         internal void LoadTools(){
-            if(Tools==null||toolsLoading)return;toolsLoading=true;
-            var backend=Tools;
+            if(Tools==null)return;
+            if(toolsLoading){reloadAgain=true;return;}
+            toolsLoading=true;var backend=Tools;
             ThreadPool.QueueUserWorkItem(delegate{
                 ToolSnapshot snapshot;try{snapshot=backend.Status();}catch(Exception e){snapshot=new ToolSnapshot{Error=e.Message};}
-                try{BeginInvoke((Action)delegate{toolsLoading=false;toolSnapshot=snapshot;if(page==ToolsIndex)Build();});}catch{toolsLoading=false;}
+                try{BeginInvoke((Action)delegate{
+                    toolsLoading=false;var previous=toolSnapshot;toolSnapshot=snapshot;
+                    if(page==ToolsIndex){if(SameShape(previous,snapshot)){RefreshControls();}else RebuildKeepingScroll();}
+                    if(reloadAgain){reloadAgain=false;LoadTools();}
+                });}catch{toolsLoading=false;}
             });
         }
+        static bool SameShape(ToolSnapshot a,ToolSnapshot b){
+            if(a==null||b==null||a.Error!=null||b.Error!=null)return false;
+            return a.Tools.Select(t=>t.Id).SequenceEqual(b.Tools.Select(t=>t.Id));
+        }
+        void RebuildKeepingScroll(){int y=-Viewport.AutoScrollPosition.Y;ToolRebuilds++;Build();Viewport.AutoScrollPosition=new Point(0,y);}
+        internal int ToolRebuilds;
         internal ToolSnapshot ToolState{get{return toolSnapshot;}}
-        internal bool ToolsLoading{get{return toolsLoading;}}
+        internal bool ToolsLoading{get{return toolsLoading||(switches!=null&&switches.Busy);}}
+        bool reloadAgain;
+        ToolSwitchSaver switches;
+        ToolSwitchSaver Switches{get{
+            if(switches==null)switches=new ToolSwitchSaver(this,()=>Tools,error=>SetFeedback(L.Text("操作未完成：")+error,true),delegate{SetFeedback("已保存，正在通知已连接的 Claude。",false);LoadTools();});
+            return switches;}}
+        ToolInfo CurrentTool(string id){return toolSnapshot==null?null:toolSnapshot.Tools.FirstOrDefault(t=>t.Id==id);}
+        bool GroupOn(string group){bool on;return toolSnapshot!=null&&toolSnapshot.Groups.TryGetValue(group,out on)&&on;}
         // The command runs off the window thread; the page reloads when it has finished.
         void ToolAction(Action work,string done){
             if(Tools==null)return;
@@ -125,27 +146,35 @@ namespace CMCP {
             if(toolSnapshot.Error!=null){var failed=AddSection("本机工具");AddRow(failed,()=>L.Text("无法读取本机工具"),()=>toolSnapshot.Error,Command("重试",delegate{toolSnapshot=null;Build();}));return;}
             var builtin=AddSection("内置工具");
             foreach(var row in GroupRows){
-                string group=row[0];bool on;toolSnapshot.Groups.TryGetValue(group,out on);
-                var toggle=new ToggleSwitch{Text=L.Text(row[1]),Checked=on,Colors=colors,Size=new Size(48,30)};
-                toggle.Click+=delegate{bool next=toggle.Checked;ToolAction(()=>Tools.SetGroup(group,next),next?"已开启，正在通知已连接的 Claude。":"已关闭，正在通知已连接的 Claude。");};
+                string group=row[0];
+                var toggle=new ToggleSwitch{Text=L.Text(row[1]),Checked=GroupOn(group),Colors=colors,Size=new Size(48,30)};
+                // Only this switch changes now; quick clicks are merged and saved once, as the last state.
+                toggle.Click+=delegate{Switches.Want(true,group,toggle.Checked);};
+                refresh.Add(delegate{if(!Switches.Pending(true,group))toggle.Checked=GroupOn(group);});
                 AddRow(builtin,()=>L.Text(row[1]),()=>group=="blender"?L.Text(row[2])+" "+(toolSnapshot.Blender!=null?L.Text("已检测到 Blender：")+toolSnapshot.Blender:L.Text("没有检测到本机安装的 Blender。")):L.Text(row[2]),toggle);
             }
             var custom=AddSection("自定义工具");
             if(toolSnapshot.Tools.Count==0)AddRow(custom,"还没有自定义工具","粘贴 GitHub 上 MCP 服务器给出的配置即可添加；也可以照 mcp-tools 文件夹里的 AGENT.md 自己编写。",null);
             foreach(var tool in toolSnapshot.Tools){
-                var item=tool;
+                string id=tool.Id;
                 var actions=new ToolRowActions();
-                actions.Log=Command("日志",delegate{if(File.Exists(item.Log))OpenPath(item.Log);else SetFeedback("这个工具还没有日志。",false);});
+                actions.Log=Command("日志",delegate{var item=CurrentTool(id);if(item!=null&&File.Exists(item.Log))OpenPath(item.Log);else SetFeedback("这个工具还没有日志。",false);});
                 actions.Remove=Danger("删除",delegate{
+                    var item=CurrentTool(id);if(item==null)return;
                     if(!ConfirmTool(String.Format(L.Text("删除 {0}？\r\n\r\n文件夹会移到 mcp-tools 里以 .removed- 开头的文件夹，可以手动恢复。"),item.Name)))return;
-                    ToolAction(()=>Tools.Remove(item.Id),"已删除，正在通知已连接的 Claude。");});
-                actions.Toggle=new ToggleSwitch{Text=item.Name,Checked=item.Enabled&&item.Approved,Colors=colors,Size=new Size(48,30),Enabled=item.Errors.Length==0};
-                actions.Toggle.Click+=delegate{
-                    bool next=actions.Toggle.Checked;
-                    if(next&&!item.Approved&&!ConfirmTool(item.Describe+"\r\n\r\n"+L.Text("开启这个工具吗？"))){actions.Toggle.Checked=false;return;}
-                    ToolAction(()=>Tools.SetTool(item.Id,next),next?"已开启，正在通知已连接的 Claude。":"已关闭，正在通知已连接的 Claude。");};
+                    ToolAction(()=>Tools.Remove(id),"已删除，正在通知已连接的 Claude。");});
+                actions.Toggle=new ToggleSwitch{Text=tool.Name,Checked=tool.Enabled&&tool.Approved,Colors=colors,Size=new Size(48,30),Enabled=tool.Errors.Length==0};
+                var toggle=actions.Toggle;
+                toggle.Click+=delegate{
+                    var item=CurrentTool(id);if(item==null)return;bool next=toggle.Checked;
+                    if(next&&!item.Approved){
+                        if(!ConfirmTool(item.Describe+"\r\n\r\n"+L.Text("开启这个工具吗？"))){toggle.Checked=false;return;}
+                        item.Approved=true;
+                    }
+                    Switches.Want(false,id,next);};
+                refresh.Add(delegate{var item=CurrentTool(id);if(item==null)return;toggle.Enabled=item.Errors.Length==0;if(!Switches.Pending(false,id))toggle.Checked=item.Enabled&&item.Approved;});
                 actions.Arrange();
-                AddRow(custom,()=>item.Name+(item.Version!=null?" "+item.Version:""),()=>ToolDetail(item),actions);
+                AddRow(custom,()=>{var item=CurrentTool(id);return item==null?"":item.Name+(item.Version!=null?" "+item.Version:"");},()=>{var item=CurrentTool(id);return item==null?"":ToolDetail(item);},actions);
             }
             var manage=AddSection("管理");
             AddRow(manage,"添加工具","粘贴 MCP 服务器的配置（例如 README 里 Claude Desktop 的 mcpServers 片段）。添加后默认关闭。",Command("添加",delegate{
@@ -183,6 +212,42 @@ namespace CMCP {
             }
             return String.Join("\r\n",lines);
         }
+    }
+    // Collects quick switch clicks and saves only the last state of each switch, one save at a time.
+    internal sealed class ToolSwitchSaver : IDisposable {
+        readonly Dictionary<string,bool> groups=new Dictionary<string,bool>(),tools=new Dictionary<string,bool>();
+        Dictionary<string,bool> sendingGroups=new Dictionary<string,bool>(),sendingTools=new Dictionary<string,bool>();
+        readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=350};
+        readonly Control owner;readonly Func<IToolBackend> backend;readonly Action<string> failed;readonly Action saved;
+        internal volatile bool Busy;internal int Saves;
+        internal ToolSwitchSaver(Control owner,Func<IToolBackend> backend,Action<string> failed,Action saved){this.owner=owner;this.backend=backend;this.failed=failed;this.saved=saved;timer.Tick+=delegate{Flush();};}
+        internal bool Pending(bool group,string id){return group?groups.ContainsKey(id)||sendingGroups.ContainsKey(id):tools.ContainsKey(id)||sendingTools.ContainsKey(id);}
+        internal void Want(bool group,string id,bool on){(group?groups:tools)[id]=on;timer.Stop();timer.Start();}
+        internal void Flush(){
+            timer.Stop();
+            if(Busy||groups.Count+tools.Count==0)return;
+            var target=backend();if(target==null)return;
+            sendingGroups=new Dictionary<string,bool>(groups);sendingTools=new Dictionary<string,bool>(tools);groups.Clear();tools.Clear();Busy=true;Saves++;
+            var g=sendingGroups;var t=sendingTools;
+            ThreadPool.QueueUserWorkItem(delegate{
+                string error=null;try{target.Apply(g,t);}catch(Exception e){error=e.Message;}
+                Busy=false;
+                try{owner.BeginInvoke((Action)delegate{
+                    sendingGroups=new Dictionary<string,bool>();sendingTools=new Dictionary<string,bool>();
+                    if(error!=null)failed(error);
+                    if(groups.Count+tools.Count>0)Flush();else saved();
+                });}catch{}
+            });
+        }
+        // The page is closing: whatever is still waiting is saved after the save in flight.
+        internal void Drain(){
+            timer.Stop();
+            if(groups.Count+tools.Count==0)return;
+            var target=backend();if(target==null)return;
+            var g=new Dictionary<string,bool>(groups);var t=new Dictionary<string,bool>(tools);groups.Clear();tools.Clear();Saves++;
+            ThreadPool.QueueUserWorkItem(delegate{var clock=Stopwatch.StartNew();while(Busy&&clock.ElapsedMilliseconds<30000)Thread.Sleep(20);try{target.Apply(g,t);}catch{}});
+        }
+        public void Dispose(){timer.Dispose();}
     }
     // Log and delete buttons beside a tool's switch, laid out as one row control.
     internal sealed class ToolRowActions : Panel {
@@ -228,13 +293,24 @@ namespace CMCP {
         internal readonly ToolSnapshot State=new ToolSnapshot{Root=Path.Combine(Path.GetTempPath(),"cmcp-fake-mcp-tools")};
         internal readonly List<string> Calls=new List<string>();
         internal FakeToolBackend(){foreach(var g in new[]{"files","commands","processes","toolchains","desktop"})State.Groups[g]=true;State.Groups["blender"]=false;}
-        public ToolSnapshot Status(){Calls.Add("status");return State;}
+        // A new copy each time, as the command line returns.
+        public ToolSnapshot Status(){Calls.Add("status");lock(State){
+            var copy=new ToolSnapshot{Root=State.Root,Blender=State.Blender,BlenderOfferDone=State.BlenderOfferDone,IdleMinutes=State.IdleMinutes};
+            foreach(var g in State.Groups)copy.Groups[g.Key]=g.Value;
+            foreach(var t in State.Tools)copy.Tools.Add(new ToolInfo{Id=t.Id,Name=t.Name,Description=t.Description,Version=t.Version,Log=t.Log,DescribeZh=t.DescribeZh,DescribeEn=t.DescribeEn,Enabled=t.Enabled,Approved=t.Approved,Errors=t.Errors,Warnings=t.Warnings,MissingSecrets=t.MissingSecrets,Tools=t.Tools});
+            return copy;}}
         public void SetGroup(string group,bool on){Calls.Add("group "+group+" "+on);State.Groups[group]=on;}
         public void SetTool(string id,bool on){Calls.Add("tool "+id+" "+on);var t=State.Tools.First(x=>x.Id==id);t.Enabled=on;if(on)t.Approved=true;}
+        internal int Delay;
+        public void Apply(IDictionary<string,bool> groups,IDictionary<string,bool> tools){
+            Calls.Add("apply "+String.Join(",",groups.Select(p=>p.Key+"="+p.Value).Concat(tools.Select(p=>p.Key+"="+p.Value))));
+            if(Delay>0)Thread.Sleep(Delay);
+            lock(State){foreach(var p in groups)State.Groups[p.Key]=p.Value;foreach(var p in tools){var t=State.Tools.First(x=>x.Id==p.Key);t.Enabled=p.Value;if(p.Value)t.Approved=true;}}
+        }
         public void SetIdle(int minutes){Calls.Add("idle "+minutes);State.IdleMinutes=minutes;}
         public void BlenderOfferDone(){Calls.Add("offer");State.BlenderOfferDone=true;}
         public void Refresh(){Calls.Add("refresh");}
-        public string Import(string text,bool apply){Calls.Add("import "+apply);return "{\"items\":[{\"id\":\"blender_mcp\",\"describe\":{\"zh\":\"运行 uvx\",\"en\":\"runs uvx\"},\"errors\":[],\"warnings\":[]}]}";}
+        public string Import(string text,bool apply){Calls.Add("import "+apply);if(apply)lock(State)State.Tools.Add(new ToolInfo{Id="added",Name="Added",Description="new",DescribeZh="新",DescribeEn="new"});return "{\"items\":[{\"id\":\"blender_mcp\",\"describe\":{\"zh\":\"运行 uvx\",\"en\":\"runs uvx\"},\"errors\":[],\"warnings\":[]}]}";}
         public void Remove(string id){Calls.Add("remove "+id);State.Tools.RemoveAll(t=>t.Id==id);}
     }
     internal static class ToolsPageTests {
@@ -244,30 +320,52 @@ namespace CMCP {
             check(parsed.Groups["files"]&&!parsed.Groups["blender"]&&parsed.IdleMinutes==0&&parsed.Blender==@"C:\Blender\blender.exe"&&parsed.Tools[0].Tools.Length==2&&parsed.Tools[0].Warnings.Contains("UNPINNED")&&parsed.Tools[0].MissingSecrets[0]=="env:TOKEN","tool status from the command line parses groups, tools, secrets and warnings");
             check(ToolSnapshot.Parse("{\"error\":\"broken\"}").Error=="broken","a tool command error is reported, not thrown");
             using(var form=new Manager(true)){
-                form.ClientSize=new Size(760,560);form.Show();Application.DoEvents();form.OpenSettings();Application.DoEvents();
+                form.ClientSize=new Size(760,460);form.Show();Application.DoEvents();form.OpenSettings();Application.DoEvents();
                 var fake=new FakeToolBackend();fake.State.Tools.Add(new ToolInfo{Id="blender_mcp",Name="MCP for Blender",Description="Blender",DescribeZh="会运行 uvx",DescribeEn="runs uvx"});
                 fake.State.Tools.Add(new ToolInfo{Id="broken",Name="Broken",Description="x",Errors=new[]{"schema must be 1"}});
                 var page=form.Settings;page.Tools=fake;var asked=new List<string>();bool answer=false;page.ConfirmTool=text=>{asked.Add(text);return answer;};
-                page.ShowTools();Pump(()=>page.ToolState!=null&&!page.ToolsLoading);Application.DoEvents();
+                Func<bool> idle=()=>page.ToolState!=null&&!page.ToolsLoading;
+                Action settle=()=>{var clock=Stopwatch.StartNew();while(clock.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(10);if(idle()&&clock.ElapsedMilliseconds>700)break;}};
+                page.ShowTools();Pump(idle);Application.DoEvents();
                 var sheet=page.Viewport.Controls[0];
                 Func<string,ToggleSwitch> toggle=name=>sheet.Controls.OfType<ToggleSwitch>().Concat(sheet.Controls.OfType<ToolRowActions>().Select(a=>a.Toggle)).First(t=>t.Text==name);
+                Func<int> applies=()=>fake.Calls.Count(c=>c.StartsWith("apply "));
                 check(page.ToolState!=null&&sheet.Controls.OfType<Label>().Any(l=>l.Text=="内置工具")&&sheet.Controls.OfType<Label>().Any(l=>l.Text=="自定义工具"),"the tools page lists built-in and custom tools from the backend");
-                check(!toggle("Blender").Checked&&toggle("文件读写").Checked,"Blender starts off and the other built-in groups on");
-                toggle("Blender").AccessibilityObject.DoDefaultAction();Pump(()=>fake.Calls.Contains("group blender True"));
-                check(fake.Calls.Contains("group blender True"),"switching a built-in group saves it for this computer");
-                Pump(()=>page.ToolState!=null&&!page.ToolsLoading);sheet=page.Viewport.Controls[0];
+                var blender=toggle("Blender");
+                check(!blender.Checked&&toggle("文件读写").Checked,"Blender starts off and the other built-in groups on");
+                page.Viewport.AutoScrollPosition=new Point(0,120);Application.DoEvents();int scrolled=-page.Viewport.AutoScrollPosition.Y,rebuilds=page.ToolRebuilds;
+                blender.Focus();
+                for(int i=0;i<7;i++){blender.AccessibilityObject.DoDefaultAction();Application.DoEvents();}
+                check(blender.Checked&&applies()==0,"quick clicks change only the switch at once and wait before saving");
+                settle();
+                check(applies()==1&&fake.State.Groups["blender"]&&fake.Calls.Last(c=>c.StartsWith("apply ")).Contains("blender=True"),"seven quick clicks become one save of the last state ("+String.Join(" | ",fake.Calls.Where(c=>c.StartsWith("apply ")))+")");
+                check(page.ToolRebuilds==rebuilds&&!blender.IsDisposed&&Object.ReferenceEquals(blender,toggle("Blender"))&&blender.Checked,"saving switches updates the rows in place without rebuilding the page");
+                check(-page.Viewport.AutoScrollPosition.Y==scrolled&&scrolled>0&&blender.Focused,"switching keeps the scroll position ("+scrolled+") and keyboard focus");
+                fake.Delay=600;int before=applies();
+                for(int i=0;i<3;i++){blender.AccessibilityObject.DoDefaultAction();Application.DoEvents();}
+                var wait=Stopwatch.StartNew();while(wait.ElapsedMilliseconds<550){Application.DoEvents();Thread.Sleep(10);}
+                for(int i=0;i<2;i++){blender.AccessibilityObject.DoDefaultAction();Application.DoEvents();}
+                settle();settle();fake.Delay=0;
+                check(applies()-before<=2&&fake.State.Groups["blender"]==blender.Checked&&blender.Checked==false&&page.ToolRebuilds==rebuilds,"clicks during a save are saved after it, ending in the last state without a rebuild ("+(applies()-before)+" saves)");
                 toggle("MCP for Blender").AccessibilityObject.DoDefaultAction();Application.DoEvents();
-                check(asked.Count==1&&asked[0].Contains("会运行 uvx")&&!fake.Calls.Contains("tool blender_mcp True")&&!toggle("MCP for Blender").Checked,"declining the first-use description leaves the tool off");
-                answer=true;toggle("MCP for Blender").AccessibilityObject.DoDefaultAction();Pump(()=>fake.Calls.Contains("tool blender_mcp True"));
-                check(asked.Count==2&&fake.Calls.Contains("tool blender_mcp True"),"confirming the description turns the tool on");
-                Pump(()=>page.ToolState!=null&&!page.ToolsLoading);sheet=page.Viewport.Controls[0];
+                check(asked.Count==1&&asked[0].Contains("会运行 uvx")&&!toggle("MCP for Blender").Checked,"declining the first-use description leaves the tool off");
+                answer=true;toggle("MCP for Blender").AccessibilityObject.DoDefaultAction();settle();
+                check(asked.Count==2&&fake.Calls.Any(c=>c.StartsWith("apply ")&&c.Contains("blender_mcp=True"))&&toggle("MCP for Blender").Checked,"confirming the description turns the tool on");
+                for(int i=0;i<4;i++){toggle("MCP for Blender").AccessibilityObject.DoDefaultAction();Application.DoEvents();}settle();
+                check(asked.Count==2&&fake.State.Tools.First(t=>t.Id=="blender_mcp").Enabled&&page.ToolRebuilds==rebuilds,"an approved tool switches quickly without asking again");
                 check(!toggle("Broken").Enabled&&sheet.Controls.OfType<Label>().Any(l=>l.Text.Contains("schema must be 1")),"a tool with errors cannot be switched on and shows why");
                 page.AskImport=()=>"{\"mcpServers\":{\"blender\":{\"command\":\"uvx\",\"args\":[\"mcp-for-blender\"]}}}";
-                sheet.Controls.OfType<ModernButton>().First(b=>b.Text=="添加").AccessibilityObject.DoDefaultAction();Pump(()=>fake.Calls.Contains("import True"));
-                check(fake.Calls.Contains("import False")&&fake.Calls.Contains("import True"),"pasted configuration is previewed, confirmed and then added");
-                Pump(()=>page.ToolState!=null&&!page.ToolsLoading);sheet=page.Viewport.Controls[0];
+                page.Viewport.AutoScrollPosition=new Point(0,80);Application.DoEvents();scrolled=-page.Viewport.AutoScrollPosition.Y;
+                sheet.Controls.OfType<ModernButton>().First(b=>b.Text=="添加").AccessibilityObject.DoDefaultAction();Pump(()=>fake.Calls.Contains("import True"));settle();
+                sheet=page.Viewport.Controls[0];
+                check(fake.Calls.Contains("import False")&&fake.Calls.Contains("import True")&&sheet.Controls.OfType<ToolRowActions>().Any(a=>a.Toggle.Text=="Added"),"pasted configuration is previewed, confirmed and then added");
+                check(page.ToolRebuilds==rebuilds+1&&Math.Abs(-page.Viewport.AutoScrollPosition.Y-scrolled)<=1,"a changed tool list rebuilds once and keeps the scroll position");
                 sheet.Controls.OfType<ModernButton>().First(b=>b.Text=="刷新").AccessibilityObject.DoDefaultAction();Pump(()=>fake.Calls.Contains("refresh"));
                 check(fake.Calls.Contains("refresh"),"the refresh button asks every CMCP process to read the tools again");
+                blender=toggle("Blender");blender.AccessibilityObject.DoDefaultAction();Application.DoEvents();before=applies();
+                form.CloseSettings();var drain=Stopwatch.StartNew();while(applies()==before&&drain.ElapsedMilliseconds<3000){Application.DoEvents();Thread.Sleep(10);}
+                check(applies()==before+1&&fake.State.Groups["blender"],"a click right before leaving the page is still saved");
+                form.OpenSettings();Application.DoEvents();page=form.Settings;page.Tools=fake;page.ShowTools();Pump(idle);Application.DoEvents();
                 foreach(bool dark in new[]{true,false}){form.SetTheme(dark);Application.DoEvents();}
                 check(!page.Viewport.NativeBarsVisible&&page.Viewport.Controls[0].Controls.OfType<ToolRowActions>().All(a=>a.Right<=page.Viewport.Controls[0].Width),"tool rows fit the page in both themes");
                 L.Set("en");page.ShowTools();Application.DoEvents();check(page.Viewport.Controls[0].Controls.OfType<Label>().Any(l=>l.Text=="Built-in tools"),"the tools page is translated");L.Set("zh-CN");

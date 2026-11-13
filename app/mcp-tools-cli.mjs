@@ -2,6 +2,7 @@
 // node (one JSON object per run on stdout); `check` is the one-command test from AGENT.md.
 //   status  --state DIR
 //   set     --state DIR (--group NAME | --tool ID) (--on | --off) | --idle MINUTES | --blender-offer-done
+//   apply   --state DIR                    (stdin {"groups":{name:bool},"tools":{id:bool}}: one write)
 //   refresh --state DIR
 //   import  --state DIR [--apply]          (reads the pasted text on stdin)
 //   remove  --state DIR --tool ID
@@ -63,6 +64,23 @@ export function set(state,o){
     if(o['blender-offer-done'])s.blenderOffer.done=true;
   });
 }
+// Several switches in one write: the settings pages collect quick clicks and save only the last
+// state of each switch, so other CMCP processes see one change instead of a burst.
+export function applySwitches(state,{groups={},tools={}}={}){
+  if(!groups||typeof groups!=='object'||Array.isArray(groups)||!tools||typeof tools!=='object'||Array.isArray(tools))throw Error('Invalid switches');
+  for(const [name,on] of Object.entries(groups))if(!GROUPS.includes(name)||typeof on!=='boolean')throw Error('Unknown group');
+  for(const [id,on] of Object.entries(tools))if(!ID.test(id)||typeof on!=='boolean')throw Error('Unknown tool');
+  const scanned=Object.values(tools).some(Boolean)?scanTools(toolsRoot(state)):[];
+  return updateSettings(state,s=>{
+    for(const [name,on] of Object.entries(groups))s.groups[name]=on;
+    for(const [id,on] of Object.entries(tools)){
+      if(!on){s.tools[id]=false;continue;}
+      const tool=scanned.find(t=>t.id===id);
+      if(!tool?.manifest)throw Error(tool?tool.errors.join('; '):'Unknown tool');
+      s.tools[id]=true;s.acknowledged[id]=approvalKey(tool.manifest);
+    }
+  });
+}
 export async function importText(state,text,{apply=false,secrets=defaultSecretStore()}={}){
   const root=toolsRoot(state);ensureToolsFolder(root);
   const existing=new Set(scanTools(root).map(t=>t.id));for(const name of fs.readdirSync(root))existing.add(name);
@@ -109,6 +127,7 @@ if(process.argv[1]&&fs.realpathSync(process.argv[1])===fileURLToPath(import.meta
   try{
     if(command==='status')print(status(stateOf(o)));
     else if(command==='set'){set(stateOf(o),o);print({saved:true});}
+    else if(command==='apply'){const s=applySwitches(stateOf(o),JSON.parse(await stdin()||'{}'));print({saved:true,groups:s.groups,tools:s.tools});}
     else if(command==='refresh'){requestRefresh(stateOf(o));print({refreshed:true});}
     else if(command==='import')print(await importText(stateOf(o),await stdin(),{apply:o.apply===true}));
     else if(command==='remove')print(await remove(stateOf(o),o.tool));

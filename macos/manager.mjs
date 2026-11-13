@@ -23,7 +23,7 @@ import {currentInstallation} from './uninstall.mjs';
 import {closeSessions,detectTerminals,openTerminal} from './ssh.mjs';
 import {closePages,detectBrowsers,openPage} from './browsers.mjs';
 import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../app/ssh-terminal.mjs';
-import {status as toolStatus,set as setTools,importText,remove as removeTool} from '../app/mcp-tools-cli.mjs';
+import {status as toolStatus,set as setTools,applySwitches,importText,remove as removeTool} from '../app/mcp-tools-cli.mjs';
 import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
 import {spawn} from 'node:child_process';
 
@@ -110,6 +110,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     // Settings > Tools: one set of switches for this Mac, shared by every connection.
     '/api/tools':async()=>toolStatus(directory),
     '/api/tools/set':async input=>{setTools(directory,{group:input.group,tool:input.tool,on:input.on===true,idle:input.idle,'blender-offer-done':input.blenderOfferDone===true});return {saved:true};},
+    '/api/tools/apply':async input=>{const s=applySwitches(directory,{groups:input.groups||{},tools:input.tools||{}});return {saved:true,groups:s.groups,tools:s.tools};},
     '/api/tools/refresh':async()=>{requestRefresh(directory);return {refreshed:true};},
     '/api/tools/import':async input=>{if(typeof input.text!=='string'||input.text.length>256*1024)throw Error('粘贴的内容无效');return importText(directory,input.text,{apply:input.apply===true,...toolSecrets?{secrets:toolSecrets}:{}});},
     '/api/tools/remove':input=>removeTool(directory,input.id),
@@ -137,7 +138,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     try{
       if(req.headers.host!==new URL(origin).host)return json(res,421,{error:'Host not allowed'});
       const url=new URL(req.url,origin);
-      if(req.method==='GET'&&['/','/ui/app.js','/ui/motion.js','/ui/update-state.js','/ui/tooltips.js','/ui/style.css'].includes(url.pathname)){
+      if(req.method==='GET'&&['/','/ui/app.js','/ui/motion.js','/ui/update-state.js','/ui/tooltips.js','/ui/tool-saver.js','/ui/style.css'].includes(url.pathname)){
         const file=url.pathname==='/'?'index.html':url.pathname.split('/').at(-1);
         res.writeHead(200,{'content-type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'application/javascript; charset=utf-8':'text/css; charset=utf-8','cache-control':'no-store',
           'content-security-policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",'x-content-type-options':'nosniff'});
