@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "blender_mcp",
+  "category": "3d",
+  "title": {"zh": "Blender（MCP for Blender）", "en": "Blender (MCP for Blender)"},
+  "summary": {
+    "zh": "通过 Blender 插件让 Claude 查看和修改本机打开的 Blender 场景、执行 Blender Python。使用前请关闭 CMCP 内置的 Blender 组。",
+    "en": "Lets Claude inspect and change the scene in the Blender open on this computer and run Blender Python through its add-on. Turn off CMCP's built-in Blender group first."
+  },
+  "detect": ["blender"],
+  "manifest": {
+    "schema": 1,
+    "name": "MCP for Blender",
+    "description": "ahujasid/blender-mcp: controls the open Blender through its add-on (port 9876).",
+    "homepage": "https://github.com/ahujasid/blender-mcp",
+    "license": "MIT",
+    "version": "2.2.5",
+    "transport": "stdio",
+    "command": "uvx",
+    "args": ["mcp-for-blender==2.2.5"],
+    "env": {"DISABLE_TELEMETRY": "true"},
+    "requires": [{"runtime": "uv"}, {"runtime": "app", "name": "Blender", "hint": "Install the MCP for Blender add-on from the project page and start its server in Blender"}],
+    "capabilities": ["files", "python", "network", "gui"],
+    "instructions": "Uses the same Blender add-on port as CMCP's built-in Blender tools; keep only one of them on."
+  }
+}

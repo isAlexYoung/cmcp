@@ -7,6 +7,10 @@
 //   import  --state DIR [--apply]          (reads the pasted text on stdin)
 //   remove  --state DIR --tool ID
 //   check   FOLDER [--call TOOL JSON] [--state DIR]
+//   market  --state DIR                    (presets with requirements, installed and newer versions)
+//   install --state DIR --preset ID        (writes mcp-tools/ID; the tool stays off)
+//   update  --state DIR --preset ID --confirmed   (only after the user confirmed the new version)
+//   presets-check [--online]               (CI: every preset valid, pinned, published)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,10 +18,11 @@ import {fileURLToPath} from 'node:url';
 import {GROUPS,INTERFACE,ID,toolsRoot,readSettings,updateSettings,requestRefresh,scanTools,parseManifest,approvalKey,describeTool,parseImport,installImported,
   ensureToolsFolder,secretNames,toolLogFile,detectBlender,resolveLaunch,exposedName,defaultSecretStore,RuntimeMissing,runtimeOf} from './mcp-tools.mjs';
 import {ProxyServer,readToolCache} from './mcp-proxy.mjs';
+import {marketView,installPreset,updatePreset,checkPresets} from './mcp-market.mjs';
 
 function options(argv){
   const values={_:[]};
-  for(let i=0;i<argv.length;i++){const a=argv[i];if(a.startsWith('--')){const key=a.slice(2);if(['on','off','apply','blender-offer-done','json'].includes(key))values[key]=true;else values[key]=argv[++i];}else values._.push(a);}
+  for(let i=0;i<argv.length;i++){const a=argv[i];if(a.startsWith('--')){const key=a.slice(2);if(['on','off','apply','blender-offer-done','json','confirmed','online'].includes(key))values[key]=true;else values[key]=argv[++i];}else values._.push(a);}
   return values;
 }
 const stdin=async()=>{const chunks=[];let size=0;for await(const c of process.stdin){size+=c.length;if(size>256*1024)throw Error('粘贴的内容太长');chunks.push(c);}return Buffer.concat(chunks).toString('utf8');};
@@ -131,6 +136,12 @@ if(process.argv[1]&&fs.realpathSync(process.argv[1])===fileURLToPath(import.meta
     else if(command==='refresh'){requestRefresh(stateOf(o));print({refreshed:true});}
     else if(command==='import')print(await importText(stateOf(o),await stdin(),{apply:o.apply===true}));
     else if(command==='remove')print(await remove(stateOf(o),o.tool));
+    else if(command==='market')print({presets:marketView(stateOf(o))});
+    else if(command==='install'){const r=installPreset(stateOf(o),o.preset);requestRefresh(stateOf(o));print(r);}
+    else if(command==='update'){const r=updatePreset(stateOf(o),o.preset,{confirmed:o.confirmed===true});requestRefresh(stateOf(o));print(r);}
+    else if(command==='presets-check'){const r=await checkPresets({online:o.online===true});
+      for(const item of r.results)process.stdout.write((item.errors.length?'FAIL ':'OK   ')+item.file+(item.errors.length?': '+item.errors.join('; '):'')+'\n');
+      process.stdout.write(r.ok?'OK '+r.results.length+' presets\n':'FAILED\n');process.exitCode=r.ok?0:1;}
     else if(command==='check'){
       if(!o._[0])throw Error('usage: check FOLDER [--call TOOL JSON]');
       const result=await check(o._[0],{call:o.call,args:o._[1],state:o.state});

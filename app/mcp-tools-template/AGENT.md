@@ -64,6 +64,10 @@ The full JSON Schema is in `cmcp-tool.schema.json` next to this file.
 | `maxConcurrency` | no | 1-16 calls at once (default 4); more wait in a queue. |
 | `tools` | no | `{"include": [...], "exclude": [...], "descriptions": {"name": "shorter text"}}`. |
 
+Placeholders in `env` values and `args`: `{data}` is a private folder for this tool in CMCP's
+own data (never inside mcp-tools, so sharing the folder does not share the data); `{tool}` is
+this tool's folder. Example: `"MEMORY_FILE_PATH": "{data}/memory.jsonl"`.
+
 ## 3. Names Claude sees
 
 - The folder name is the tool id: `^[a-z][a-z0-9_]{0,19}$`, without `__`. Reserved:
@@ -116,7 +120,54 @@ means the tool is ready to be turned on.
 Prompts, resources, sampling and elicitation (questions during a call; the server gets a
 "not supported" error), remote URLs, SSE. Only tools are forwarded.
 
-## 8. Sharing
+## 8. Submitting a preset to the CMCP market
+
+A preset is a reviewed tool that every CMCP user can install with one click from
+Settings > Market. Presets live in the CMCP repository as `app/mcp-presets/<id>.json`:
+
+```json
+{
+  "schema": 1,
+  "id": "fetch",
+  "category": "web",
+  "title": {"zh": "从本机抓取网页", "en": "Fetch pages from this computer"},
+  "summary": {"zh": "一句话说明（不超过 200 字）", "en": "One sentence (at most 200 characters)"},
+  "detect": [],
+  "minCmcp": "4.21.0",
+  "manifest": { "...": "a complete cmcp-tool.json, see section 2" }
+}
+```
+
+Rules, checked by CI (`node app/mcp-tools-cli.mjs presets-check --online`):
+1. The manifest runs a published package pinned to one exact version: `npx` with
+   `package@1.2.3`, `uvx` with `package==1.2.3`, or `docker` with `image:tag` (not `latest`)
+   or `image@sha256:...`. `manifest.version` equals the pinned version, and that version must
+   exist on npm or PyPI.
+2. `license`, an https `homepage` (the project, not a mirror) and honest `capabilities` are
+   required. No key or token values; use `{"secret": true}`.
+3. `title` and `summary` in Chinese and English. `category`: 3d, browser, web, memory,
+   developer, design, data or other. `detect` may list `blender` or `chrome` when the tool
+   needs that program; the market then shows whether it is installed.
+4. Do not add `manifest.preset`; CMCP writes it on install.
+5. Only link to the project. Never copy its code or binaries into the CMCP repository.
+
+To submit: fork the repository, add the file, run the check above, and open a pull request
+that says what the server does on the user's computer and why the version is trustworthy
+(maintainer, release notes). A maintainer reviews the source of that exact version before
+merging. A new version is a pull request that changes the pin; users then see
+"Update to x.y.z" and confirm it themselves. CMCP never updates a tool by itself.
+
+## 9. Compatibility: interface 1 and later versions
+
+- `schema: 1` stays valid for as long as CMCP supports interface 1. New optional fields are
+  added to schema 1; older CMCP versions show them as unknown-field warnings and ignore them.
+- A change that would make an old manifest mean something else gets a new `schema` number.
+  CMCP then reads both the new and the previous schema for at least one major version, and
+  refuses newer schemas with "needs a newer CMCP" instead of guessing.
+- Presets that need a newer CMCP set `minCmcp`; older CMCP versions show them as unavailable.
+- Tool names (`<id>__<tool>`) and placeholders keep their meaning across versions.
+
+## 10. Sharing
 
 Zip the tool folder. The receiver puts it into their own mcp-tools folder, turns it on in
 CMCP and confirms it. Secrets are not part of the folder and must be entered again.

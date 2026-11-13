@@ -58,7 +58,7 @@ namespace CMCP {
         void Remove(string id);
     }
     // Runs app/mcp-tools-cli.mjs with the bundled node; pasted text goes through stdin only.
-    internal sealed class CliToolBackend : IToolBackend {
+    internal sealed partial class CliToolBackend : IToolBackend {
         readonly string kit,state;
         internal CliToolBackend(string kit,string state){this.kit=kit;this.state=state;}
         string Run(string input,params string[] args){

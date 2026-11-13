@@ -406,6 +406,23 @@ export function detectBlender(platform=process.platform,env=process.env){
   return null;
 }
 
+// Programs a preset needs on this computer, by name. Only fixed, well-known install places are
+// checked; nothing is searched or started.
+export function detectChrome(platform=process.platform,env=process.env){
+  const exists=file=>{try{return fs.statSync(file).isFile()||fs.statSync(file).isDirectory();}catch{return false;}};
+  if(platform==='darwin'){for(const app of ['/Applications/Google Chrome.app',path.join(os.homedir(),'Applications/Google Chrome.app')])if(exists(app))return app;return null;}
+  if(platform!=='win32')return null;
+  for(const root of [env.ProgramFiles||'C:\\Program Files',env['ProgramFiles(x86)']||'C:\\Program Files (x86)',env.LOCALAPPDATA].filter(Boolean)){
+    const exe=path.win32.join(root,'Google','Chrome','Application','chrome.exe');if(exists(exe))return exe;
+  }
+  return null;
+}
+export function detectApp(name,platform=process.platform,env=process.env){
+  if(name==='blender')return detectBlender(platform,env);
+  if(name==='chrome')return detectChrome(platform,env);
+  return null;
+}
+
 /* ---------------- Logs ---------------- */
 
 export function toolLogFile(stateDir,id){return path.join(stateDir,'tool-logs',id+'.log');}

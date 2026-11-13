@@ -76,13 +76,27 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 
 Install and enable the [MCP for Blender add-on](https://github.com/ahujasid/mcp-for-blender) on this computer, open Blender and start the add-on server in its sidebar. CMCP connects to `127.0.0.1:9876` by default. If the add-on uses a different port, pass it in the Blender tools' `port` argument.
 
-Reconnect CMCP and restart Claude on the VPS to discover the `blender_*` tools. They inspect the live scene and objects, execute Blender Python and return viewport images. Windows and Mac share the adapter. WebDesktop, CloudCLI and SSH terminals use their existing MCP connections. No public Blender port or separate `uvx` server is needed.
+Since 4.20 the Blender tools are off by default: turn on Settings → Tools → Blender (CMCP also offers this once when it finds Blender). Reconnect CMCP and restart Claude on the VPS to discover the `blender_*` tools. They inspect the live scene and objects, execute Blender Python and return viewport images. Windows and Mac share the adapter. WebDesktop, CloudCLI and SSH terminals use their existing MCP connections. No public Blender port or separate `uvx` server is needed.
 
 Example: “Use CMCP to check my local Blender connection, inspect the current scene, create a red cube and show a viewport screenshot. Do not overwrite existing files.”
 
 `blender_execute_code` immediately returns a job ID. Poll `blender_job_status` on the same MCP connector before continuing. Script deadlines default to 120 seconds and can be changed with `timeout_ms`, up to 10 minutes. A timeout or dropped connection does not cancel submitted Blender code. Edits are never automatically retried: inspect the scene first. Job records last only for the current CMCP session; exiting CMCP does not forcibly cancel submitted Blender code.
 
 This adapter speaks the add-on's local protocol directly; it does not import every tool from the third-party MCP server. Asset service search, online generation and that server's safe mode are not included. When Blender is closed, only Blender tools report it unavailable; other MCP tools remain usable.
+
+## Local MCP tools and the tool market
+
+Settings → Tools switches CMCP's built-in tool groups on or off for this computer: files, commands, background tasks, toolchains, desktop and Blender. Blender is off by default.
+
+CMCP can also run other MCP servers on this computer and pass their tools to Claude on the VPS:
+
+- **Market** (Settings → Market): reviewed presets such as Blender, Playwright, Chrome DevTools, memory and fetch. Each preset is pinned to one version and holds only a configuration and a link to the project. On first start, `npx` or `uvx` downloads it from the official registry. Installed tools start off. An update to a newer version is shown and applied only after you confirm it.
+- **Paste a configuration**: Settings → Tools → Add accepts the Claude Desktop `mcpServers` snippet from a server's README.
+- **Write your own**: every tool is a folder in `mcp-tools` (next to `user` on Windows, `~/Library/Application Support/CMCP/mcp-tools` on the Mac) with a `cmcp-tool.json`. `AGENT.md` in that folder describes the format for people and coding agents, and how to test a tool with one command.
+
+Claude sees these tools as `<folder>__<tool>`, for example `blender_mcp__get_scene_info`. CMCP uses only the Node.js, uv, Python or Docker already installed and tells you what is missing. Keys and tokens are kept in the system keychain or Windows encryption, never in the folder. Updating or uninstalling CMCP keeps `mcp-tools`.
+
+**Contributing a preset**: add `app/mcp-presets/<id>.json` with a pinned package version and open a pull request. The rules and the check that CI runs are in `app/mcp-tools-template/AGENT.md` (section 8).
 
 ## FAQ
 

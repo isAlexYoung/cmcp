@@ -25,6 +25,7 @@ import {closePages,detectBrowsers,openPage} from './browsers.mjs';
 import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../app/ssh-terminal.mjs';
 import {status as toolStatus,set as setTools,applySwitches,importText,remove as removeTool} from '../app/mcp-tools-cli.mjs';
 import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
+import {marketView,installPreset,updatePreset} from '../app/mcp-market.mjs';
 import {spawn} from 'node:child_process';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
@@ -111,6 +112,10 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/tools':async()=>toolStatus(directory),
     '/api/tools/set':async input=>{setTools(directory,{group:input.group,tool:input.tool,on:input.on===true,idle:input.idle,'blender-offer-done':input.blenderOfferDone===true});return {saved:true};},
     '/api/tools/apply':async input=>{const s=applySwitches(directory,{groups:input.groups||{},tools:input.tools||{}});return {saved:true,groups:s.groups,tools:s.tools};},
+    // Settings > Market: reviewed presets; install writes the tool folder, update needs a confirmation.
+    '/api/market':async()=>({presets:marketView(directory)}),
+    '/api/market/install':async input=>{const r=installPreset(directory,input.id);requestRefresh(directory);return r;},
+    '/api/market/update':async input=>{const r=updatePreset(directory,input.id,{confirmed:input.confirmed===true});requestRefresh(directory);return r;},
     '/api/tools/refresh':async()=>{requestRefresh(directory);return {refreshed:true};},
     '/api/tools/import':async input=>{if(typeof input.text!=='string'||input.text.length>256*1024)throw Error('粘贴的内容无效');return importText(directory,input.text,{apply:input.apply===true,...toolSecrets?{secrets:toolSecrets}:{}});},
     '/api/tools/remove':input=>removeTool(directory,input.id),

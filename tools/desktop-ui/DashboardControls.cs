@@ -77,6 +77,7 @@ namespace CMCP {
                     case "info":g.DrawEllipse(p,3,3,18,18);g.DrawLine(p,12,11,12,16);using(var b=new SolidBrush(color))g.FillEllipse(b,11,7,2,2);break;
                     case "sun":g.DrawEllipse(p,8,8,8,8);for(int i=0;i<8;i++){double a=i*Math.PI/4;g.DrawLine(p,12+(float)Math.Cos(a)*7.5f,12+(float)Math.Sin(a)*7.5f,12+(float)Math.Cos(a)*10,12+(float)Math.Sin(a)*10);}break;
                     case "moon":using(var path=new GraphicsPath()){path.AddArc(3.62f,3.62f,16.76f,16.76f,17.35f,235.3f);path.AddArc(7.32f,1.82f,14.86f,14.86f,225f,-180f);path.CloseFigure();g.DrawPath(p,path);}break;
+                    case "market":g.DrawRectangle(p,4,9,16,11);g.DrawArc(p,8,4,8,10,180,180);break;
                     case "tools":g.DrawLine(p,5,19,12,12);g.DrawArc(p,11,4,9,9,135,270);g.DrawLine(p,14,8,17,11);break;
                     case "terminal":g.DrawRectangle(p,3,5,18,14);g.DrawLines(p,new Point[]{new Point(7,9),new Point(10,12),new Point(7,15)});g.DrawLine(p,13,15,17,15);break;
                     case "swap":g.DrawLine(p,5,8,19,8);g.DrawLines(p,new Point[]{new Point(15,4),new Point(19,8),new Point(15,12)});g.DrawLine(p,19,16,5,16);g.DrawLines(p,new Point[]{new Point(9,12),new Point(5,16),new Point(9,20)});break;
