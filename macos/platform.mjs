@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '4.20.0';
+export const VERSION = '4.20.1';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'CMCP');
 const requestedState = process.env.CMCP_STATE_DIR || DEFAULT_STATE;
