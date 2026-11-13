@@ -46,14 +46,15 @@ The full JSON Schema is in `cmcp-tool.schema.json` next to this file.
 | `schema` | yes | Always `1`. |
 | `name` | yes | Display name, 1-60 characters. |
 | `description` | yes | One sentence, at most 200 characters, shown to the user (not to Claude). |
-| `transport` | yes | `"stdio"`, or `"http"` for a server on 127.0.0.1 / localhost / [::1] only. |
+| `transport` | yes | `"stdio"`; `"http"` (Streamable HTTP) or `"sse"` for a server on 127.0.0.1 / localhost / [::1] or a remote server over https. |
 | `command` | stdio | `npx`, `npm`, `uvx`, `uv`, `node`, `python`, `python3`, `py`, `deno`, `bun`, `docker`, `pipx`, an absolute path, or `./file` inside this folder. |
 | `args` | no | Array of strings. |
 | `cwd` | no | Folder relative to this tool's folder (default `.`). |
 | `env` | no | `{"NAME": "value"}` for plain settings; `{"NAME": {"secret": true}}` for keys and tokens. |
-| `url` | http | `http://127.0.0.1:<port>/mcp`. |
+| `url` | http, sse | `http://127.0.0.1:<port>/mcp`, or `https://...` for a remote server (which must declare `network`). |
 | `headers` | no | Like `env`; a secret header may have `"template": "Bearer {value}"`. |
-| `start` | no | http only: `{"command": ..., "args": [...]}` that CMCP starts before connecting. |
+| `start` | no | http/sse on this computer only: `{"command": ..., "args": [...]}` that CMCP starts before connecting. |
+| `auth` | no | http/sse: `{"type": "oauth", "scope"?: "...", "clientId"?: "...", "callbackPort"?: 1024-65535}` for a browser sign-in (see section 4b). |
 | `capabilities` | yes | What the tool can do: any of `files`, `exec`, `python`, `network`, `gui`, `hardware`, `credentials`. State it honestly; the user sees it before turning the tool on. `[]` means none of these. |
 | `version`, `homepage`, `license` | no | Shown to the user. `homepage` must be https. |
 | `platforms` | no | `["win32", "darwin"]` (default: both). |
@@ -85,6 +86,24 @@ stdin/stdout: answer `initialize`, `tools/list`, `tools/call`). In Python you ma
 official `mcp` package through `uvx`/`uv run`. Keep tool descriptions to one sentence that
 says what happens on this computer.
 
+## 4b. Remote MCP servers
+
+A remote server is reached from this computer, so its requests leave from here (useful when it
+is only reachable from this network, or when you sign in with this computer's browser):
+
+```json
+{"schema": 1, "name": "Linear", "description": "Issues in Linear.", "transport": "http",
+ "url": "https://mcp.linear.app/mcp", "capabilities": ["network"], "auth": {"type": "oauth"}}
+```
+
+- With `auth`, the user clicks "Sign in" on the Tools page. CMCP opens the provider's page in
+  the browser and receives the answer on `http://127.0.0.1:<callbackPort>/callback` (default
+  33418). It registers itself as a client when the server allows it; otherwise set `clientId`
+  and the `callbackPort` registered for it. Tokens are kept in the system keychain or Windows
+  DPAPI and refreshed by CMCP; they are never written into this folder.
+- A key instead of a sign-in goes in `headers` as `{"secret": true}`.
+- If a server can be reached from the VPS itself, adding it there directly is simpler.
+
 ## 5. Local test (one command)
 
 Windows (installed CMCP; replace the folder):
@@ -111,14 +130,19 @@ means the tool is ready to be turned on.
 3. Declare `capabilities` honestly.
 4. Do not download or copy third-party binaries into this folder; let npx/uvx/docker fetch
    them from their official sources. Link to the project in `homepage`.
-5. HTTP servers listen on 127.0.0.1 only. Remote MCP servers belong on the VPS itself.
+5. Local HTTP servers listen on 127.0.0.1 only. Remote servers use https.
 6. Do not change anything outside your own tool folder, and never edit CMCP's files.
 7. Do not install runtimes silently. If Node.js, uv or Python is missing, tell the user.
 
-## 7. Not supported yet (interface 1)
+## 7. What is forwarded (interface 1)
 
-Prompts, resources, sampling and elicitation (questions during a call; the server gets a
-"not supported" error), remote URLs, SSE. Only tools are forwarded.
+Tools, resources (`resources/list`, `read`, templates), prompts (with the `<id>__` prefix),
+questions during a call (elicitation) and sampling requests go to Claude on the VPS where its
+client supports them; otherwise the server gets a clear error or a "decline". `roots/list`
+answers with the folders CMCP's file tools may use. A server's list-changed notifications reach
+Claude. Clients without on-demand tool loading may see third-party tools through three compact
+tools (`cmcp_list_tools`, `cmcp_describe_tool`, `cmcp_call_tool`; Settings > Tools >
+Tool presentation). Not supported: websocket transports.
 
 ## 8. Submitting a preset to the CMCP market
 

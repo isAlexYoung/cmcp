@@ -40,7 +40,7 @@ export async function createSshDispatcher(directory) {
     const filesystem={definitions:files.tools,call:(name,args)=>backend.callTool({name,arguments:args},undefined,{timeout:120000})};
     // Third-party tools run once, in the CMCP service, when it is there.
     const client=hostClient(directory);
-    const registry=createToolRegistry({stateDir:directory,providers:[filesystem,windows,binary,blender],serverName:'windows-pc-files',makeProxy:options=>new HostedProxy(options,client),version:JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version,
+    const registry=createToolRegistry({stateDir:directory,roots,providers:[filesystem,windows,binary,blender],serverName:'windows-pc-files',makeProxy:options=>new HostedProxy(options,client),version:JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version,
       instructions:{base:`These tools operate on the user's physical Windows PC, not the VPS. Allowed file roots: ${JSON.stringify(roots)}. Use absolute Windows paths. Use windows_execute/windows_run_program for local commands and windows_start_process/windows_process_status for background jobs. The cloud CLI's built-in Bash, Read and Edit operate on the VPS; use these MCP tools for local work. Binary files use windows_binary_* tools. Operations run as the local Windows account without automatic elevation.`,blender:blenderInstructions}});
     return {forward:registry.forward,registry,get definitions(){return registry.list().tools;},async close(){binary.close();await Promise.allSettled([registry.close(),blender.close(),windows.close(),backend.close()]);}};
   } catch(error){binary.close();await Promise.allSettled([blender.close(),windows.close(),backend.close()]);throw error;}

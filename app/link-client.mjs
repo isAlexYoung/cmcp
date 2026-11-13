@@ -153,6 +153,22 @@ export class StatusBoard {
 // Windows network setting for the address each time a login starts.
 // session=true (short-term version): short logins, and `onReplaced` ends the whole service instead of
 // leaving it idle when another PC takes over.
+// Writes each new catalog revision to ~/.local/share/cloudpc-link/catalog-revision on the desktop.
+export function legacyRevisionWriter({ api, log = () => {} }) {
+  let file = null, last = null, queue = Promise.resolve();
+  return revision => { queue = queue.then(async () => {
+    if (revision === last) return;
+    try {
+      if (!file) { const info = await api('/api/sys/info?lite=1', 'GET'); if (typeof info?.home !== 'string' || !info.home.startsWith('/')) throw Error('no home'); file = info.home.replace(/\/$/, '') + '/.local/share/cloudpc-link/catalog-revision'; }
+      const dir = file.slice(0, file.lastIndexOf('/')), listing = await api('/api/sys/fs?hidden=1&path=' + encodeURIComponent(dir), 'GET');
+      const entry = listing?.entries?.find(x => x.name === 'catalog-revision');
+      if (entry && (entry.kind !== 'file' || entry.link)) throw Error('not a plain file');
+      await (entry ? api('/api/sys/fs', 'PUT', { path: file, content: revision + '\n' }) : api('/api/sys/fs', 'POST', { dir, name: 'catalog-revision', kind: 'file', content: revision + '\n' }));
+      last = revision;
+    } catch (error) { log('catalog revision not written: ' + (error.status || error.code || error.message)); }
+  }); return queue; };
+}
+
 export function startLink({ name, target, machine, version, forward, catalog, askPassword, notify, status, log, session = false, onReplaced, onConnected, deviceName = process.env.COMPUTERNAME || 'Windows', recoveryOptions,healthOptions={},onHealth,preparationCache }) {
   const interval=healthOptions.interval??1000,timeout=healthOptions.timeout??5000,hardTimeout=healthOptions.hardTimeout??30000;
   const device = deviceOf(name);
@@ -270,6 +286,13 @@ export function startLink({ name, target, machine, version, forward, catalog, as
             const announce = () => { try { const revision = catalog.revision(device); if (revision !== last && !finished && !stopped && ws.readyState === 1) { last = revision; ws.send(JSON.stringify({ t: 'catalog', revision })); } } catch {} };
             announce();
             unsubscribe = catalog.on('changed', announce);
+          } else if (catalog) {
+            // The legacy WebDesktop link carries no events: the revision goes into a file the
+            // cloud connector checks, written through the desktop's own signed-in file API.
+            const write = legacyRevisionWriter({ api: (endpoint, method, body) => cloudApi(url, auth, agent, endpoint, method, body, controller.signal), log: text => log(`[${name}] ${text}`) });
+            const announce = () => { if (!finished && !stopped) write(catalog.revision(device)); };
+            announce();
+            unsubscribe = catalog.on('changed', announce);
           }
           if(onConnected){say('configuring','连接已建立，正在验证工具链路');Promise.resolve().then(()=>onConnected(auth)).then(result=>{
             if(!finished&&!stopped&&result?.statusHandled!==true&&result!==false)say('connected',terminal?'已连接（兼容模式）':'已连接');
@@ -286,11 +309,11 @@ export function startLink({ name, target, machine, version, forward, catalog, as
         // The device's own switches apply to its calls (per-device overrides in tool-settings.json).
         // Only CMCP's own relay carries questions back to the cloud user; elsewhere a tool's
         // question is declined.
-        const ask = !terminal ? undefined : params => new Promise((resolve, reject) => {
+        const ask = !terminal ? undefined : (params, method = 'elicitation/create') => new Promise((resolve, reject) => {
           const id = randomBytes(16).toString('hex');
           const timer = setTimeout(() => { questions.delete(id); reject(Error('No answer within 10 minutes')); }, 610000);
           questions.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
-          try { ws.send(JSON.stringify({ t: 'ask', id, parent: m.id, msg: { method: 'elicitation/create', params } })); } catch (error) { questions.delete(id); clearTimeout(timer); reject(error); }
+          try { ws.send(JSON.stringify({ t: 'ask', id, parent: m.id, msg: { method, params } })); } catch (error) { questions.delete(id); clearTimeout(timer); reject(error); }
         });
         const call = msg => forward(msg, { device, ask });
         try { reply = m.recovery?.protocol === 1

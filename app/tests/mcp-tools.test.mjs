@@ -35,7 +35,7 @@ test('manifest schema 1 accepts a complete stdio and loopback HTTP tool and name
   assert.deepEqual(parseManifest(JSON.stringify(manifest()),{id:'fixture'}).errors,[]);
   const http=parseManifest(JSON.stringify({...manifest(),transport:'http',command:undefined,args:undefined,url:'http://127.0.0.1:8765/mcp',headers:{Authorization:{secret:true,template:'Bearer {value}'}}}),{id:'web'});
   assert.deepEqual(http.errors,[]);assert.deepEqual(http.secrets,['Authorization']);
-  const bad=parseManifest(JSON.stringify({schema:1,transport:'http',url:'https://example.com/mcp',capabilities:['teleport'],lifecycle:'forever',maxConcurrency:99}),{id:'Bad-Name'});
+  const bad=parseManifest(JSON.stringify({schema:1,transport:'http',url:'http://example.com/mcp',capabilities:['teleport'],lifecycle:'forever',maxConcurrency:99}),{id:'Bad-Name'});
   for(const pattern of [/name must/,/description/,/url must be/,/capabilities/,/lifecycle/,/maxConcurrency/,/folder name/])assert.ok(bad.errors.some(e=>pattern.test(e)),pattern+' in '+bad.errors);
   assert.match(parseManifest(JSON.stringify({...manifest(),schema:2})).errors[0],/newer CMCP/);
   assert.match(parseManifest('{"schema":1',{}).errors[0],/not valid JSON/);
@@ -56,8 +56,9 @@ test('README snippets import in every common shape; values go to the secret stor
   const wrapped=parseImport('{"mcpServers":{"blender":{"command":"cmd","args":["/c","uvx","mcp-for-blender"],"env":{"BLENDER_PORT":"9876"}}}}')[0];
   assert.equal(wrapped.manifest.command,'uvx');assert.deepEqual(wrapped.manifest.args,['mcp-for-blender']);assert.equal(wrapped.manifest.env.BLENDER_PORT,'9876');assert.deepEqual(wrapped.secrets,{});
   assert.equal(slug('FreeCAD-MCP Server'),'freecad_mcp_server');assert.equal(slug('3d'),'t_3d');
-  assert.throws(()=>parseImport('{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.com/mcp"}}}'),/VPS/);
-  assert.throws(()=>parseImport('{"mcpServers":{"old":{"type":"sse","url":"http://127.0.0.1:1/sse"}}}'),/不支持 sse/);
+  assert.throws(()=>parseImport('{"mcpServers":{"remote":{"type":"http","url":"http://mcp.example.com/mcp"}}}'),/https:\/\//);
+  assert.equal(parseImport('{"mcpServers":{"old":{"type":"sse","url":"http://127.0.0.1:1/sse"}}}')[0].manifest.transport,'sse');
+  assert.throws(()=>parseImport('{"mcpServers":{"ws":{"type":"websocket","url":"ws://127.0.0.1:1"}}}'),/不支持 websocket/);
   assert.throws(()=>parseImport('not json'),/JSON/);
   const two=parseImport('{"mcpServers":{"gh":{"command":"npx","args":["-y","@x/gh@1.0.0"],"env":{"GITHUB_TOKEN":"ghp_secret_value_1","MODE":"ro"}},"gh ":{"command":"npx","args":["y"]}}}');
   assert.deepEqual(two.map(i=>i.id),['gh','gh_2']);
@@ -127,7 +128,7 @@ test('catalog changes are events: switches, folder edits, upstream list_changed 
   updateSettings(f.state,s=>{s.groups.files=false;});await until(()=>events.length>after);
   assert.ok(!(await names(r)).includes('read_text_file'));
   await rpc(r,'tools/call',{name:'fixture__grow',arguments:{}});
-  await until(()=>r.has('fixture__grown_7'));
+  await until(()=>r.has('fixture__grown_9'));
   // Editing the manifest into an invalid one removes the tool, its process stops; then removal works even on Windows.
   fs.writeFileSync(path.join(f.root,'fixture','cmcp-tool.json'),'{"schema":1}');await until(()=>!r.has('fixture__echo'));
   assert.match(r.custom().find(c=>c.id==='fixture').errors.join(),/name must/);
@@ -195,4 +196,25 @@ test('Windows runs npx through npm\'s own script with node.exe, never through a 
   assert.equal(launch.command,path.join(dir,'node.exe'));assert.deepEqual(launch.args,[path.join(dir,'node_modules','npm','bin','npx-cli.js'),'-y','pkg@1.0.0']);
   fs.writeFileSync(path.join(dir,'uvx.cmd'),'@echo off');
   assert.throws(()=>resolveLaunch('uvx',[],{platform:'win32',dirs:[dir]}),/\.cmd/);
+});
+
+test('resources, prompts, roots and sampling of a local tool travel like its tools',async t=>{
+  const f=folders(t),m=addTool(f.root,'fixture');enable(f.state,'fixture',m);
+  const r=registry(t,f,{roots:[f.base]});
+  await until(()=>r.list().resources.length===1&&r.list().prompts.length===1);
+  const rpc2=(method,params,ctx)=>r.forward({jsonrpc:'2.0',id:9,method,params},ctx);
+  assert.deepEqual((await rpc2('resources/list')).result.resources.map(x=>[x.uri,x.name]),[['fixture://note','[Fixture] Note']]);
+  assert.equal((await rpc2('resources/read',{uri:'fixture://note'})).result.contents[0].text,'note text');
+  assert.match((await rpc2('resources/read',{uri:'fixture://other'})).error.message,/Unknown resource/);
+  assert.deepEqual((await rpc2('prompts/list')).result.prompts.map(x=>x.name),['fixture__greet']);
+  assert.equal((await rpc2('prompts/get',{name:'fixture__greet',arguments:{who:'Ada'}})).result.messages[0].content.text,'Say hello to Ada');
+  assert.equal((await rpc2('resources/templates/list')).result.resourceTemplates.length,0);
+  const meta=(await rpc(r,'tools/list')).result._meta['cmcp/catalog'];assert.equal(meta.resources,1);assert.equal(meta.prompts,1);
+  // Roots: the folders this computer allows CMCP's file tools to use.
+  const roots=JSON.parse((await rpc2('tools/call',{name:'fixture__roots',arguments:{}})).result.content[0].text);
+  assert.deepEqual(roots.roots.map(x=>x.name),[f.base]);assert.match(roots.roots[0].uri,/^file:/);
+  // Sampling goes through the call's channel, or fails clearly without one.
+  const methods=[];const sampled=JSON.parse((await rpc2('tools/call',{name:'fixture__sample',arguments:{}},{ask:async(params,method)=>{methods.push(method);return {role:'assistant',content:{type:'text',text:'Autumn moon'},model:'claude',stopReason:'endTurn'};}})).result.content[0].text);
+  assert.deepEqual(methods,['sampling/createMessage']);assert.equal(sampled.content.text,'Autumn moon');
+  assert.match(JSON.parse((await rpc2('tools/call',{name:'fixture__sample',arguments:{}})).result.content[0].text).message,/cannot ask Claude to write/);
 });

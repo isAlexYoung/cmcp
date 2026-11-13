@@ -67,7 +67,9 @@ export function readSettings(stateDir){
   const acknowledged={};for(const [id,value] of Object.entries(saved.acknowledged||{}))if(ID.test(id)&&/^[a-f0-9]{64}$/.test(value))acknowledged[id]=value;
   const idle=saved.idleMinutes;
   return {schema:1,groups,tools,acknowledged,idleMinutes:Number.isInteger(idle)&&idle>=0&&idle<=1440?idle:DEFAULT_IDLE_MINUTES,
-    blenderOffer:{done:saved.blenderOffer?.done===true},targets:readOverrides(saved.targets)};
+    blenderOffer:{done:saved.blenderOffer?.done===true},targets:readOverrides(saved.targets),
+    // How tools reach clients without tool search: auto decides per client, see the connector.
+    exposure:['auto','full','compact'].includes(saved.exposure)?saved.exposure:'auto'};
 }
 // Per-device overrides on top of the switches for this computer: {device: {groups, tools}}.
 // A missing entry follows the global switch. Approval (acknowledged) stays per computer.
@@ -101,7 +103,7 @@ export function requestRefresh(stateDir){atomicWrite(refreshFile(stateDir),JSON.
 export const KNOWN_COMMANDS=new Set(['npx','npm','uvx','uv','node','python','python3','py','deno','bun','docker','pipx']);
 export const CAPABILITIES=['files','exec','python','network','gui','hardware','credentials'];
 const LOOPBACK=new Set(['127.0.0.1','localhost','[::1]','::1']);
-const KNOWN_FIELDS=new Set(['schema','name','description','version','homepage','license','transport','command','args','cwd','env','url','headers','start','platforms','requires','capabilities','instructions','lifecycle','timeouts','maxConcurrency','tools','preset']);
+const KNOWN_FIELDS=new Set(['schema','name','description','version','homepage','license','transport','command','args','cwd','env','url','headers','start','platforms','requires','capabilities','instructions','lifecycle','timeouts','maxConcurrency','tools','preset','auth']);
 const SECRET_VALUE=/^(?:sk-|sk_|ghp_|gho_|github_pat_|xox[bpas]-|AKIA|AIza|-----BEGIN)/;
 const SECRET_KEY=/TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL/i;
 const str=(value,max,min=1)=>typeof value==='string'&&value.length>=min&&value.length<=max&&!/[\x00]/.test(value);
@@ -131,7 +133,7 @@ export function parseManifest(text,{id,dir,platform=process.platform}={}){
   if(!str(m.description,200))errors.push('description must be 1-200 characters');
   for(const key of ['version','license'])if(m[key]!==undefined&&!str(m[key],64))errors.push(key+' must be a short string');
   if(m.homepage!==undefined&&!(str(m.homepage,512)&&/^https:\/\//.test(m.homepage)))errors.push('homepage must be an https link');
-  if(!['stdio','http'].includes(m.transport))errors.push('transport must be "stdio" or "http"');
+  if(!['stdio','http','sse'].includes(m.transport))errors.push('transport must be "stdio", "http" or "sse"');
   const checkCommand=(command,args,where)=>{
     if(!str(command,1024)){errors.push(where+'command is required');return;}
     if(!KNOWN_COMMANDS.has(command)){
@@ -144,12 +146,18 @@ export function parseManifest(text,{id,dir,platform=process.platform}={}){
     if(args?.some(a=>/@latest$/.test(a))||(['npx','uvx'].includes(command)&&args?.length&&!args.some(a=>/@\d|==\d|@[\w.-]*\d/.test(a))))warnings.push({code:'UNPINNED',field:where+'args'});
   };
   if(m.transport==='stdio')checkCommand(m.command,m.args,'');
-  if(m.transport==='http'){
+  if(m.transport==='http'||m.transport==='sse'){
+    // A server on this computer (any http(s) on the loopback address) or a remote one over https.
     let url;try{url=new URL(m.url);}catch{}
-    if(!url||!['http:','https:'].includes(url.protocol)||!LOOPBACK.has(url.hostname))errors.push('url must be http(s)://127.0.0.1, localhost or [::1]');
+    if(!url||!['http:','https:'].includes(url.protocol)||(!LOOPBACK.has(url.hostname)&&url.protocol!=='https:'))errors.push('url must be http(s)://127.0.0.1, localhost or [::1], or https:// for a remote server');
+    else if(url.username||url.password)errors.push('url must not contain a user name or password; use a secret header');
+    const remote=isRemote(m);
+    if(remote&&Array.isArray(m.capabilities)&&!m.capabilities.includes('network'))errors.push('a remote server needs the "network" capability');
     checkValues(m.headers,'headers',errors,warnings,secrets);
-    if(m.start!==undefined){if(!m.start||typeof m.start!=='object'||Array.isArray(m.start))errors.push('start must be an object');else checkCommand(m.start.command,m.start.args,'start.');}
-  }
+    if(m.start!==undefined){if(remote)errors.push('start is only for servers on this computer');else if(!m.start||typeof m.start!=='object'||Array.isArray(m.start))errors.push('start must be an object');else checkCommand(m.start.command,m.start.args,'start.');}
+    if(m.auth!==undefined){const a=m.auth;
+      if(!a||typeof a!=='object'||a.type!=='oauth'||(a.scope!==undefined&&!str(a.scope,512))||(a.clientId!==undefined&&!str(a.clientId,256))||(a.callbackPort!==undefined&&!(Number.isInteger(a.callbackPort)&&a.callbackPort>=1024&&a.callbackPort<=65535)))errors.push('auth must be {"type":"oauth", "scope"?, "clientId"?, "callbackPort"? 1024-65535}');}
+  } else if(m.auth!==undefined)errors.push('auth is only for http and sse servers');
   if(m.cwd!==undefined&&!(str(m.cwd,1024)&&(!dir||inside(dir,path.resolve(dir,m.cwd)))))errors.push('cwd must stay inside the tool folder');
   checkValues(m.env,'env',errors,warnings,secrets);
   if(m.platforms!==undefined&&(!Array.isArray(m.platforms)||!m.platforms.length||m.platforms.some(p=>!['win32','darwin'].includes(p))))errors.push('platforms must list win32 and/or darwin');
@@ -168,10 +176,18 @@ export function parseManifest(text,{id,dir,platform=process.platform}={}){
   if(m.platforms&&!m.platforms.includes(platform)&&['win32','darwin'].includes(platform))errors.push('not available on this computer ('+platform+')');
   return {manifest:errors.length?undefined:m,errors,warnings,secrets};
 }
+export function isRemote(m){try{return ['http','sse'].includes(m.transport)&&!LOOPBACK.has(new URL(m.url).hostname);}catch{return false;}}
 // What the user confirms before first use: changes to the command or capabilities ask again.
-export const approvalKey=m=>sha(JSON.stringify([m.transport,m.command||'',m.args||[],m.url||'',m.start||null,[...m.capabilities].sort()]));
+export const approvalKey=m=>sha(JSON.stringify([m.transport,m.command||'',m.args||[],m.url||'',m.start||null,[...m.capabilities].sort(),...m.auth?[m.auth]:[]]));
 export function describeTool(m){
-  const command=m.transport==='http'?(m.start?[m.start.command,...m.start.args||[]].join(' ')+' → '+m.url:m.url):[m.command,...m.args||[]].join(' ');
+  if(isRemote(m)){
+    const host=new URL(m.url).host,signin=m.auth?.type==='oauth';
+    return {
+      zh:`${m.name} 是远程 MCP 服务 ${host}，CMCP 从这台电脑连接它，Claude 调用它的工具时请求会从这台电脑发出${signin?'；需要你在浏览器里登录，登录凭据加密保存在这台电脑上':''}。它在对方服务器上能做什么由对方决定，CMCP 无法限制。`,
+      en:`${m.name} is the remote MCP service ${host}. CMCP connects to it from this computer, so Claude's calls to its tools leave from here${signin?'; you sign in in the browser and the sign-in is kept encrypted on this computer':''}. What it does on its own servers is up to that service; CMCP cannot limit it.`,
+    };
+  }
+  const command=m.transport!=='stdio'?(m.start?[m.start.command,...m.start.args||[]].join(' ')+' → '+m.url:m.url):[m.command,...m.args||[]].join(' ');
   const zh={files:'读写你的文件',exec:'运行任意命令',python:'运行 Python 代码',network:'联网',gui:'操作桌面程序',hardware:'访问外接设备',credentials:'使用账号或令牌'};
   const en={files:'read and write your files',exec:'run any command',python:'run Python code',network:'use the network',gui:'control desktop programs',hardware:'use attached devices',credentials:'use accounts or tokens'};
   const caps=m.capabilities;
@@ -276,12 +292,15 @@ export function parseImport(text,{existing=new Set()}={}){
       // READMEs for Windows often wrap the command in "cmd /c"; CMCP starts it without a shell.
       if(/^cmd(?:\.exe)?$/i.test(command)&&/^\/[cC]$/.test(args[0]||'')&&args[1]){command=args[1].replace(/\.(?:cmd|exe)$/i,'');args=args.slice(2);}
       Object.assign(manifest,{transport:'stdio',command,...args.length?{args}:{}});
-    } else if(['http','streamable-http','streamableHttp'].includes(type)){
+    } else if(['http','streamable-http','streamableHttp','sse'].includes(type)){
       let url;try{url=new URL(server.url);}catch{}
-      if(!url||!LOOPBACK.has(url.hostname))throw Error(name+'：远程 MCP 服务器请直接加在 VPS 上，不需要经过本机（CMCP 只代理本机 127.0.0.1 上的 HTTP 服务器）');
-      Object.assign(manifest,{transport:'http',url:server.url});
-      if(server.headers&&typeof server.headers==='object'){manifest.headers={};for(const [k,v] of Object.entries(server.headers)){manifest.headers[k]={secret:true};secrets['header:'+k]=String(v);}}
-    } else throw Error(name+'：不支持 '+type+' 类型（只支持 stdio 和本机 HTTP）');
+      if(!url||!(LOOPBACK.has(url.hostname)?['http:','https:'].includes(url.protocol):url.protocol==='https:'))throw Error(name+'：地址必须是本机的 http(s)://127.0.0.1，或远程的 https:// 地址');
+      Object.assign(manifest,{transport:type==='sse'?'sse':'http',url:server.url});
+      const headers=server.headers&&typeof server.headers==='object'&&Object.keys(server.headers).length?server.headers:null;
+      if(headers){manifest.headers={};for(const [k,v] of Object.entries(headers)){manifest.headers[k]={secret:true};secrets['header:'+k]=String(v);}}
+      // A remote server reached without a key may ask for a browser sign-in; nothing happens until it does.
+      if(!LOOPBACK.has(url.hostname)){manifest.capabilities=['network'];manifest.description=('Remote MCP server '+url.host).slice(0,200);if(!headers)manifest.auth={type:'oauth'};}
+    } else throw Error(name+'：不支持 '+type+' 类型（只支持 stdio、http 和 sse）');
     if(server.cwd!==undefined)manifest.cwd='.';
     // Values that look like keys or tokens go to the secret store; settings such as ports stay in the manifest.
     if(server.env&&typeof server.env==='object'){manifest.env={};for(const [k,v] of Object.entries(server.env)){const value=String(v);if(SECRET_KEY.test(k)||SECRET_VALUE.test(value)){manifest.env[k]={secret:true};secrets['env:'+k]=value;}else manifest.env[k]=value;}}
@@ -320,6 +339,12 @@ export async function loadSecrets(stateDir,id,store){
   let data;try{data=readJson(secretsFile(stateDir,id));}catch{return {};}
   const values={};for(const [key,value] of Object.entries(data.values||{}))values[key]=await store.unprotect(value);
   return values;
+}
+// Removes some values (for example a sign-in) and keeps the others.
+export async function dropSecrets(stateDir,id,keys,store){
+  const file=secretsFile(stateDir,id);let data;try{data=readJson(file);}catch{return;}
+  let changed=false;for(const key of keys)if(Object.hasOwn(data.values||{},key)){await store?.remove?.(data.values[key])?.catch?.(()=>{});delete data.values[key];changed=true;}
+  if(changed)atomicWrite(file,JSON.stringify(data,null,2)+'\n');
 }
 export function secretNames(stateDir,id){try{return Object.keys(readJson(secretsFile(stateDir,id)).values||{});}catch{return [];}}
 export async function removeSecrets(stateDir,id,store){

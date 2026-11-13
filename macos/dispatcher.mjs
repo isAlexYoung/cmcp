@@ -18,7 +18,7 @@ export async function createDispatcher({roots,filesystem:injected,stateDir=STATE
     filesystem=new Client({name:'cmcp-mac',version:VERSION});await filesystem.connect(transport);
   }
   const files={definitions:compatibleToolDefinitions(await filesystem.listTools()).tools,call:(name,args)=>filesystem.callTool({name,arguments:args},undefined,{timeout:120000})};
-  const registry=createToolRegistry({stateDir,providers:[files,mac,binary,blender],serverName:'mac-pc-files',version:VERSION,...registryOptions,
+  const registry=createToolRegistry({stateDir,roots,providers:[files,mac,binary,blender],serverName:'mac-pc-files',version:VERSION,...registryOptions,
     instructions:{base:`These tools operate on the physical Mac. Use absolute Mac paths, such as /Users/name/project. Allowed file roots: ${JSON.stringify(roots)}. Commands and launched programs run as the current Mac user with full account permissions. The cloud terminal is a separate Linux computer.`,blender:blenderInstructions}});
   return{forward:registry.forward,registry,get definitions(){return registry.list().tools;},async close(){binary.close();await Promise.allSettled([registry.close(),blender.close(),mac.close(),filesystem.close()]);}};
 }

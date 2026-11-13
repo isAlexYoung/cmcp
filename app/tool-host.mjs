@@ -38,11 +38,10 @@ export async function startToolHost({stateDir,registry,log=()=>{},endpoint=hostE
       try{
         if(op==='refresh'){write(socket,{id,tools:await proxy.refresh(),status:proxy.status()});return;}
         if(op==='status'){write(socket,{id,status:proxy.status(),tripped:proxy.tripped()});return;}
-        if(op==='call'){
-          // A question during this call goes back to the worker, which asks its cloud user.
-          const ask=params=>new Promise((resolve,reject)=>{const question=randomBytes(12).toString('hex');asks.set(question,{resolve,reject});write(socket,{id,question,params});});
-          write(socket,{id,result:await proxy.call(message.name,message.args||{},{ask})});return;
-        }
+        // A question or sampling request during this call goes back to the worker, which asks its cloud user.
+        const ask=(params,method)=>new Promise((resolve,reject)=>{const question=randomBytes(12).toString('hex');asks.set(question,{resolve,reject});write(socket,{id,question,params,method});});
+        if(op==='call'){write(socket,{id,result:await proxy.call(message.name,message.args||{},{ask})});return;}
+        if(op==='request'&&['resource','prompt'].includes(message.kind)){write(socket,{id,result:await proxy.request(message.kind,message.params||{},{ask})});return;}
         write(socket,{id,error:'Unknown operation'});
       }catch(error){write(socket,{id,error:error.message});}
     });
@@ -75,7 +74,7 @@ export function hostClient(stateDir,{connectTimeout=2000}={}){
       lines(s,message=>{
         if(!opened){if(message.ok){opened=true;clearTimeout(timer);socket=s;resolve(s);}return;}
         const p=pending.get(message.id);if(!p)return;
-        if(message.question){Promise.resolve(p.ask?p.ask(message.params):Promise.reject(Error('No client can show this question'))).then(answer=>write(s,{question:message.question,answer}),error=>write(s,{question:message.question,answer:null,error:error.message}));return;}
+        if(message.question){Promise.resolve(p.ask?p.ask(message.params,message.method):Promise.reject(Error('No client can show this question'))).then(answer=>write(s,{question:message.question,answer}),error=>write(s,{question:message.question,answer:null,error:error.message}));return;}
         pending.delete(message.id);message.error?p.reject(Object.assign(Error(message.error),{host:true})):p.resolve(message);
       });
     }).catch(error=>{ready=null;throw error;});
@@ -113,6 +112,11 @@ export class HostedProxy {
       // The call may have reached the tool before the host went away: never resent.
       return {isError:true,content:[{type:'text',text:UNCERTAIN+' ('+error.message+')'}]};
     }
+  }
+  async request(kind,params,ctx={}){
+    if(this.local||!(await this.client.available()))return this.fallback().request(kind,params,ctx);
+    try{return (await this.client.request({op:'request',tool:this.id,kind,params},ctx.ask)).result;}
+    catch(error){if(error.host&&/not on/.test(error.message))return this.fallback().request(kind,params,ctx);throw error;}
   }
   async close(){await this.local?.close();}
 }

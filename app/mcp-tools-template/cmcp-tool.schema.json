@@ -40,7 +40,8 @@
     "transport": {
       "enum": [
         "stdio",
-        "http"
+        "http",
+        "sse"
       ]
     },
     "command": {
@@ -94,7 +95,8 @@
     },
     "url": {
       "type": "string",
-      "pattern": "^https?://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?(/|$)"
+      "description": "http(s) on 127.0.0.1, localhost or [::1]; a remote server must use https.",
+      "pattern": "^(https?://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?(/|$)|https://)"
     },
     "headers": {
       "type": "object",
@@ -259,6 +261,32 @@
         }
       }
     },
+    "auth": {
+      "type": "object",
+      "description": "Browser sign-in (OAuth) for an http or sse server.",
+      "properties": {
+        "type": {
+          "const": "oauth"
+        },
+        "scope": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "clientId": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "callbackPort": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
     "preset": {
       "type": "object"
     }
@@ -282,7 +310,10 @@
       "if": {
         "properties": {
           "transport": {
-            "const": "http"
+            "enum": [
+              "http",
+              "sse"
+            ]
           }
         }
       },

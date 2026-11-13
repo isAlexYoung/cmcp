@@ -7,7 +7,7 @@ import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {createHash} from 'node:crypto';
 import {GROUPS,groupOf,toolsRoot,readSettings,effectiveSwitches,scanTools,fingerprint,exposedName,ensureToolsFolder,refreshFile,approvalKey,defaultSecretStore} from './mcp-tools.mjs';
-import {ProxyServer} from './mcp-proxy.mjs';
+import {ProxyServer,readToolExtras} from './mcp-proxy.mjs';
 
 const PROTOCOLS=['2024-11-05','2025-03-26','2025-06-18','2025-11-25'];
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -16,7 +16,7 @@ const sha=value=>createHash('sha256').update(value).digest('hex');
 function plainSchema(schema){if(!schema||typeof schema!=='object')return schema;const copy=structuredClone(schema);delete copy.$schema;return copy;}
 const text=(message,isError=true)=>({...isError?{isError:true}:{},content:[{type:'text',text:message}]});
 
-export function createToolRegistry({stateDir,providers=[],instructions={},serverName,version,platform=process.platform,env=process.env,secrets=defaultSecretStore(platform),root=toolsRoot(stateDir,platform,env),watch=true,makeProxy=options=>new ProxyServer(options),log=()=>{}}){
+export function createToolRegistry({stateDir,providers=[],instructions={},serverName,version,roots=[],platform=process.platform,env=process.env,secrets=defaultSecretStore(platform),root=toolsRoot(stateDir,platform,env),watch=true,makeProxy=options=>new ProxyServer(options),log=()=>{}}){
   const events=new EventEmitter();events.setMaxListeners(64);
   const proxies=new Map();let stamp=null,timer=null,watchers=[],active=0,closed=false,warming=new Set();
   try{ensureToolsFolder(root);}catch(error){log('mcp-tools folder unavailable: '+error.message);}
@@ -25,7 +25,7 @@ export function createToolRegistry({stateDir,providers=[],instructions={},server
   function proxyFor(tool,settings){
     let proxy=proxies.get(tool.id);
     if(proxy&&(proxy.hash!==tool.hash||proxy.idleMs!==settings.idleMinutes*60000)){proxies.delete(tool.id);proxy.close().catch(()=>{});proxy=null;}
-    if(!proxy){proxy=makeProxy({id:tool.id,manifest:tool.manifest,hash:tool.hash,dir:tool.dir,stateDir,platform,env,secrets,idleMs:settings.idleMinutes*60000,onToolsChanged:()=>check(true)});proxies.set(tool.id,proxy);}
+    if(!proxy){proxy=makeProxy({id:tool.id,manifest:tool.manifest,hash:tool.hash,dir:tool.dir,stateDir,platform,env,secrets,idleMs:settings.idleMinutes*60000,onToolsChanged:()=>check(true),roots});proxies.set(tool.id,proxy);}
     return proxy;
   }
   // Fill the cache of an enabled tool in the background; the list never waits for a process.
@@ -55,7 +55,7 @@ export function createToolRegistry({stateDir,providers=[],instructions={},server
     if(views.has(device))return views.get(device);
     const {settings}=base,on=effectiveSwitches(settings,device||null);
     const groups=new Set(['system',...GROUPS.filter(g=>on.groups[g])]);
-    const tools=[],routes=new Map(),custom=[];
+    const tools=[],routes=new Map(),custom=[],resources=[],resourceRoutes=new Map(),prompts=[],promptRoutes=new Map();
     for(const [name,provider] of builtinNames){
       if(!groups.has(groupOf(name)))continue;
       const d=provider.definitions.find(x=>x.name===name);tools.push(d);routes.set(name,{provider});
@@ -76,12 +76,16 @@ export function createToolRegistry({stateDir,providers=[],instructions={},server
         tools.push({...upstream,name,description:'['+tool.manifest.name+'] '+description,inputSchema:plainSchema(upstream.inputSchema)||{type:'object'},...upstream.outputSchema?{outputSchema:plainSchema(upstream.outputSchema)}:{}});
         routes.set(name,{proxy,upstream:upstream.name});entry.count++;
       }
+      // Resources keep their URIs (the first tool wins a duplicate); prompts get the tool prefix.
+      const extras=readToolExtras(stateDir,tool.id,tool.hash);
+      for(const resource of extras.resources)if(resource&&typeof resource.uri==='string'&&!resourceRoutes.has(resource.uri)){resources.push({...resource,name:'['+tool.manifest.name+'] '+(resource.name||resource.uri)});resourceRoutes.set(resource.uri,proxy);}
+      for(const prompt of extras.prompts){if(!prompt||typeof prompt.name!=='string')continue;const name=exposedName(tool.id,prompt.name);if(promptRoutes.has(name))continue;prompts.push({...prompt,name});promptRoutes.set(name,{proxy,upstream:prompt.name});}
     }
     const parts=[instructions.base||''];
     if(groups.has('blender')&&instructions.blender)parts.push(instructions.blender);
     if(custom.some(t=>t.enabled&&t.count))parts.push('Tools named <tool>__<name> are third-party MCP servers the user installed on this local computer; they run with the user\'s local account.');
     const enabledGroups=[...groups];
-    const view={tools,routes,instructions:parts.filter(Boolean).join(' '),groups:enabledGroups,revision:sha(JSON.stringify([tools,parts,enabledGroups])),custom,settings};
+    const view={tools,routes,resources,resourceRoutes,prompts,promptRoutes,instructions:parts.filter(Boolean).join(' '),groups:enabledGroups,exposure:settings.exposure,revision:sha(JSON.stringify([tools,parts,enabledGroups,settings.exposure,resources,prompts])),custom,settings};
     views.set(device,view);return view;
   }
   // Recompute when anything that decides the lists changed; emit only if a device's list changed.
@@ -133,7 +137,17 @@ export function createToolRegistry({stateDir,providers=[],instructions={},server
       const current=check(false,device);
       result={protocolVersion:PROTOCOLS.includes(msg.params?.protocolVersion)?msg.params.protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:serverName,version},instructions:current.instructions};
     } else if(msg.method==='ping')result={};
-    else if(msg.method==='tools/list'){const current=check(false,device);result={tools:current.tools,_meta:{'cmcp/catalog':{schema:1,revision:current.revision,groups:current.groups}}};}
+    else if(msg.method==='tools/list'){const current=check(false,device);result={tools:current.tools,_meta:{'cmcp/catalog':{schema:1,revision:current.revision,groups:current.groups,exposure:current.exposure,resources:current.resources.length,prompts:current.prompts.length}}};}
+    else if(msg.method==='resources/list')result={resources:check(false,device).resources};
+    else if(msg.method==='resources/templates/list')result={resourceTemplates:[]};
+    else if(msg.method==='prompts/list')result={prompts:check(false,device).prompts};
+    else if(msg.method==='resources/read'||msg.method==='prompts/get'){
+      const current=check(false,device),p=msg.params||{};
+      const route=msg.method==='resources/read'?current.resourceRoutes.get(p.uri):current.promptRoutes.get(p.name);
+      if(!route)return error(-32602,(msg.method==='resources/read'?'Unknown resource: ':'Unknown prompt: ')+(p.uri||p.name));
+      try{result=msg.method==='resources/read'?await route.request('resource',{uri:p.uri},ctx):await route.proxy.request('prompt',{name:route.upstream,arguments:p.arguments},ctx);}
+      catch(e){return error(-32603,e.message);}
+    }
     else if(msg.method==='tools/call'){
       const p=msg.params;
       if(!p||typeof p.name!=='string'||(p.arguments!==undefined&&(!p.arguments||typeof p.arguments!=='object'||Array.isArray(p.arguments))))return error(-32602,'Invalid tool call');

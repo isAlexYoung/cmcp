@@ -69,11 +69,28 @@ class RequiredToolTests(unittest.TestCase):
         self.assertEqual(len(scripted_link(M, names, {'schema': 1, 'revision': 'm', 'groups': ['files']}).fetch_catalog()['tools']), 7)
 
 
+class CompactRuleTests(unittest.TestCase):
+    def test_who_gets_compact_mode(self):
+        w = C.wants_compact
+        self.assertTrue(w('compact', {'name': 'claude-code', 'version': '2.1.400'}, {}, 1))
+        self.assertFalse(w('full', {'name': 'claude-ai'}, {}, 50))
+        self.assertFalse(w('auto', {'name': 'claude-ai'}, {}, 0), 'nothing to hide')
+        self.assertTrue(w('auto', {'name': 'claude-ai'}, {}, 1), 'Claude Desktop loads every tool up front')
+        self.assertFalse(w('auto', {'name': 'claude-code', 'version': '2.1.302'}, {}, 50), 'direct: tool search')
+        gateway = {'ANTHROPIC_BASE_URL': 'https://gw.example'}
+        self.assertTrue(w('auto', {'name': 'claude-code', 'version': '2.1.302'}, gateway, 31))
+        self.assertFalse(w('auto', {'name': 'claude-code', 'version': '2.1.302'}, gateway, 30))
+        self.assertFalse(w('auto', {'name': 'claude-code', 'version': '2.1.304'}, gateway, 50), 'tool search on behind gateways from 2.1.304')
+        self.assertFalse(w('auto', {'name': 'claude-code', 'version': '2.1.302'}, dict(gateway, ENABLE_TOOL_SEARCH='true'), 50))
+        self.assertTrue(w('auto', {'name': 'claude-code', 'version': '2.1.400'}, {'ENABLE_TOOL_SEARCH': 'false'}, 31))
+        self.assertTrue(M.wants_compact('auto', {'name': 'claude-ai'}, {}, 1))
+
+
 class FakePc:
     """Answers the relay's requests the way CMCP's tool registry does."""
 
     def __init__(self, relay):
-        self.relay, self.tools, self.revision, self.calls, self.groups = relay, ['freecad__make_box'], 'r1', [], ['system']
+        self.relay, self.tools, self.revision, self.calls, self.groups, self.exposure, self.called = relay, ['freecad__make_box'], 'r1', [], ['system'], 'auto', []
 
     def emit(self, packet):
         if packet.get('t') != 'req':
@@ -83,9 +100,10 @@ class FakePc:
         if message['method'] == 'initialize':
             result = {'instructions': 'PC tools'}
         elif message['method'] == 'tools/list':
-            result = {'tools': [tool(n) for n in self.tools], '_meta': {'cmcp/catalog': {'schema': 1, 'revision': self.revision, 'groups': self.groups}}}
+            result = {'tools': [tool(n) for n in self.tools], '_meta': {'cmcp/catalog': {'schema': 1, 'revision': self.revision, 'groups': self.groups, 'exposure': self.exposure}}}
         else:
-            result = {'content': [{'type': 'text', 'text': 'ok'}]}
+            self.called.append(message.get('params', {}).get('name'))
+            result = {'content': [{'type': 'text', 'text': 'ok ' + str(message.get('params', {}).get('arguments'))}]}
         reply = {'t': 'res', 'id': packet['id'], 'msg': {'jsonrpc': '2.0', 'id': message.get('id'), 'result': result}}
         threading.Thread(target=self.relay.message, args=(reply,), daemon=True).start()
 
@@ -215,7 +233,7 @@ class ConnectorRefreshTests(unittest.TestCase):
     def test_an_announced_revision_refreshes_the_list_and_notifies_claude(self):
         self.send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18', 'clientInfo': {'name': 'claude-code'}}})
         capabilities = self.wait_for(lambda line: line.get('id') == 1)[0]['result']['capabilities']
-        self.assertEqual(capabilities, {'tools': {'listChanged': True}})
+        self.assertEqual(capabilities, {'tools': {'listChanged': True}, 'resources': {'listChanged': True}, 'prompts': {'listChanged': True}})
         self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         deadline = time.time() + 10
         while self.relay.watchers < 1 and time.time() < deadline:
@@ -238,6 +256,113 @@ class ConnectorRefreshTests(unittest.TestCase):
         self.relay.message({'t': 'catalog', 'revision': 'r2'})
         time.sleep(0.5)
         self.assertEqual(self.pc.calls, calls, 'a repeated revision causes no refresh')
+
+
+@unittest.skipIf(os.name == 'nt', 'Unix sockets')
+class CompactModeTests(ConnectorRefreshTests):
+    def test_an_announced_revision_refreshes_the_list_and_notifies_claude(self):
+        pass
+
+    def test_claude_desktop_sees_three_tools_that_reach_every_local_tool(self):
+        self.pc.tools = ['fx__echo', 'fx__ask', 'blender_get_scene_info']
+        self.pc.groups = ['system', 'blender']
+        self.send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18', 'clientInfo': {'name': 'claude-ai', 'version': '1.0'}}})
+        self.wait_for(lambda line: line.get('id') == 1)
+        self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+        self.wait_for(lambda line: line.get('method') == 'notifications/tools/list_changed')
+        self.assertEqual(self.tools(2), ['cmcp_list_tools', 'cmcp_describe_tool', 'cmcp_call_tool'])
+        self.send({'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call', 'params': {'name': 'cmcp_list_tools', 'arguments': {'query': 'fx'}}})
+        listing = self.wait_for(lambda line: line.get('id') == 3)[0]['result']['content'][0]['text']
+        self.assertIn('fx__echo', listing)
+        self.assertNotIn('blender_get_scene_info', listing)
+        self.send({'jsonrpc': '2.0', 'id': 4, 'method': 'tools/call', 'params': {'name': 'cmcp_describe_tool', 'arguments': {'name': 'fx__echo'}}})
+        described = json.loads(self.wait_for(lambda line: line.get('id') == 4)[0]['result']['content'][0]['text'])
+        self.assertEqual(described['inputSchema'], {'type': 'object'})
+        self.send({'jsonrpc': '2.0', 'id': 5, 'method': 'tools/call', 'params': {'name': 'cmcp_call_tool', 'arguments': {'name': 'fx__echo', 'arguments': {'text': 'hi'}}}})
+        called = self.wait_for(lambda line: line.get('id') == 5)[0]
+        self.assertEqual(self.pc.called, ['fx__echo'])
+        self.assertIn("'text': 'hi'", called['result']['content'][0]['text'])
+        self.send({'jsonrpc': '2.0', 'id': 6, 'method': 'tools/call', 'params': {'name': 'cmcp_call_tool', 'arguments': {'name': 'fx__ech'}}})
+        self.assertIn('fx__echo', self.wait_for(lambda line: line.get('id') == 6)[0]['result']['content'][0]['text'])
+        # The user chooses "full": the tools are listed directly again after the change event.
+        before = len(self.notifications())
+        self.pc.exposure, self.pc.revision = 'full', 'r2'
+        self.relay.message({'t': 'catalog', 'revision': 'r2'})
+        self.wait_for(lambda line: len(self.notifications()) > before)
+        self.assertEqual(self.tools(7), ['fx__echo', 'fx__ask', 'blender_get_scene_info'])
+
+
+@unittest.skipIf(os.name == 'nt', 'Unix sockets')
+class LegacyLinkTests(unittest.TestCase):
+    """The legacy WebDesktop link: no watch request; CMCP writes catalog-revision beside the socket."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        base = Path(self.directory.name)
+        self.folder = base / 'link'
+        self.folder.mkdir()
+        self.tools, self.revision = ['fx__echo'], 'r1'
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.server.bind(str(self.folder / 'link.sock'))
+        self.server.listen(16)
+        self.addCleanup(self.server.close)
+        threading.Thread(target=self.serve, daemon=True).start()
+        env = dict(os.environ, CLOUDPC_LINK_SOCKET=str(self.folder / 'link.sock'), HOME=str(base))
+        self.process = subprocess.Popen([sys.executable, '-u', str(ROOT / 'cloudpc-connector.py'), 'serve', '--name', 'legacy-test', '--home', str(base)],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        self.addCleanup(self.stop)
+        self.lines = []
+        threading.Thread(target=self.read, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                conn, _ = self.server.accept()
+            except OSError:
+                return
+            with conn:
+                request = json.loads(conn.makefile('rb').readline())
+                if request.get('op') != 'call':
+                    reply = {'id': 1, 'ok': False, 'code': 'error', 'error': 'unknown op'}
+                else:
+                    msg = request['msg']
+                    result = {'instructions': 'PC'} if msg['method'] == 'initialize' else {'tools': [tool(n) for n in self.tools], '_meta': {'cmcp/catalog': {'schema': 1, 'revision': self.revision, 'groups': ['system']}}}
+                    reply = {'id': 1, 'ok': True, 'msg': {'jsonrpc': '2.0', 'id': msg.get('id'), 'result': result}}
+                conn.sendall((json.dumps(reply) + '\n').encode())
+
+    def stop(self):
+        self.process.stdin.close()
+        try:
+            self.process.wait(5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        self.process.stdout.close()
+        self.process.stderr.close()
+
+    def read(self):
+        for raw in self.process.stdout:
+            self.lines.append(json.loads(raw))
+
+    def wait_for(self, check, seconds=15):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if any(check(line) for line in list(self.lines)):
+                return
+            time.sleep(0.1)
+        self.fail('timed out; lines: %r' % self.lines)
+
+    def test_a_written_revision_refreshes_the_list(self):
+        self.process.stdin.write((json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18', 'clientInfo': {'name': 'claude-code'}}}) + '\n').encode())
+        self.process.stdin.write((json.dumps({'jsonrpc': '2.0', 'method': 'notifications/initialized'}) + '\n').encode())
+        self.process.stdin.flush()
+        self.wait_for(lambda line: line.get('method') == 'notifications/tools/list_changed')
+        time.sleep(2.5)
+        before = sum(1 for line in self.lines if line.get('method') == 'notifications/tools/list_changed')
+        self.tools, self.revision = ['fx__echo', 'fx__new'], 'r2'
+        (self.folder / 'catalog-revision').write_text('r2\n')
+        self.wait_for(lambda line: sum(1 for x in self.lines if x.get('method') == 'notifications/tools/list_changed') > before, 10)
 
 
 if __name__ == '__main__':

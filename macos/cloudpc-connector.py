@@ -48,6 +48,41 @@ TRANSFER_TOOLS = [{"name": name, "description": description,
         ("mac_download_to_cloud", "Copy any binary file from Mac to an absolute path on this cloud computer (Linux). Streams 1 MiB chunks internally; returns size and SHA-256 without putting file bytes in chat."),
         ("mac_upload_from_cloud", "Copy any binary file from an absolute path on this cloud computer (Linux) to Mac. Supports MP4, audio, images, PDF, Office and archives. Validates SHA-256 before publishing."))]
 TRANSFER_NAMES = {tool["name"] for tool in TRANSFER_TOOLS}
+
+# Compact mode: third-party tools and Blender behind three tools, for clients that load every tool
+# description up front (Claude Desktop, Claude Code behind a gateway without tool search).
+META_TOOLS = [
+    {"name": "cmcp_list_tools", "description": "List the local tools installed on the user's computer (third-party MCP servers and Blender), one line each. Filter with query.",
+     "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "maxLength": 200}}, "additionalProperties": False}},
+    {"name": "cmcp_describe_tool", "description": "Show what one local tool from cmcp_list_tools does and its input schema.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "maxLength": 128}}, "required": ["name"], "additionalProperties": False}},
+    {"name": "cmcp_call_tool", "description": "Run one local tool from cmcp_list_tools with its arguments.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "maxLength": 128}, "arguments": {"type": "object"}}, "required": ["name"], "additionalProperties": False}},
+]
+META_NAMES = {tool["name"] for tool in META_TOOLS}
+
+
+def compactable(tool):
+    name = tool.get("name", "")
+    return "__" in name or name.startswith("blender_")
+
+
+def wants_compact(exposure, client, environ, custom_count):
+    """Whether to put compactable tools behind META_TOOLS for this client (heuristic, see spec)."""
+    if exposure in ("compact", "full"):
+        return exposure == "compact"
+    if not custom_count:
+        return False
+    name = str(client.get("name", "")).lower()
+    if name != "claude-code":
+        return True
+    search = environ.get("ENABLE_TOOL_SEARCH", "").lower()
+    if search == "false" or environ.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"):
+        return custom_count > 30
+    version = tuple(int(x) for x in re.findall(r"\d+", str(client.get("version", "")))[:3]) or (0,)
+    if environ.get("ANTHROPIC_BASE_URL") and not search and version < (2, 1, 304):
+        return custom_count > 30
+    return False
 # Built-in tools that must be present, by the group that can switch them off on the PC.
 REQUIRED_TOOLS = {"read_text_file": "files", "write_file": "files", "list_allowed_directories": "files",
                   "mac_execute": "commands", "mac_run_program": "commands", "mac_start_process": "processes",
@@ -373,6 +408,15 @@ class Link:
         catalog = {"instructions": first.get("result", {}).get("instructions") or DEFAULT_INSTRUCTIONS, "tools": tools}
         if isinstance(meta, dict) and isinstance(meta.get("revision"), str):
             catalog["revision"] = meta["revision"][:128]
+        if isinstance(meta, dict) and meta.get("exposure") in ("auto", "full", "compact"):
+            catalog["exposure"] = meta["exposure"]
+        # Resources and prompts of the PC's local tools, when there are any.
+        for kind in ("resources", "prompts"):
+            if isinstance(meta, dict) and isinstance(meta.get(kind), int) and meta[kind] > 0:
+                listed = self.request({"jsonrpc": "2.0", "id": 3, "method": kind + "/list", "params": {}}, wait)
+                items = listed.get("result", {}).get(kind)
+                if isinstance(items, list):
+                    catalog[kind] = items
         return catalog
 
 
@@ -465,24 +509,27 @@ def run_server(private):
         catalog = read_json(cache_file)
     except (OSError, ValueError):
         catalog = {"instructions": DEFAULT_INSTRUCTIONS, "tools": []}
-    state = {"catalog": catalog, "initialized": False, "refreshing": False, "again": False, "can_ask": False}
+    state = {"catalog": catalog, "initialized": False, "refreshing": False, "again": False, "can_ask": False, "can_sample": False}
     questions = {}
     questions_lock = threading.Lock()
 
     def ask_client(msg):
         # A local tool's question (MCP elicitation) shown by Claude; only when Claude said it can.
-        if msg.get("method") != "elicitation/create" or not isinstance(msg.get("params"), dict):
-            return {"error": "Only questions (elicitation) can be shown"}
-        if not state["can_ask"]:
+        method = msg.get("method")
+        if method not in ("elicitation/create", "sampling/createMessage") or not isinstance(msg.get("params"), dict):
+            return {"error": "Only questions (elicitation) and sampling can be passed on"}
+        if method == "sampling/createMessage" and not state["can_sample"]:
+            return {"error": "This Claude client does not take sampling requests"}
+        if method == "elicitation/create" and not state["can_ask"]:
             return {"result": {"action": "decline"}}
         ask_id = "cmcp-ask-" + uuid.uuid4().hex
         waiting = {"event": threading.Event(), "reply": None}
         with questions_lock:
             questions[ask_id] = waiting
         try:
-            output({"jsonrpc": "2.0", "id": ask_id, "method": "elicitation/create", "params": msg["params"]})
+            output({"jsonrpc": "2.0", "id": ask_id, "method": method, "params": msg["params"]})
             if not waiting["event"].wait(600):
-                return {"result": {"action": "cancel"}}
+                return {"result": {"action": "cancel"}} if method == "elicitation/create" else {"error": "No answer within 10 minutes"}
             reply = waiting["reply"]
             if isinstance(reply.get("result"), dict):
                 return {"result": reply["result"]}
@@ -502,12 +549,43 @@ def run_server(private):
                 sys.stdout.write(json.dumps(value, ensure_ascii=True) + "\n")
                 sys.stdout.flush()
 
-    def tool_list():
+    def all_tools():
         tools = state["catalog"]["tools"]
         # File transfers run on the PC's binary tools, which go away with the files group.
         if any(tool.get("name") == "mac_binary_info" for tool in tools):
             return tools + TRANSFER_TOOLS
         return tools
+
+    def compact():
+        hidden = [tool for tool in state["catalog"]["tools"] if compactable(tool)]
+        return wants_compact(state["catalog"].get("exposure", "auto"), state.get("client") or {}, os.environ, len(hidden))
+
+    def tool_list():
+        tools = all_tools()
+        if not compact():
+            return tools
+        return [tool for tool in tools if not compactable(tool)] + META_TOOLS
+
+    def meta_call(name, arguments, mid):
+        hidden = [tool for tool in state["catalog"]["tools"] if compactable(tool)]
+        if name == "cmcp_list_tools":
+            query = str(arguments.get("query") or "").lower()
+            rows = [tool["name"] + " - " + str(tool.get("description", "")).split(". ")[0][:160] for tool in hidden
+                    if not query or query in (tool["name"] + " " + str(tool.get("description", ""))).lower()]
+            text = "\n".join(rows[:100]) + ("\n(%d more; use query)" % (len(rows) - 100) if len(rows) > 100 else "")
+            return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text or "No local tools match."}]}}
+        target = next((tool for tool in hidden if tool["name"] == arguments.get("name")), None)
+        if target is None:
+            close = sorted(hidden, key=lambda tool: -len(set(tool["name"]) & set(str(arguments.get("name")))))[:3]
+            hint = ("Unknown local tool. Similar: " + ", ".join(tool["name"] for tool in close)) if close else "Unknown local tool."
+            return {"jsonrpc": "2.0", "id": mid, "result": {"isError": True, "content": [{"type": "text", "text": hint}]}}
+        if name == "cmcp_describe_tool":
+            text = json.dumps({"name": target["name"], "description": target.get("description", ""), "inputSchema": target.get("inputSchema", {})}, ensure_ascii=False)
+            return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
+        inner = arguments.get("arguments") or {}
+        if not isinstance(inner, dict):
+            return {"jsonrpc": "2.0", "id": mid, "result": {"isError": True, "content": [{"type": "text", "text": "arguments must be an object"}]}}
+        return link.request({"jsonrpc": "2.0", "id": mid, "method": "tools/call", "params": {"name": target["name"], "arguments": inner}})
 
     def refresh():
         # Keep the cached list current; tell Claude when the PC's tools changed. A change
@@ -523,8 +601,14 @@ def run_server(private):
                 try:
                     fresh = link.fetch_catalog(wait=0)
                     if fresh != state["catalog"]:
-                        changed = fresh["tools"] != state["catalog"]["tools"]
+                        # What Claude sees may change with the list or with the exposure setting.
+                        before = tool_list()
+                        old = state["catalog"]
                         state["catalog"] = fresh
+                        changed = tool_list() != before
+                        for kind in ("resources", "prompts"):
+                            if fresh.get(kind, []) != old.get(kind, []) and state["initialized"]:
+                                output({"jsonrpc": "2.0", "method": "notifications/" + kind + "/list_changed"})
                         atomic_write(cache_file, encoded_json(fresh))
                         if changed and state["initialized"]:
                             output({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
@@ -548,7 +632,9 @@ def run_server(private):
                 stream = sock.makefile("rb")
                 first = json.loads(stream.readline(4096) or b"null")
                 if not isinstance(first, dict) or (not first.get("ok") and first.get("code") != "busy"):
-                    return
+                    # The legacy WebDesktop link has no watch: CMCP writes the revision into a file
+                    # next to its socket instead, and a local check of that file replaces the event.
+                    return watch_file()
                 if first.get("ok"):
                     pause = 1
                     while True:
@@ -565,16 +651,35 @@ def run_server(private):
             time.sleep(pause)
             pause = min(pause * 2, 30)
 
+    def watch_file():
+        marker = LINK_SOCKET.parent / "catalog-revision"
+        seen = None
+        while True:
+            try:
+                stamp = marker.stat()
+                current = (stamp.st_mtime_ns, stamp.st_size)
+                if seen is not None and current != seen:
+                    revision = marker.read_text(encoding="utf-8").strip()[:128]
+                    if revision and revision != state["catalog"].get("revision"):
+                        threading.Thread(target=refresh, daemon=True).start()
+                seen = current
+            except (OSError, ValueError):
+                seen = seen or (0, 0)
+            time.sleep(2)
+
     def process(message):
         method = message["method"]
         mid = message.get("id")
         if method == "initialize":
             capabilities = message.get("params", {}).get("capabilities") or {}
+            client = message.get("params", {}).get("clientInfo")
+            state["client"] = client if isinstance(client, dict) else {}
             state["can_ask"] = isinstance(capabilities, dict) and isinstance(capabilities.get("elicitation"), dict)
+            state["can_sample"] = isinstance(capabilities, dict) and isinstance(capabilities.get("sampling"), dict)
             asked = str(message.get("params", {}).get("protocolVersion", ""))
             output({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": asked if asked in PROTOCOLS else "2025-03-26",
-                "capabilities": {"tools": {"listChanged": True}},
+                "capabilities": {"tools": {"listChanged": True}, "resources": {"listChanged": True}, "prompts": {"listChanged": True}},
                 "serverInfo": {"name": "mac-pc-files", "version": VERSION},
                 "instructions": state["catalog"].get("instructions") or DEFAULT_INSTRUCTIONS}})
             threading.Thread(target=refresh, daemon=True).start()
@@ -598,12 +703,29 @@ def run_server(private):
             output({"jsonrpc": "2.0", "id": mid, "result": {"tools": tool_list()}})
             threading.Thread(target=refresh, daemon=True).start()
             return
+        if method in ("resources/list", "prompts/list"):
+            kind = method.split("/")[0]
+            output({"jsonrpc": "2.0", "id": mid, "result": {kind: state["catalog"].get(kind, [])}})
+            return
+        if method == "resources/templates/list":
+            output({"jsonrpc": "2.0", "id": mid, "result": {"resourceTemplates": []}})
+            return
+        if method in ("resources/read", "prompts/get"):
+            try:
+                output(link.request(message))
+            except Offline:
+                output({"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message": OFFLINE_TEXT}})
+            except Exception as error:
+                output({"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message": str(error)}})
+            return
         if method != "tools/call":
             output({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "Method not found: " + method}})
             return
         name = message.get("params", {}).get("name")
         try:
-            if name in TRANSFER_NAMES:
+            if name in META_NAMES and compact():
+                output(meta_call(name, message.get("params", {}).get("arguments") or {}, mid))
+            elif name in TRANSFER_NAMES:
                 result = transfer_file(link, name, message["params"].get("arguments", {}))
                 output({"jsonrpc": "2.0", "id": mid, "result": {
                     "content": [{"type": "text", "text": json.dumps(result)}], "structuredContent": result}})
