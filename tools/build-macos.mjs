@@ -24,10 +24,12 @@ const shared=['link-client.mjs','connection-transport.mjs','terminal-link.mjs','
 shared.push('ssh-terminal.mjs','ssh-mcp.mjs','ssh-local-tools.mjs','ssh-bootstrap.py','cloudpc-connector.py','tool-schemas.mjs','cloudcli.mjs','ssh-web.mjs');
 shared.push('blender-tools.mjs');
 shared.push('cloudcli-setup.mjs','cloudcli-setup.py');
-shared.push('tool-registry.mjs','mcp-tools.mjs','mcp-proxy.mjs','mcp-tools-cli.mjs');
+shared.push('tool-registry.mjs','mcp-tools.mjs','mcp-proxy.mjs','mcp-tools-cli.mjs','mcp-market.mjs');
 for(const name of shared)fs.copyFileSync(path.join(root,'app',name),path.join(resources,'app',name));
 // AGENT.md, the manifest schema and examples copied into the user's mcp-tools folder.
 fs.cpSync(path.join(root,'app/mcp-tools-template'),path.join(resources,'app/mcp-tools-template'),{recursive:true});
+// The market's reviewed presets: configurations and links only, no third-party code.
+fs.cpSync(path.join(root,'app/mcp-presets'),path.join(resources,'app/mcp-presets'),{recursive:true});
 fs.cpSync(path.join(root,'macos/node_modules'),path.join(resources,'node_modules'),{recursive:true,filter:source=>!source.split(path.sep).includes('.bin')});
 fs.copyFileSync(process.execPath,path.join(resources,'runtime/node'));fs.chmodSync(path.join(resources,'runtime/node'),0o755);
 fs.copyFileSync(path.join(root,'macos/runtime/NODE-LICENSE.txt'),path.join(resources,'runtime/LICENSE'));

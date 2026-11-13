@@ -15,7 +15,7 @@ const plainStore={protect:async value=>'plain:'+value,unprotect:async value=>val
 function folder(t){const d=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-mac-tools-')));t.after(()=>fs.rmSync(d,{recursive:true,force:true}));return d;}
 
 test('the tools page sits between Connections and About',()=>{
-  assert.equal(pageDirection('connect','tools'),1);assert.equal(pageDirection('tools','about'),1);assert.equal(pageDirection('about','tools'),-1);
+  assert.equal(pageDirection('connect','tools'),1);assert.equal(pageDirection('tools','market'),1);assert.equal(pageDirection('market','about'),1);assert.equal(pageDirection('tools','about'),1);assert.equal(pageDirection('about','tools'),-1);
 });
 
 test('manager routes list, import, switch, refresh and remove tools inside the Mac data folder',async t=>{
@@ -59,4 +59,30 @@ test('the Mac dispatcher exposes an enabled third-party tool with its prefix and
   let list=[];for(let i=0;i<200&&!list.includes('fx__echo');i++){list=await names();await delay(50);}
   assert.ok(list.includes('fx__echo'));assert.ok(list.includes('mac_execute'));assert.ok(!list.some(n=>n.startsWith('blender_')));
   const r=await d.forward({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'fx__echo',arguments:{text:'mac'}}});assert.equal(r.result.content[0].text,'mac');
+});
+
+test('the market reads the CMCP version where the Mac bundle keeps it',async t=>{
+  // The bundle has Resources/app without package.json and Resources/macos/package.json.
+  const bundle=folder(t),app=path.join(bundle,'app'),mac=path.join(bundle,'macos');fs.mkdirSync(app);fs.mkdirSync(mac);
+  fs.copyFileSync(new URL('../../app/mcp-market.mjs',import.meta.url),path.join(app,'mcp-market.mjs'));
+  fs.writeFileSync(path.join(mac,'package.json'),JSON.stringify({version:'9.8.7'}));
+  fs.writeFileSync(path.join(app,'mcp-tools.mjs'),"export const ID=/x/,RESERVED=new Set(),toolsRoot=()=>'',ensureToolsFolder=()=>{},parseManifest=()=>({}),approvalKey=()=>'',describeTool=()=>({}),readSettings=()=>({}),updateSettings=()=>{},resolveLaunch=()=>{},RuntimeMissing=Error,runtimeOf=x=>x,detectApp=()=>null,atomicWrite=()=>{};");
+  const {cmcpVersion}=await import(new URL('file://'+path.join(app,'mcp-market.mjs')).href);
+  assert.equal(cmcpVersion(),'9.8.7');
+});
+
+test('market routes list the reviewed presets, install one that stays off, and refuse an unconfirmed update',async t=>{
+  const directory=folder(t);
+  const m=await createManager({directory,secrets:async()=>{},proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}}});t.after(()=>m.close());
+  const call=async(route,body={})=>{const r=await fetch(m.origin+'/api/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:JSON.stringify(body)});return {status:r.status,data:await r.json()};};
+  const market=(await call('market')).data.presets;
+  assert.ok(market.length>=5&&market.every(p=>p.title.zh&&p.title.en&&p.version&&p.license&&p.homepage.startsWith('https://')));
+  const blender=market.find(p=>p.id==='blender_mcp');assert.ok(blender.requires.some(r=>r.kind==='app'&&r.name==='blender'));
+  assert.equal((await call('market/install',{id:'memory'})).data.installed,'memory');
+  const tools=(await call('tools')).data.tools;assert.equal(tools.find(x=>x.id==='memory').enabled,false,'installed presets start off');
+  assert.equal((await call('market')).data.presets.find(p=>p.id==='memory').installed.version,'2.0.1');
+  assert.equal((await call('market/install',{id:'memory'})).status,400);
+  assert.equal((await call('market/update',{id:'memory'})).status,400,'an update needs the confirmation flag');
+  assert.equal((await call('market/install',{id:'nope'})).status,400);
+  assert.ok(fs.existsSync(path.join(directory,'tool-refresh.json')),'installing tells running CMCP processes');
 });

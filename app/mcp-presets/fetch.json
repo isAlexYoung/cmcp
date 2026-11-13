@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "fetch",
+  "category": "web",
+  "title": {"zh": "从本机抓取网页", "en": "Fetch pages from this computer"},
+  "summary": {
+    "zh": "让 Claude 从这台电脑的网络抓取网页并转成 Markdown，可以访问 VPS 访问不到的内网或本机地址。",
+    "en": "Lets Claude fetch web pages over this computer's network as Markdown, including intranet or local addresses the VPS cannot reach."
+  },
+  "manifest": {
+    "schema": 1,
+    "name": "Fetch",
+    "description": "modelcontextprotocol/servers fetch: web pages as Markdown, fetched from this computer.",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+    "license": "MIT",
+    "version": "2026.10.28",
+    "transport": "stdio",
+    "command": "uvx",
+    "args": ["mcp-server-fetch==2026.10.28"],
+    "requires": [{"runtime": "uv"}],
+    "capabilities": ["network"]
+  }
+}

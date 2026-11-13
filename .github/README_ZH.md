@@ -76,13 +76,27 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 
 本机安装并启用 [MCP for Blender 插件](https://github.com/ahujasid/mcp-for-blender)，打开 Blender，在侧栏中启动插件服务。CMCP 默认连接 `127.0.0.1:9876`；插件改了端口时，让 Claude 在 Blender 工具的 `port` 参数中填写对应端口。
 
-连接 CMCP 后重新打开 VPS 上的 Claude，即可让它使用 `blender_*` 工具读取当前场景、检查物体、执行 Blender Python，以及获取视口图片。Windows 和 Mac 使用同一套接口；网页桌面、CloudCLI 与 SSH 终端沿用各自现有的 MCP 通道，无需开放 Blender 的公网端口，也不需要另外启动 `uvx` 服务。
+从 4.20 起 Blender 工具默认关闭：在 设置 →“工具”中打开 Blender（CMCP 检测到 Blender 时也会提示一次）。连接 CMCP 后重新打开 VPS 上的 Claude，即可让它使用 `blender_*` 工具读取当前场景、检查物体、执行 Blender Python，以及获取视口图片。Windows 和 Mac 使用同一套接口；网页桌面、CloudCLI 与 SSH 终端沿用各自现有的 MCP 通道，无需开放 Blender 的公网端口，也不需要另外启动 `uvx` 服务。
 
 例如：“通过 CMCP 检查我本机 Blender 的连接，读取当前场景，然后创建一个红色立方体，给我看视口截图。先不要覆盖已有文件。”
 
 `blender_execute_code` 会立即返回任务编号，Claude 应在同一个 MCP 连接器中调用 `blender_job_status` 查询结果，再继续下一步。脚本等待上限默认 120 秒，可通过 `timeout_ms` 调整，最长 10 分钟。超时或断线不代表 Blender 已停止执行；CMCP 不会自动重复执行修改操作，应先检查场景。退出 CMCP 后任务记录不保留，也不会强制停止 Blender 中已经提交的代码。
 
 此集成直接兼容插件的本机接口，提供场景、物体、Python、视口与任务查询工具；不是将第三方 MCP 服务的全部工具直接导入。素材平台搜索、在线生成与第三方服务端的安全模式不包含在此适配器内。未启动 Blender 时，仅 Blender 工具提示如何连接，其余 MCP 工具正常使用。
+
+## 本机 MCP 工具与工具市场
+
+设置 →“工具”可以为这台电脑开关 CMCP 的内置工具组：文件读写、命令执行、后台任务、开发工具链、桌面操作、Blender。Blender 默认关闭。
+
+CMCP 还可以在这台电脑上运行其他 MCP 服务器，把它们的工具交给 VPS 上的 Claude：
+
+- **市场**（设置 →“市场”）：经过审核的预设，例如 Blender、Playwright、Chrome 开发者工具、长期记忆、网页抓取。每个预设固定一个版本，只包含配置和项目链接；第一次启动时由 `npx` 或 `uvx` 从官方源下载。安装后默认关闭。有新版本时会显示“更新到 x.y.z”，你确认后才会更新。
+- **粘贴配置**：设置 →“工具”→“添加”，粘贴 MCP 服务器 README 里给 Claude Desktop 的 `mcpServers` 配置即可。
+- **自己编写**：每个工具是 `mcp-tools` 文件夹（Windows 在 `user` 旁边，Mac 在 `~/Library/Application Support/CMCP/mcp-tools`）里的一个子文件夹，内含 `cmcp-tool.json`。该文件夹里的 `AGENT.md` 写明了格式和一条命令的测试方法，供人和 AI 编程助手参考。
+
+Claude 看到的工具名是“文件夹名__工具名”，例如 `blender_mcp__get_scene_info`。CMCP 只使用电脑上已有的 Node.js、uv、Python 或 Docker，缺少时会提示。令牌和密钥保存在系统钥匙串或 Windows 加密存储里，不会写进文件夹。更新或卸载 CMCP 都会保留 `mcp-tools`。
+
+**提交预设**：新增 `app/mcp-presets/<id>.json`（固定软件包版本）并发起 Pull Request。规则和 CI 的检查方法见 `app/mcp-tools-template/AGENT.md` 第 8 节。
 
 ## 常见问题
 

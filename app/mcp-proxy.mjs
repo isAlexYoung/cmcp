@@ -29,12 +29,20 @@ export class ProxyServer {
   cachedTools(){return readToolCache(this.stateDir,this.id,this.hash);}
   status(){return {state:this.state,error:this.error};}
   tripped(){const now=Date.now();this.failures=this.failures.filter(t=>now-t<this.breaker.windowMs);return this.failures.length>=this.breaker.failures;}
+  // {data}: this tool's private folder in the user's state (kept apart from the shareable
+  // mcp-tools folder); {tool}: the tool's own folder. Used in env values and args.
+  expand(value){
+    if(typeof value!=='string'||!/\{(?:data|tool)\}/.test(value))return value;
+    const data=path.join(this.stateDir,'tool-data',this.id);
+    if(value.includes('{data}'))fs.mkdirSync(data,{recursive:true,mode:0o700});
+    return value.split('{data}').join(data).split('{tool}').join(this.dir);
+  }
   async environment(){
     const env={};for(const [k,v] of Object.entries(this.env))if(!PRIVATE_ENV.test(k)&&typeof v==='string')env[k]=v;
     const secrets=this.secrets?await loadSecrets(this.stateDir,this.id,this.secrets):{};
     this.redact=Object.values(secrets);
     for(const [k,v] of Object.entries(this.manifest.env||{})){
-      if(typeof v==='string')env[k]=v;
+      if(typeof v==='string')env[k]=this.expand(v);
       else if(secrets['env:'+k]!==undefined)env[k]=secrets['env:'+k];
       else throw Error('缺少密钥 '+k+'：请在 CMCP 的“工具”页重新导入或填写');
     }
@@ -63,7 +71,7 @@ export class ProxyServer {
     client.setNotificationHandler(ToolListChangedNotificationSchema,()=>{this.refresh().catch(()=>{});});
     let transport;
     if(m.transport==='stdio'){
-      const launch=this.launch(m.command,m.args||[],{platform:this.platform,env,dir:this.dir});
+      const launch=this.launch(m.command,(m.args||[]).map(a=>this.expand(a)),{platform:this.platform,env,dir:this.dir});
       this.log('start '+[launch.command,...launch.args].join(' '));
       transport=new StdioClientTransport({command:launch.command,args:launch.args,env,cwd,stderr:'pipe'});
       transport.stderr?.on('data',chunk=>this.log('stderr '+chunk.toString().trimEnd()));
