@@ -8,6 +8,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {TerminalLink} from './terminal-link.mjs';
 import {RequestRecovery} from './request-recovery.mjs';
+import {spawnSshWithRecovery,HOST_KEY_RECOVERY_ERROR} from './ssh-host-key.mjs';
 
 export const sshConnectorName = key => 'cmcp-ssh-'+createHash('sha256').update(key).digest('hex').slice(0,16);
 const quote = value => "'"+String(value).replace(/'/g,"'\\''")+"'";
@@ -54,11 +55,11 @@ export function sshExitCode(stderr) {
 }
 
 export class SshPipe extends EventEmitter {
-  constructor({ssh='ssh',login,env=process.env,payload,spawnProcess=spawn}) {
+  constructor({ssh='ssh',login,env=process.env,payload,spawnProcess=spawn,knownHostsFile}) {
     super();this.readyState=1;this.bufferedAmount=0;
     const bootstrap=fs.readFileSync(new URL('./ssh-bootstrap.py',import.meta.url),'utf8');
     // No credentials or user paths enter the remote shell command.
-    this.child=spawnProcess(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap,login.cloudcliUser||undefined)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+    this.child=spawnSshWithRecovery(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap,login.cloudcliUser||undefined)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']},{login,spawnProcess,knownHostsFile,input:JSON.stringify(payload)+'\n'});
     let stderr='';
     this.child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString()).slice(-16384);});
     this.child.stdout.on('data',chunk=>this.emit('message',chunk,true));
@@ -67,10 +68,9 @@ export class SshPipe extends EventEmitter {
     this.child.on('close',()=>{
       if(this.readyState===3)return;
       this.readyState=3;const code=sshExitCode(stderr);
-      this.emit('error',Object.assign(Error(code==='SSH_AUTH'?'SSH 认证失败，请检查密码或密钥':code==='SSH_HOST_KEY'?'SSH 主机指纹校验失败，请核对服务器指纹':code==='SSH_SETUP'?'云端 MCP 配置失败，请检查 Python 3.9 和账户配置权限':'SSH 连接中断'),{code}));
+      this.emit('error',Object.assign(Error(code==='SSH_AUTH'?'SSH 认证失败，请检查密码或密钥':code==='SSH_HOST_KEY'?HOST_KEY_RECOVERY_ERROR:code==='SSH_SETUP'?'云端 MCP 配置失败，请检查 Python 3.9 和账户配置权限':'SSH 连接中断'),{code}));
       this.emit('close',1006,'ssh closed');
     });
-    this.child.stdin.write(JSON.stringify(payload)+'\n');
   }
   send(text) {
     const message=JSON.parse(text);
@@ -136,7 +136,7 @@ export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,dev
       active=null;
       if(signal.aborted||closed)break;
       if(['SSH_AUTH','SSH_HOST_KEY','SSH_SETUP','SSH_START','SSH_REPLACED'].includes(failure?.code)) {
-        status('failed',{SSH_AUTH:'SSH 认证失败，请检查密码或密钥',SSH_HOST_KEY:'SSH 主机指纹校验失败，请核对服务器指纹',SSH_SETUP:'云端 MCP 配置失败，请检查 Python 3.9 和账户配置权限',SSH_START:'无法启动 SSH 客户端',SSH_REPLACED:'云端 MCP 已被其他连接接管，已暂停自动重连'}[failure.code]);return;
+        status('failed',{SSH_AUTH:'SSH 认证失败，请检查密码或密钥',SSH_HOST_KEY:HOST_KEY_RECOVERY_ERROR,SSH_SETUP:'云端 MCP 配置失败，请检查 Python 3.9 和账户配置权限',SSH_START:'无法启动 SSH 客户端',SSH_REPLACED:'云端 MCP 已被其他连接接管，已暂停自动重连'}[failure.code]);return;
       }
       const wait=retryDelay??[1000,3000,5000,10000,20000][Math.min(attempt++,4)];
       status('recovering','SSH 暂时中断，正在恢复；未确认的操作不会重复执行');

@@ -12,17 +12,18 @@ import {pathToFileURL} from 'node:url';
 import {sshArguments,sshConnectorName,sshExitCode} from './ssh-mcp.mjs';
 import {workerPaths,readSshLogin,ensureSshWorker} from './ssh-terminal.mjs';
 import {recordCloudcliKind,SELF_HOSTED} from './cloudcli.mjs';
+import {spawnSshWithRecovery,HOST_KEY_RECOVERY_ERROR} from './ssh-host-key.mjs';
 
 const quote=value=>"'"+String(value).replace(/'/g,"'\\''")+"'";
 const script=()=>fs.readFileSync(new URL('./cloudcli-setup.py',import.meta.url),'utf8');
 const wrapper=`command -v python3 >/dev/null 2>&1 || { printf '%s\\n' '{"ok":false,"code":"PYTHON"}'; exit 0; }; exec python3 -I -B -c "$1"`;
 export const setupCommand=source=>'sh -c '+quote(wrapper)+' sh '+quote(source);
 
-const sshFailure={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:'SSH 主机指纹校验失败，请核对服务器指纹。',SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'};
+const sshFailure={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:HOST_KEY_RECOVERY_ERROR,SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'};
 // One SSH call: a JSON line in, a JSON line out. Nothing secret is on the command line.
-export function runRemote(login,request,{ssh='ssh',env=process.env,spawnProcess=spawn,timeout=120000}={}){
+export function runRemote(login,request,{ssh='ssh',env=process.env,spawnProcess=spawn,timeout=120000,knownHostsFile}={}){
   return new Promise((resolve,reject)=>{
-    let child;try{child=spawnProcess(ssh,[...sshArguments(login,{background:true}),setupCommand(script())],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});}catch{reject(Object.assign(Error(sshFailure.SSH_START),{code:'SSH_START'}));return;}
+    let child;try{child=spawnSshWithRecovery(ssh,[...sshArguments(login,{background:true}),setupCommand(script())],{env,windowsHide:true,stdio:['pipe','pipe','pipe']},{login,spawnProcess,knownHostsFile,input:JSON.stringify(request)+'\n',endInput:true});}catch{reject(Object.assign(Error(sshFailure.SSH_START),{code:'SSH_START'}));return;}
     let out='',err='',done=false;
     const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);try{child.kill();}catch{}error?reject(error):resolve(value);};
     const timer=setTimeout(()=>finish(Object.assign(Error('VPS 在规定时间内没有回应，未确认结果。'),{code:'TIMEOUT'})),timeout);
@@ -35,7 +36,6 @@ export function runRemote(login,request,{ssh='ssh',env=process.env,spawnProcess=
       if(line){try{finish(null,JSON.parse(line));return;}catch{}}
       const code=sshExitCode(err);finish(Object.assign(Error(sshFailure[code]||'无法通过 SSH 完成检查，请确认 SSH 登录可用。'),{code}));
     });
-    child.stdin.end(JSON.stringify(request)+'\n');
   });
 }
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {HOST_KEY_RECOVERY_ERROR} from './ssh-host-key.mjs';
 
 // Only explicit enables connect, including after Windows restarts. The BAT
 // start entry explicitly enables all; missing/corrupt preferences never do so.
@@ -68,7 +69,7 @@ export function createTargetConnections({readTargets, readControls, create, stat
       }).catch(error => {
         if (current()) {
           slot.failed = true; slot.retryAt = ['SSH_AUTH','SSH_HOST_KEY','SSH_START'].includes(error.code)?Infinity:Date.now() + retryMs;
-          const sshError={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:'SSH 主机指纹校验失败，请核对服务器指纹。',SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'}[error.code];
+          const sshError={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:HOST_KEY_RECOVERY_ERROR,SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'}[error.code];
           guardedStatus.set(name, sshError?'error':'offline', sshError||(error.code==='CLOUDCLI_PROTOCOL_REQUIRED'?'CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。':'无法连接此云电脑；其他连接不受影响，稍后重试'));
         }
       });

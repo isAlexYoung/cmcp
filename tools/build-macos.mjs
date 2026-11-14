@@ -22,6 +22,7 @@ fs.cpSync(path.join(root,'macos/ui'),path.join(resources,'macos/ui'),{recursive:
 fs.copyFileSync(path.join(root,'macos/runtime/FILESYSTEM-LICENSE.txt'),path.join(resources,'macos/FILESYSTEM-LICENSE.txt'));
 const shared=['link-client.mjs','connection-transport.mjs','terminal-link.mjs','desktop-auth.mjs','direct-browser.mjs','shared-session-gateway.mjs','static-assets.mjs','web-recovery.mjs','shared-autofill.mjs','request-recovery.mjs','target-connections.mjs','managed-target.mjs','cloud-connector.mjs','cloudpc-relay.py'];
 shared.push('ssh-terminal.mjs','ssh-mcp.mjs','ssh-local-tools.mjs','ssh-bootstrap.py','cloudpc-connector.py','tool-schemas.mjs','cloudcli.mjs','ssh-web.mjs');
+shared.push('ssh-host-key.mjs');
 shared.push('blender-tools.mjs');
 shared.push('cloudcli-setup.mjs','cloudcli-setup.py');
 shared.push('tool-registry.mjs','mcp-tools.mjs','mcp-proxy.mjs','mcp-tools-cli.mjs','mcp-market.mjs','tool-host.mjs','mcp-oauth.mjs');

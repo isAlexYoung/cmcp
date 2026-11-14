@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.23.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.23.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.23.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.23.1.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -90,7 +90,7 @@ namespace CMCP {
         }
         internal const string SelfHostedReady="自行安装的 CloudCLI：网页可以打开；本机工具经此设备的 SSH 后台通道连接。",SelfHostedDown="自行安装的 CloudCLI 暂时无法访问，正在重试。";
         internal static string PreparationDetail(string state, string message) {
-            if(state=="error"&&new[]{"SSH 认证失败，请检查密码或密钥。","SSH 主机指纹校验失败，请核对服务器指纹。","无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。"}.Contains(message))return message;
+            if(state=="error"&&new[]{"SSH 认证失败，请检查密码或密钥。","SSH 主机指纹校验失败，请核对服务器指纹。","SSH 主机指纹自动恢复失败，请检查服务器及本机 known_hosts 文件权限。","无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。"}.Contains(message))return message;
             if(state=="offline"&&message=="CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。")return message;
             // A self-hosted CloudCLI (app/managed-target.mjs): fixed texts only.
             if(state=="connected"&&message==SelfHostedReady||state=="offline"&&message==SelfHostedDown)return message;
@@ -300,6 +300,7 @@ namespace CMCP {
                 check(LocalState.PreparationDetail("recovering","正在校验云端连接组件，正在重试当前步骤（2/4）") != null, "current preparation retry is visible");
                 check(LocalState.PreparationDetail("recovering","正在检查云端连接组件 cookie=DO-NOT-DISPLAY") == null, "arbitrary status text cannot expose credentials");
                 check(LocalState.PreparationDetail("stopped","正在检查云端连接组件") == null, "stopped connections do not display stale preparation stages");
+                check(LocalState.PreparationDetail("error","SSH 主机指纹自动恢复失败，请检查服务器及本机 known_hosts 文件权限。") != null, "a final SSH fingerprint recovery failure is displayed on the connection card");
                 check(LocalState.WorkerDetail(new Target{State="connecting",Detail="正在校验云端连接组件"},"[4/5] 正在连接云电脑...",true).Contains("正在校验云端连接组件"), "pending start worker preserves the precise backend preparation stage");
                 File.WriteAllText(Path.Combine(temp, "link-status.json"), "{\"pid\":2147483647,\"targets\":{\"demo\":{\"state\":\"connected\"}}}");
                 check(LocalState.Load(temp).Targets[0].State == "stopped", "dead PID never reports connected");

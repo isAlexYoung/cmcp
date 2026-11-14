@@ -40,6 +40,8 @@ jobs:
         run: |
           node --test macos/tests/*.test.mjs | tee test-results/mac-backend.tap
           python3 macos/tests/connector_test.py 2>&1 | tee test-results/mac-connector.txt
+      - name: Shared SSH host-key recovery
+        run: node --test app/tests/ssh-host-key.test.mjs | tee test-results/ssh-host-key.tap
       - name: Build native application
         run: node tools/build-macos.mjs "$RUNNER_TEMP/cmcp-built" | tee test-results/build.json
       - name: Real AppKit and WebKit interface checks
