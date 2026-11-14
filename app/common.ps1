@@ -335,24 +335,100 @@ function Open-CloudPage([string]$name, [string]$url) {
 }
 
 # Closes this device's page windows when Settings ask for it. Returns how many processes ended.
-function Close-CloudPage([string]$name) {
+function Get-CloudPageProcesses([string[]]$folders) {
+    # WMI/CIM can stall even for a local query. Read only browser command lines
+    # through process handles instead; inaccessible/exited processes are skipped.
+    if (!('CmcpBrowserProcesses' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+public static class CmcpBrowserProcesses {
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr handle, int kind, IntPtr data, int length, out int needed);
+    public static bool Owns(int pid, string[] folders) {
+        IntPtr handle=OpenProcess(0x1000, false, pid), buffer=IntPtr.Zero;
+        if(handle==IntPtr.Zero) return false;
+        try {
+            int size;
+            NtQueryInformationProcess(handle, 60, IntPtr.Zero, 0, out size);
+            if(size<=0 || size>131072) return false;
+            buffer=Marshal.AllocHGlobal(size);
+            if(NtQueryInformationProcess(handle, 60, buffer, size, out size)!=0) return false;
+            int length=(ushort)Marshal.ReadInt16(buffer);
+            IntPtr text=Marshal.ReadIntPtr(buffer, IntPtr.Size==8 ? 8 : 4);
+            long offset=text.ToInt64()-buffer.ToInt64();
+            if(offset<0 || offset+length>size || length%2!=0) return false;
+            string line=Marshal.PtrToStringUni(text, length/2);
+            foreach(string folder in folders) {
+                int at=line.IndexOf(folder, StringComparison.OrdinalIgnoreCase), end=at+folder.Length;
+                if(at>=0 && (at==0 || line[at-1]=='=' || line[at-1]=='"' || Char.IsWhiteSpace(line[at-1])) &&
+                    (end==line.Length || line[end]=='"' || Char.IsWhiteSpace(line[end]))) return true;
+            }
+            return false;
+        } finally {
+            if(buffer!=IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+            CloseHandle(handle);
+        }
+    }
+}
+'@
+    }
+    foreach ($browser in @('msedge','chrome','firefox')) {
+        foreach ($process in @(Get-Process -Name $browser -ErrorAction SilentlyContinue)) {
+            if ([CmcpBrowserProcesses]::Owns($process.Id, $folders)) { $process }
+            else { $process.Dispose() }
+        }
+    }
+}
+
+# Runs only in the bounded, private cleanup worker below.
+function Close-CloudPageWindow([string]$name) {
     $browser = Get-BrowserChoice $name
     if (!$browser -or !$browser.Close) { return 0 }
     $folders = @('edge', 'chrome', 'firefox' | ForEach-Object { Get-CloudPageFolder $name $_ })
-    $owned = {
-        param($line)
-        if (!$line) { return $false }
-        foreach ($folder in $folders) { if ($line.IndexOf($folder, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true } }
-        return $false
+    $found = @(Get-CloudPageProcesses $folders)
+    try {
+        if (!$found.Count) { return 0 }
+        # Politely first, like the window's close button, so the browser can save its state.
+        foreach ($process in $found) { try { if ($process.MainWindowHandle -ne [IntPtr]::Zero) { [void]$process.CloseMainWindow() } } catch { } }
+        $deadline = [Diagnostics.Stopwatch]::StartNew()
+        while ($deadline.ElapsedMilliseconds -lt 4000 -and @($found | Where-Object { !$_.HasExited }).Count) { Start-Sleep -Milliseconds 200 }
+        # Recheck ownership: a recycled PID must never close another browser.
+        foreach ($process in $found) { try { if (!$process.HasExited -and [CmcpBrowserProcesses]::Owns($process.Id, $folders)) { $process.Kill() } } catch { } }
+        return $found.Count
+    } finally { foreach ($process in $found) { $process.Dispose() } }
+}
+
+function Close-CloudPage([string]$name) {
+    $browser = Get-BrowserChoice $name
+    if (!$browser -or !$browser.Close) { return 0 }
+    # Bound the whole cleanup, including process discovery and native window calls.
+    # A stuck cleanup worker is ours to terminate; the shared backend is untouched.
+    $common = (Join-Path $script:KitDir 'common.ps1').Replace("'", "''")
+    $command = ". '$common'; try { [Console]::Write((Close-CloudPageWindow '" + $name.Replace("'", "''") + "')) } catch { Write-ErrorLog '关闭网页窗口' `$_; exit 1 }"
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.EnvironmentVariables['CMCP_STATE_DIR'] = $script:StateDir
+    $worker = [Diagnostics.Process]::Start($info)
+    try {
+        if (!$worker.WaitForExit(8000)) {
+            try { $worker.Kill(); $null = $worker.WaitForExit(1000) } catch { }
+            throw [TimeoutException]::new('Browser window cleanup timed out; the connection remains stopped.')
+        }
+        if ($worker.ExitCode -ne 0) { throw 'Browser window cleanup failed; the connection remains stopped.' }
+        return [int]$worker.StandardOutput.ReadToEnd()
+    } finally {
+        $worker.StandardOutput.Dispose()
+        $worker.StandardError.Dispose()
+        $worker.Dispose()
     }
-    $found = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe' OR Name='firefox.exe'" | Where-Object { & $owned $_.CommandLine })
-    if (!$found.Count) { return 0 }
-    # Politely first, like the window's close button, so the browser can save its state.
-    foreach ($item in $found) { try { $process = Get-Process -Id $item.ProcessId -ErrorAction Stop; if ($process.MainWindowHandle -ne [IntPtr]::Zero) { [void]$process.CloseMainWindow() } } catch { } }
-    $deadline = [DateTime]::UtcNow.AddSeconds(4)
-    while ([DateTime]::UtcNow -lt $deadline -and @($found | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }).Count) { Start-Sleep -Milliseconds 200 }
-    foreach ($item in $found) { Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue }
-    return $found.Count
 }
 
 function Open-SharedCloudBrowser([string]$name = '') {

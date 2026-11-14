@@ -101,6 +101,7 @@ function Start-LinkService {[IO.File]::WriteAllText((Join-Path $StateDir 'backen
 function Stop-LinkService {throw 'GLOBAL STOP FORBIDDEN'}
 function Unregister-AutoStart {throw 'GLOBAL STOP FORBIDDEN'}
 function Open-SharedCloudBrowser {return $false}
+function Close-CloudPage {if(Test-Path (Join-Path $StateDir 'fail-browser-close')){throw [TimeoutException]::new('fixture cleanup timeout')};return 0}
 function Get-LinkStatus {
     $map=@{}
     foreach($c in @((Get-TargetControls).targets)){$map[$c.name]=@{state=$(if($c.enabled){'waiting-login'}else{'stopped'});revision=$c.revision;message='DO-NOT-FORWARD-RAW-BACKEND'}}
@@ -138,6 +139,13 @@ function Get-LinkStatus {
     $stop=Spawn 'stop.ps1' ([DateTime]::UtcNow.Ticks) 'cancel-wait'
     Check ($stop.WaitForExit(10000) -and $stop.ExitCode -eq 0 -and $start.WaitForExit(10000) -and $start.ExitCode -eq 0) 'waiting-login can be cancelled with production revision checks'
     Check (@((Get-TargetControls).targets | Where-Object { $_.name -eq 'B' -and $_.enabled }).Count -eq 1) 'second cancellation retains B enabled'
+    $null=Set-TargetConnection 'A' $true
+    [IO.File]::WriteAllText((Join-Path $temp 'fail-browser-close'),'1')
+    $stop=Spawn 'stop.ps1' ([DateTime]::UtcNow.Ticks) 'cleanup-failed'
+    Check ($stop.WaitForExit(10000) -and $stop.ExitCode -eq 0) 'confirmed stop succeeds even when browser cleanup times out'
+    $stopEvents=@(([IO.File]::ReadAllLines((Join-Path $temp 'cleanup-failed.out'))) | ForEach-Object {$_|ConvertFrom-Json})
+    Check (@($stopEvents|Where-Object kind -eq 'complete').Count -eq 1 -and @($stopEvents|Where-Object message -eq '连接已停止，但网页窗口未能自动关闭，请手动关闭。').Count -eq 1) 'stop acknowledgement is retained with a separate browser cleanup warning'
+    Check (@((Get-TargetControls).targets|Where-Object {$_.name -eq 'A' -and $_.enabled}).Count -eq 0 -and @((Get-TargetControls).targets|Where-Object {$_.name -eq 'B' -and $_.enabled}).Count -eq 1) 'failed browser cleanup leaves A disabled and B enabled'
     $open=Spawn 'manager-open.ps1' 0 'open'
     Check ($open.WaitForExit(10000) -and $open.ExitCode -eq 1 -and [IO.File]::ReadAllText((Join-Path $temp 'open.out')) -match 'schema') 'explicit unavailable desktop open reports inline instead of modal'
     Check (!(Test-Path -LiteralPath $StopFlag)) 'all inline operations avoid global stop flag'
@@ -154,7 +162,7 @@ function Get-LinkStatus {
     foreach($child in $children){try{if(!$child.HasExited){$child.Kill()};$child.Dispose()}catch{}}
     if($EvidenceDirectory){
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($EvidenceDirectory))
-        foreach($name in @('init','cancel-init','waiting','cancel-wait','open','old-auto-backend')){foreach($suffix in @('.out','.err')){
+        foreach($name in @('init','cancel-init','waiting','cancel-wait','cleanup-failed','open','old-auto-backend')){foreach($suffix in @('.out','.err')){
             $file=Join-Path $temp ($name+$suffix)
             if(Test-Path -LiteralPath $file){Copy-Item -LiteralPath $file -Destination (Join-Path $EvidenceDirectory ($name+$suffix))}
         }}

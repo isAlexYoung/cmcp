@@ -42,6 +42,19 @@ try{
     Settings '{"schema":1,"browser":"chrome","closeWeb":true}'
     $closed=Close-CloudPage "dev'ice"
     Check ($closed -eq 1 -and $fakes[0].WaitForExit(5000) -and !$fakes[1].HasExited) 'stopping closes only this device''s page window'
+    Check ((Close-CloudPage "dev'ice") -eq 0 -and !$fakes[1].HasExited) 'manually closed or already stopped browser completes without waiting for WMI'
+    # Run the real outer cleanup with a deliberately wedged inner worker.
+    $fixture=Join-Path $temporary 'cleanup-fixture';$null=New-Item -ItemType Directory -Path $fixture
+    $marker=Join-Path $script:StateDir 'cleanup-pid'
+    $source=[IO.File]::ReadAllText((Join-Path $app 'common.ps1'))
+    $source+="`r`nfunction Close-CloudPageWindow { param([string]`$name) [IO.File]::WriteAllText((Join-Path `$script:StateDir 'cleanup-pid'),[string]`$PID); Start-Sleep -Seconds 60; return 0 }`r`n"
+    [IO.File]::WriteAllText((Join-Path $fixture 'common.ps1'),$source,[Text.UTF8Encoding]::new($true))
+    Copy-Item -LiteralPath (Join-Path $app 'target-controls.ps1') -Destination $fixture
+    $savedKit=$script:KitDir;$script:KitDir=$fixture
+    $clock=[Diagnostics.Stopwatch]::StartNew();$timedOut=$false
+    try { $null=Close-CloudPage "dev'ice" } catch [TimeoutException] { $timedOut=$true } finally { $script:KitDir=$savedKit }
+    $cleanupPid=[int][IO.File]::ReadAllText($marker)
+    Check ($timedOut -and $clock.Elapsed.TotalSeconds -lt 11 -and !(Get-Process -Id $cleanupPid -ErrorAction SilentlyContinue) -and !$fakes[1].HasExited) 'hung cleanup is bounded, terminates only its own worker and preserves another device''s browser'
     [pscustomobject]@{passed=$checks.Count;failed=0;skipped=0;checks=$checks}|ConvertTo-Json -Depth 4
 }finally{
     foreach($process in $fakes){if(!$process.HasExited){Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue}}

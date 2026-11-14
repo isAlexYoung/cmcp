@@ -105,6 +105,20 @@ test('private manager HTTP API enforces token, origin, verbs and explicit target
   assert.equal(m.snapshot().preferences.closeAction,'exit');assert.equal((await call('settings',{language:'invalid'})).status,400);
   const html=await fetch(m.origin+'/');assert.ok(html.headers.get('content-security-policy').includes("default-src 'none'"));
 });
+test('stopping responds and remains stopped while browser cleanup is stuck or fails',async t=>{
+  const f=fixture(t);let cleanupCalls=0;
+  const m=await createManager({...f,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}},
+    closeBrowserPages:async()=>{if(++cleanupCalls===1)return await new Promise(()=>{});throw Error('browser query failed');}});
+  t.after(()=>m.close());
+  const a=await m.store.save(input(),async()=>true),b=await m.store.save(input('https://second.invalid'),async()=>true);
+  const stop=async id=>{const response=await fetch(m.origin+'/api/targets/stop',{method:'POST',signal:AbortSignal.timeout(1500),headers:{'content-type':'application/json','x-cmcp-token':m.token},body:JSON.stringify({id})});assert.equal(response.status,200);assert.equal((await response.json()).stopped,true);};
+  m.store.setEnabled(a,true);m.store.setEnabled(b,true);const revision=m.store.controlMap().get(b).revision;
+  await stop(a);assert.equal(m.snapshot().targets.find(t=>t.id===a).state,'stopped');
+  assert.equal(m.store.controlMap().get(b).enabled,true);assert.equal(m.store.controlMap().get(b).revision,revision);
+  await stop(a);assert.equal(cleanupCalls,2);assert.equal(m.snapshot().targets.find(t=>t.id===a).state,'stopped');
+  m.store.setEnabled(a,true);assert.equal(m.store.controlMap().get(a).enabled,true,'a failed cleanup does not prevent reconnect');
+});
+
 test('full application exit disables every connection and closes backend tools',async t=>{
   const f=fixture(t);let closed=0;const m=await createManager({...f,detectShared:async()=>true,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{closed++;}}});
   await m.store.save(input(),async()=>true);await m.store.save(input('https://second.invalid'),async()=>true);m.store.setEnabled(null,true);

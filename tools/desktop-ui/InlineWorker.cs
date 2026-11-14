@@ -11,6 +11,8 @@ namespace CMCP {
     internal sealed class InlineWorker : IDisposable {
         internal readonly Process Process;
         readonly Queue<string> events = new Queue<string>();
+        bool outputEnded;
+        internal bool OutputEnded { get { lock(events)return outputEnded; } }
         internal InlineWorker(string kit,string action,string name,string url,string password,bool autoLogin=false,string stateDirectory=null) {
             bool save=action=="add"||action=="edit";
             string file=save?"manager-save.ps1":Actions.Script(action);
@@ -23,7 +25,8 @@ namespace CMCP {
             };
             Process=new Process{StartInfo=info};
             Process.OutputDataReceived+=delegate(object sender,DataReceivedEventArgs e){
-                if(e.Data==null||e.Data.Length>4096)return;
+                if(e.Data==null){lock(events)outputEnded=true;return;}
+                if(e.Data.Length>4096)return;
                 lock(events){if(events.Count==64)events.Dequeue();events.Enqueue(e.Data);}
             };
             // Do not forward raw stderr (which could contain server data).

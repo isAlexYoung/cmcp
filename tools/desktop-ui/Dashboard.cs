@@ -41,7 +41,8 @@ namespace CMCP {
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         // The update button moved to About, so a new version is announced by a dot instead.
         readonly System.Windows.Forms.Timer updateCheck = new System.Windows.Forms.Timer{Interval=15000};
-        sealed class PendingAction { internal Process Process; internal InlineWorker Worker; internal string Name, Action, Label="", Icon="", Message="", Note="", SshFrom="", LoginMode="", Runtime=""; internal bool Superseded, Failed, Saved, DropSsh, DeleteSsh, HideAddress; internal SshLogin SshDraft; internal CloudCliLogin CloudDraft; }
+        sealed class PendingAction { internal Process Process; internal InlineWorker Worker; internal readonly Stopwatch Elapsed=Stopwatch.StartNew(); internal long OutputDeadline=-1; internal string Name, Action, Label="", Icon="", Message="", Note="", SshFrom="", LoginMode="", Runtime=""; internal bool Superseded, Failed, Saved, DropSsh, DeleteSsh, HideAddress, StopConfirmed; internal SshLogin SshDraft; internal CloudCliLogin CloudDraft; }
+        internal TimeSpan StopActionTimeout=TimeSpan.FromSeconds(40);
         readonly Dictionary<string,string> progress=new Dictionary<string,string>();
         readonly List<PendingAction> children = new List<PendingAction>();
         internal readonly Dictionary<string,TargetCard> Cards = new Dictionary<string,TargetCard>(StringComparer.Ordinal);
@@ -485,11 +486,17 @@ namespace CMCP {
         static SshStore DemoSsh(){var demo=new SshStore();demo.logins.Add(new SshLogin{name="preview-b",host="203.0.113.24",username="root"});return demo;}
         void CollectActions(){
             foreach(var pending in children.ToArray()){
-                bool exited=false;try{exited=pending.Process.HasExited;if(exited)pending.Process.WaitForExit();}catch{exited=true;}
+                // Never wait indefinitely on a worker or on inherited progress pipes.
+                bool exited=false;try{exited=pending.Process.HasExited;}catch{exited=true;}
+                if(exited&&pending.Worker!=null&&!pending.Worker.OutputEnded){
+                    if(pending.OutputDeadline<0)pending.OutputDeadline=pending.Elapsed.ElapsedMilliseconds+1000;
+                    if(pending.Elapsed.ElapsedMilliseconds<pending.OutputDeadline)continue;
+                }
                 if(pending.Worker!=null)foreach(var data in pending.Worker.Drain()){
                     if(pending.Superseded)continue;
                     string kind=LocalState.Text(LocalState.Get(data,"kind")),message=LocalState.Text(LocalState.Get(data,"message"));
                     pending.Message=message;pending.Failed|=kind=="error";
+                    if(pending.Action=="stop"&&kind=="complete")pending.StopConfirmed=true;
                     if(pending.Action=="add"||pending.Action=="edit"){
                         if(Editor!=null&&Editor.TargetName==pending.Name)Editor.ShowError(message);
                         if(kind=="saved"){
@@ -502,6 +509,14 @@ namespace CMCP {
                         }
                     }else progress[pending.Runtime.Length>0?pending.Runtime:pending.Name]=message;
                 }
+                if(!exited&&pending.Action=="stop"&&pending.Elapsed.Elapsed>=StopActionTimeout){
+                    // Only our observer is terminated. The persisted per-device switch
+                    // and shared Node backend are never changed by this watchdog.
+                    try{pending.Process.Kill();}catch{}
+                    pending.Failed=true;exited=true;
+                    pending.Message=pending.StopConfirmed?"连接已停止，但网页窗口未能自动关闭，请手动关闭。":"停止操作等待超时，请查看本机日志。";
+                    if(!pending.Superseded)progress[pending.Runtime.Length>0?pending.Runtime:pending.Name]=pending.Message;
+                }
                 try{if(!exited)continue;
                     if(pending.Action=="remove"&&pending.DeleteSsh&&pending.Process.ExitCode==0&&Ssh.Remove(pending.Name))try{SaveSsh();}catch{}
                     if(!pending.Superseded){
@@ -509,7 +524,7 @@ namespace CMCP {
                             if(pending.Saved){if(Editor!=null)Editor.SetBusy(false);CloseEditor();}
                             else if(Editor!=null){Editor.SetBusy(false);Editor.ShowError(pending.Message.Length>0?pending.Message:"保存未完成，请检查本机日志。");}
                         }else if(pending.Process.ExitCode!=0&&!pending.Failed&&pending.Message.Length==0)progress[pending.Runtime.Length>0?pending.Runtime:pending.Name]="操作未完成，请查看本机日志；其他连接不受影响。";
-                        else if(pending.Action=="stop"&&pending.Process.ExitCode==0)progress[pending.Runtime.Length>0?pending.Runtime:pending.Name]="此台连接已停止。";
+                        else if(pending.Action=="stop"&&pending.Process.ExitCode==0)progress[pending.Runtime.Length>0?pending.Runtime:pending.Name]=pending.StopConfirmed&&pending.Message.Length>0?pending.Message:"此台连接已停止。";
                         else if(pending.Action=="open"&&pending.Process.ExitCode==0)progress[pending.Runtime.Length>0?pending.Runtime:pending.Name]="已打开此台云电脑。";
                         else if(pending.Action=="connect"&&pending.Process.ExitCode==0&&!pending.Failed)progress.Remove(pending.Runtime.Length>0?pending.Runtime:pending.Name);
                     }

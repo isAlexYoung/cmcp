@@ -15,7 +15,11 @@ if ($ManagerMode) {
 }
 # Once this device has stopped, its page window closes too when Settings ask for it.
 function Complete-TargetStop {
-    try { $null = Close-CloudPage $TargetName } catch { Write-ErrorLog '关闭网页窗口' $_ }
+    if ($ManagerMode) { Send-ManagerEvent 'complete' '此台连接已停止。' }
+    try { $null = Close-CloudPage $TargetName } catch {
+        try { Write-ErrorLog '关闭网页窗口' $_ } catch { }
+        if ($ManagerMode) { Send-ManagerEvent 'progress' '连接已停止，但网页窗口未能自动关闭，请手动关闭。' }
+    }
     exit 0
 }
 try {

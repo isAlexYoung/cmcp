@@ -252,6 +252,22 @@ namespace CMCP {
                 check(a.BusyStop&&b.BusyConnect&&b.Details.Stop.Enabled,"stop A dispatches immediately while B remains independently cancellable");
                 check(Until(()=>!a.BusyStop&&!a.BusyConnect&&a.Target.Detail=="此台连接已停止。",form)&&b.BusyConnect,"late cancelled progress cannot replace A stop result or stop B");
                 b.Details.Stop.PerformClick();check(Until(()=>!b.BusyStop&&!b.BusyConnect,form),"B can also cancel without a confirmation or progress popup");
+                string stopFile=Path.Combine(kit,"stop.ps1"),hangFile=Path.Combine(kit,"hang-stop"),ackFile=Path.Combine(kit,"ack-stop"),pidFile=Path.Combine(kit,"stop-pid");
+                File.AppendAllText(stopFile,"\r\nif(Test-Path (Join-Path $PSScriptRoot 'hang-stop')){\r\nif(Test-Path (Join-Path $PSScriptRoot 'ack-stop')){[Console]::WriteLine('{\"schema\":1,\"kind\":\"complete\",\"message\":\"此台连接已停止。\"}')}\r\n[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'stop-pid'),[string]$PID)\r\nStart-Sleep -Seconds 60\r\n}\r\n",System.Text.Encoding.UTF8);
+                form.StopActionTimeout=TimeSpan.FromSeconds(3);
+                try{foreach(bool acknowledged in new[]{false,true}){
+                    File.Delete(Path.Combine(kit,"stop-A"));File.Delete(pidFile);File.WriteAllText(hangFile,"1");if(acknowledged)File.WriteAllText(ackFile,"1");else File.Delete(ackFile);
+                    a.Connect.PerformClick();check(Until(()=>a.BusyConnect&&a.Target.Detail=="正在等待网页登录",form),"restart A before wedged stop fixture "+acknowledged);
+                    a.Details.Stop.PerformClick();
+                    check(Until(()=>File.Exists(pidFile),form),"wedged stop worker started "+acknowledged);
+                    int stopPid=Int32.Parse(File.ReadAllText(pidFile));
+                    try{
+                        string expected=acknowledged?"连接已停止，但网页窗口未能自动关闭，请手动关闭。":"停止操作等待超时，请查看本机日志。";
+                        check(Until(()=>!a.BusyStop&&!a.BusyConnect&&a.Target.Detail==expected,form),"wedged stop releases the card and preserves acknowledgement result "+acknowledged);
+                        bool alive=false;try{using(var observer=System.Diagnostics.Process.GetProcessById(stopPid))alive=!observer.HasExited;}catch(ArgumentException){}
+                        check(!alive&&a.Connect.Enabled&&b.Edit.Enabled&&!b.BusyStop,"stop watchdog terminates only its observer and allows retry "+acknowledged);
+                    }finally{try{using(var observer=System.Diagnostics.Process.GetProcessById(stopPid)){if(!observer.HasExited)observer.Kill();}}catch(ArgumentException){}}
+                }}finally{form.StopActionTimeout=TimeSpan.FromSeconds(40);foreach(string file in new[]{hangFile,ackFile,pidFile})File.Delete(file);}
                 form.OpenAdd();form.Editor.UrlInput.Box.Text="https://c.invalid";form.Editor.NameInput.Box.Text="第三台云电脑";form.Editor.Remember.Checked=true;form.Editor.PasswordInput.Box.Text="TESTONLY123";form.Editor.Save.PerformClick();
                 check(form.Editor!=null&&form.Editor.Password.Length==0&&!form.Editor.Save.Enabled,"save clears password from editor and prevents duplicate submissions");
                 check(Until(()=>form.Editor==null&&form.Cards.ContainsKey("C"),form)&&form.Cards["C"].Preference.label=="第三台云电脑"&&form.Cards["C"].Target.AutoLogin&&form.Cards["C"].Target.HasSavedPassword,"embedded add handles saved worker result and applies card metadata");
