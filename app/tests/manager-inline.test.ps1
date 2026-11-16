@@ -68,7 +68,7 @@ try {
     # Start the actual selected-target scripts in a private fixture directory.
     $fixture=Join-Path (Split-Path $app -Parent) ('build-results\inline-fixture-' + [Guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($fixture)
-    foreach($file in @('start.ps1','stop.ps1','manager-open.ps1','manager-events.ps1','cloud-api.ps1')){Copy-Item -LiteralPath (Join-Path $app $file) -Destination (Join-Path $fixture $file)}
+    foreach($file in @('start.ps1','stop.ps1','manager-open.ps1','manager-events.ps1','cloud-api.ps1','network-settings.ps1')){Copy-Item -LiteralPath (Join-Path $app $file) -Destination (Join-Path $fixture $file)}
     $source=[IO.File]::ReadAllText((Join-Path $app 'start.ps1'))
     $required=[regex]::Match($source,"foreach \(\`$f in @\(([^\r\n]+)\)\)").Groups[1].Value
     foreach($match in [regex]::Matches($required,"'([^']+)'")){
