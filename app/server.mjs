@@ -1,5 +1,6 @@
 import {readTunnelTargets,acquireWebTunnel} from './ssh-web.mjs';
 import {readSshLogin} from './ssh-terminal.mjs';
+import {networkRevision} from './network-policy.mjs';
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
@@ -239,10 +240,10 @@ function notify(title, message) {
 function startLinks() {
   const proxyFor = async (url, signal) => {
     const r = await powershell('get-proxy.ps1', ['-Url', url], {capture:true, timeoutMs:30000, signal});
-    if (r.code !== 0) throw new Error('Cannot read Windows proxy settings');
+    if (r.code !== 0) throw Object.assign(new Error('Cannot read CMCP proxy settings'),{code:'CMCP_PROXY_SETTINGS'});
     return r.out.trim();
   };
-  connections = createTargetConnections({readTargets,
+  connections = createTargetConnections({readTargets,readNetworkRevision:()=>networkRevision(stateDir),
     readControls:() => readTargetControls(path.join(stateDir, 'target-controls.json')),
     status, onChange:writeBrowserEntries,
     create:managedTargetFactory({openTunnel:async(t,signal)=>acquireWebTunnel({directory:stateDir,id:t.tunnel.id,login:readSshLogin(stateDir,t.tunnel.id),signal,env:{...process.env,CMCP_STATE_DIR:stateDir,CMCP_SSH_ASKPASS:t.tunnel.id,SSH_ASKPASS:path.resolve(here,"../CMCP.exe"),SSH_ASKPASS_REQUIRE:"force",DISPLAY:"cmcp"}}),proxyFor, machine:machineId(stateDir), version:bridgeVersion,

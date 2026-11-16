@@ -5,14 +5,17 @@ import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import Ajv2020 from 'ajv/dist/2020.js';
+import { guardedCommand } from './windows-command-guard.mjs';
 
 const cwdProperty = { type: 'string', description: 'Absolute directory on the Windows PC, e.g. D:\\work\\project. Defaults to the bridge directory.' };
 const envProperty = { type: 'object', additionalProperties: { type: 'string' }, description: 'Environment overrides for this command only.' };
+const memoryProperty = { type: 'integer', minimum: 64, maximum: 8192, default: 2048, description: 'Memory commit cap in MiB for the command and all descendants. Default 2048; raise explicitly for a large build. Child processes end with the managed command.' };
 const commandProperties = {
   command: { type: 'string', minLength: 1, maxLength: 200000, description: 'Command or script to execute on the Windows PC.' },
   shell: { type: 'string', enum: ['powershell', 'cmd'], default: 'powershell' },
   cwd: cwdProperty,
   env: envProperty,
+  memory_limit_mb: memoryProperty,
 };
 const timeoutProperty = { type: 'integer', minimum: 100, maximum: 90000, default: 60000, description: 'Foreground command deadline in milliseconds. Use windows_start_process for longer work.' };
 const outputProperty = { type: 'integer', minimum: 1000, maximum: 200000, default: 30000 };
@@ -30,7 +33,7 @@ export const windowsToolDefinitions = [
   definition('windows_run_program', 'Run a Windows executable directly with an argument array, without shell string quoting. Suitable for python.exe, node.exe, git.exe or a full executable path. For .bat/.cmd scripts and pipelines use windows_execute. Use windows_start_process for long work.', {
     executable: { type: 'string', minLength: 1, maxLength: 4096 },
     args: { type: 'array', items: { type: 'string', maxLength: 200000 }, maxItems: 500, default: [] },
-    cwd: cwdProperty, env: envProperty, timeout_ms: timeoutProperty, output_limit: outputProperty,
+    cwd: cwdProperty, env: envProperty, memory_limit_mb: memoryProperty, timeout_ms: timeoutProperty, output_limit: outputProperty,
   }, ['executable']),
   definition('windows_start_process', 'Start a background PowerShell or CMD command on Windows. Returns a managed session ID; poll windows_process_status for output and use windows_stop_process to stop its process tree. Suitable for development servers, builds and commands longer than 90 seconds. Processes are owned by this temporary MCP session.', {
     ...commandProperties,
@@ -112,6 +115,12 @@ export function createWindowsTools({ defaultCwd, roots, stateDir }) {
     session.stopping = (async () => {
       // The managed ChildProcess must still be live. Never kill a caller's PID.
       if (!session.child.pid || session.child.exitCode !== null || session.child.signalCode !== null) return;
+      if (session.guarded) {
+        session.child.kill(); // Closing this helper's job kills only its assigned descendants.
+        await Promise.race([session.completed, new Promise(resolve => setTimeout(resolve, 5000))]);
+        if (session.running) throw new Error('The guarded Windows process has not stopped');
+        return;
+      }
       const killer = spawn(taskkill, ['/PID', String(session.child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
       const code = await new Promise((resolve, reject) => {
         killer.once('error', reject);
@@ -134,6 +143,10 @@ export function createWindowsTools({ defaultCwd, roots, stateDir }) {
     const cwd = args.cwd ?? defaultCwd;
     if (!path.win32.isAbsolute(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error('cwd must be an existing absolute Windows directory');
     const env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ...args.env };
+    // Known Node test failures must fail inside this command, not consume all system commit memory.
+    if (!/(?:^|\s)--max[-_]old[-_]space[-_]size(?:=|\s)/.test(env.NODE_OPTIONS || '')) {
+      env.NODE_OPTIONS = `${env.NODE_OPTIONS || ''} --max-old-space-size=1024`.trim();
+    }
     const id = randomUUID();
     let executable, argv, scriptFile = null;
     if (direct) {
@@ -153,9 +166,18 @@ export function createWindowsTools({ defaultCwd, roots, stateDir }) {
       fs.writeFileSync(scriptFile, '@echo off\r\nchcp 65001 >nul\r\n' + args.command.replace(/\r?\n/g, '\r\n') + '\r\nexit /b %errorlevel%\r\n', 'utf8');
       argv = ['/d', '/s', '/c', '""' + scriptFile + '""'];
     }
-    const child = spawn(executable, argv, { cwd, env, windowsHide: true, windowsVerbatimArguments: !direct && args.shell === 'cmd', stdio: ['pipe', 'pipe', 'pipe'] });
+    const verbatim = !direct && args.shell === 'cmd';
+    let guarded;
+    try {
+      guarded = process.platform === 'win32'
+        ? guardedCommand(stateDir, executable, argv, cwd, verbatim, args.memory_limit_mb ?? 2048) : null;
+    } catch (error) {
+      if (scriptFile) { try { fs.unlinkSync(scriptFile); } catch {} }
+      throw error;
+    }
+    const child = spawn(guarded?.executable || executable, guarded?.args || argv, { cwd, env, windowsHide: true, windowsVerbatimArguments: guarded ? false : verbatim, stdio: ['pipe', 'pipe', 'pipe'] });
     const session = {
-      id, child, cwd, running: true, exitCode: null, signal: null, error: null,
+      id, child, cwd, guarded: Boolean(guarded), running: true, exitCode: null, signal: null, error: null,
       stdout: new OutputBuffer(), stderr: new OutputBuffer(),
       timedOut: false, stopped: false, stopping: null, timer: null,
       startedAt: new Date().toISOString(), finishedAt: null, completed: null,

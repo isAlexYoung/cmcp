@@ -24,10 +24,11 @@ $script:StopFlag=Join-Path $StateDir 'stopped.flag'
 $script:ErrorLog=Join-Path $StateDir 'error.log'
 function Get-NodeExe {return 'REAL_NODE'}
 # Only this private fixture may be stopped. Never enumerate live CMCP copies.
+$script:NativeServices=${function:Get-ServiceProcesses}
 function Get-ServiceProcesses {
     $server='"'+(Join-Path $KitDir 'server.mjs')+'"'
     $supervisor='"'+(Join-Path $KitDir 'run-service.ps1')+'"'
-    return @(Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains($server)) -or ($_.Name -eq 'powershell.exe' -and ([string]$_.CommandLine).Contains($supervisor)) })
+    return @(& $script:NativeServices | Where-Object { ($_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains($server)) -or ($_.Name -eq 'powershell.exe' -and ([string]$_.CommandLine).Contains($supervisor)) })
 }
 function Register-AutoStart {throw 'UNEXPECTED AUTOSTART CHANGE'}
 function Unregister-AutoStart {throw 'UNEXPECTED AUTOSTART CHANGE'}
@@ -37,7 +38,7 @@ Put-File (Join-Path $kit 'common.ps1') $common
 Copy-Item -LiteralPath (Join-Path $app 'manager-restart.ps1') -Destination $kit
 $supervisor=[IO.File]::ReadAllText((Join-Path $app 'run-service.ps1')).Replace('Local\ClaudeCloudPcLinkService',('Local\CmcpRestartFixture-'+[Guid]::NewGuid().ToString('N')))
 Put-File (Join-Path $kit 'run-service.ps1') $supervisor
-foreach($file in @('shared-autofill.mjs','managed-target.mjs','target-connections.mjs','node_modules\express\package.json','node_modules\ws\package.json','node_modules\@modelcontextprotocol\sdk\package.json','node_modules\@modelcontextprotocol\server-filesystem\dist\index.js')){Put-File (Join-Path $kit $file) '{}'}
+foreach($file in @('windows-tools.mjs','shared-autofill.mjs','managed-target.mjs','target-connections.mjs','node_modules\express\package.json','node_modules\ws\package.json','node_modules\@modelcontextprotocol\sdk\package.json','node_modules\@modelcontextprotocol\server-filesystem\dist\index.js')){Put-File (Join-Path $kit $file) '{}'}
 $server=@'
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
 const state=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','state');
@@ -82,7 +83,7 @@ try {
     $p=Worker 'repeat';Check ((Finish $p) -eq 0 -and (Status).pid -eq $first.pid) 'ordinary launch reuses the fresh compatible backend PID'
     $parallel1=Worker 'parallel-1';$parallel2=Worker 'parallel-2'
     Check ((Finish $parallel1) -eq 0 -and (Finish $parallel2) -eq 0) 'simultaneous launches serialize and both complete'
-    $matching=@(Get-CimInstance Win32_Process | Where-Object {$_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains('"'+(Join-Path $kit 'server.mjs')+'"')})
+    $matching=@(Get-ServiceProcesses | Where-Object {$_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains('"'+(Join-Path $kit 'server.mjs')+'"')})
     Check ($matching.Count -eq 1 -and (Status).pid -eq $first.pid -and (Get-Content (Join-Path $state 'launches.txt')).Count -eq 2) 'parallel opens reuse one backend without interrupting connections'
     Check ((Finish (Worker 'updated' -ForceRestart)) -eq 0 -and (Status).pid -ne $first.pid) 'an update explicitly restarts even a compatible backend'
     $upgraded=Status
@@ -120,5 +121,5 @@ try {
     Start-Sleep -Milliseconds 200
     foreach($p in $workers){try{if(!$p.HasExited){$p.Kill()};$p.Dispose()}catch{}}
     # Identify only our uniquely named fixture, never the live CMCP backend.
-    foreach($p in @(Get-CimInstance Win32_Process | Where-Object {$_.Name -in @('node.exe','powershell.exe') -and ([string]$_.CommandLine).Contains('"'+$kit+'\')})){Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue}
+    foreach($p in @(Get-ServiceProcesses | Where-Object {$_.Name -in @('node.exe','powershell.exe') -and ([string]$_.CommandLine).Contains('"'+$kit+'\')})){Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue}
 }

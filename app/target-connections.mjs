@@ -21,16 +21,16 @@ export const targetRevision = (target, controls) => controls?.get(target.name)?.
 
 // Independent slots: a slow/offline VPS never blocks another target's stop or
 // start. A cancelled setup must settle before that same slot can start again.
-export function createTargetConnections({readTargets, readControls, create, status, onChange = () => {}, interval = 250, retryMs = 10000}) {
+export function createTargetConnections({readTargets, readControls, readNetworkRevision = () => '', create, status, onChange = () => {}, interval = 250, retryMs = 10000}) {
   const slots = new Map();
   let closed = false;
-  const signature = (t, revision) => JSON.stringify([t.url, t.stamp, t.authMode, t.autoLogin===true, revision]);
+  const signature = (t, revision, network) => JSON.stringify([t.url, t.stamp, t.authMode, t.autoLogin===true, revision, t.tunnel ? '' : network]);
   const snapshot = () => {
-    const controls = readControls(), desired = new Map();
+    const controls = readControls(), desired = new Map(), network = readNetworkRevision();
     for (const t of readTargets().slice(0, 400)) {
       if (!t?.name || !t?.url || desired.has(t.name)) continue;
       const revision = targetRevision(t, controls);
-      if (revision !== null) desired.set(t.name, {target:t, revision, signature:signature(t, revision)});
+      if (revision !== null) desired.set(t.name, {target:t, revision, signature:signature(t, revision, network)});
       else status.set(t.name, 'stopped', '此云电脑已停止；其他云电脑不受影响', controls?.get(t.name)?.revision);
     }
     return desired;
@@ -70,7 +70,8 @@ export function createTargetConnections({readTargets, readControls, create, stat
         if (current()) {
           slot.failed = true; slot.retryAt = ['SSH_AUTH','SSH_HOST_KEY','SSH_START'].includes(error.code)?Infinity:Date.now() + retryMs;
           const sshError={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:HOST_KEY_RECOVERY_ERROR,SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'}[error.code];
-          guardedStatus.set(name, sshError?'error':'offline', sshError||(error.code==='CLOUDCLI_PROTOCOL_REQUIRED'?'CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。':'无法连接此云电脑；其他连接不受影响，稍后重试'));
+          const proxyError={CMCP_PROXY_SETTINGS:'无法读取代理设置，请在设置 → 连接中检查；不会回退直连。',PROXY_FAILED:'代理连接失败，请检查代理地址和端口；不会回退直连。'}[error.code];
+          guardedStatus.set(name, sshError?'error':'offline', sshError||proxyError||(error.code==='CLOUDCLI_PROTOCOL_REQUIRED'?'CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。':'无法连接此云电脑；其他连接不受影响，稍后重试'));
         }
       });
     }

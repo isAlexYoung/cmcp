@@ -363,7 +363,7 @@ export function startLink({ name, target, machine, version, forward, catalog, as
           if(currentProxy!==nextProxy||agentUrl!==url){agent?.destroy();agent=agentFor(url,nextProxy);currentProxy=nextProxy;agentUrl=url;}
           proxyDirty=false;
         } catch (error) {
-          say('offline', '无法读取或使用系统网络设置，稍后重试', describeNetworkError(error));
+          say('offline', '无法读取代理设置，请在设置 → 连接中检查；不会回退直连。', describeNetworkError(error));
           await sleep(backoff); backoff = Math.min(backoff * 2, 30000); continue;
         }
       }
@@ -393,7 +393,7 @@ export function startLink({ name, target, machine, version, forward, catalog, as
           await sleep(30000); continue;
         }
         if (stopped) break;
-        say('connecting', currentProxy ? '正在登录云电脑（已使用系统网络设置）' : '正在登录云电脑');
+        say('connecting', currentProxy ? '正在登录云电脑（已使用代理）' : '正在登录云电脑');
         try {
           credential = await login(url, password, agent, !session, controller.signal);
         } catch (error) {

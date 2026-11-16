@@ -1,5 +1,6 @@
 ﻿# 通过网页桌面的接口操作云电脑：登录、读写文件、执行命令。
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'network-settings.ps1')
 
 function Connect-CloudPc([string]$BaseUrl, [string]$Password) {
     if ((Get-CloudAuthMode $BaseUrl) -eq 'shared-browser') { throw '这台云电脑使用网页桌面会话，请在 CMCP 中点击“打开云电脑”；禁止后台再次登录。' }
@@ -9,6 +10,7 @@ function Connect-CloudPc([string]$BaseUrl, [string]$Password) {
 }
 
 function Invoke-CloudApi($Path, $Method = 'GET', $Body = $null) {
+    $script:CloudSession.Proxy=Get-CmcpWebProxy $script:CloudBase
     $params = @{ Uri = ($script:CloudBase + $Path); Method = $Method; WebSession = $script:CloudSession; TimeoutSec = 40; ErrorAction = 'Stop'; UseBasicParsing = $true }
     if ($null -ne $Body) {
         $params.ContentType = 'application/json; charset=utf-8'
@@ -38,8 +40,7 @@ function Set-CloudFile($Path, $Content) {
 function Invoke-CloudCommand($Command, $WorkingDirectory, $TimeoutSeconds = 180, [hashtable]$ExitMessages = @{}) {
     $ws = New-Object System.Net.WebSockets.ClientWebSocket
     $ws.Options.Cookies = $script:CloudSession.Cookies
-    # 与浏览器一样使用 Windows 的网络设置
-    try { $ws.Options.Proxy = [Net.WebRequest]::GetSystemWebProxy() } catch {}
+    $ws.Options.Proxy = Get-CmcpWebProxy $script:CloudBase
     $cancel = New-Object System.Threading.CancellationTokenSource
     $cancel.CancelAfter($TimeoutSeconds * 1000)
     $builder = New-Object Text.StringBuilder

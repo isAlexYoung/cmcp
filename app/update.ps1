@@ -1,5 +1,6 @@
 ﻿param([ValidateSet('check','prepare')][string]$Action,[Parameter(Mandatory=$true)][string]$InstallRoot,[Parameter(Mandatory=$true)][string]$StateDirectory,[int]$ManagerPid)
 $ErrorActionPreference='Stop';. (Join-Path $PSScriptRoot 'update-core.ps1')
+$script:CmcpNetworkStateDirectory=$StateDirectory
 $phase='prepare'
 function Send-UpdateProgress([string]$Stage,[long]$Received=0,[long]$Total=0,[string]$Unit='bytes'){
     if($Action -eq 'prepare'){[Console]::WriteLine((@{type='progress';stage=$Stage;received=$Received;total=$Total;unit=$Unit}|ConvertTo-Json -Compress));[Console]::Out.Flush()}
@@ -30,7 +31,7 @@ try{
     $phase='identity';$manager=Get-Process -Id $ManagerPid
     if(!(Test-CmcpManagerPath $InstallRoot $manager.Path)){throw 'Wrong manager process'}
     $request=[ordered]@{schema=1;installRoot=$InstallRoot;staged=$stage;backup=$backup;version=$release.version;oldVersion=$current;managerPid=$ManagerPid;managerStart=$manager.StartTime.ToUniversalTime().Ticks.ToString();token=[guid]::NewGuid().ToString('N');zipHash=$hash}
-    foreach($name in @('update-core.ps1','update-apply.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $transaction $name)}
+    foreach($name in @('update-core.ps1','update-apply.ps1','network-settings.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $transaction $name)}
     [IO.File]::WriteAllText((Join-Path $transaction 'request.json'),($request|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
     [Console]::WriteLine((@{status='prepared';transaction=$id;version=$release.version}|ConvertTo-Json -Compress))
 }catch{

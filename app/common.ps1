@@ -6,9 +6,10 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.23.0'
+$script:KitVersion = '4.23.2'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = if ($env:CMCP_STATE_DIR) { [IO.Path]::GetFullPath($env:CMCP_STATE_DIR) } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'user' }
+. (Join-Path $PSScriptRoot 'network-settings.ps1')
 $script:TargetsFile = Join-Path $script:StateDir 'cloudpc-targets.json'
 $script:StopFlag = Join-Path $script:StateDir 'stopped.flag'
 $script:StatusFile = Join-Path $script:StateDir 'link-status.json'
@@ -186,7 +187,7 @@ function Test-InternetUp {
 # 返回 @{ Ok; Kind = ok|url|password|locked|expired|notset|network; Message }
 function Test-CloudAddress([string]$baseUrl) {
     try {
-        $r = Invoke-WebRequest -Uri ($baseUrl + '/api/health') -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 0
+        $r = Invoke-WebRequest -Uri ($baseUrl + '/api/health') -WebSession (New-CmcpWebSession $baseUrl) -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 0
         $json = $null
         try { $json = $r.Content | ConvertFrom-Json } catch {}
         if ($json -and $json.ok -eq $true) { return [pscustomobject]@{ Ok = $true; Kind = 'ok'; Message = '' } }
@@ -214,7 +215,7 @@ function Test-CloudLogin([string]$baseUrl, [string]$password) {
     if ($mode -eq 'shared-browser') { return [pscustomobject]@{ Ok = $true; Kind = 'shared'; AuthMode = $mode; Message = '请通过打开云电脑入口登录，MCP 将共用网页会话' } }
     $body = [Text.Encoding]::UTF8.GetBytes((@{ password = $password; remember = $false } | ConvertTo-Json -Compress))
     try {
-        $null = Invoke-WebRequest -Uri ($baseUrl + '/api/auth/login') -Method Post -Body $body -ContentType 'application/json; charset=utf-8' -UseBasicParsing -TimeoutSec 30 -MaximumRedirection 0
+        $null = Invoke-WebRequest -Uri ($baseUrl + '/api/auth/login') -WebSession (New-CmcpWebSession $baseUrl) -Method Post -Body $body -ContentType 'application/json; charset=utf-8' -UseBasicParsing -TimeoutSec 30 -MaximumRedirection 0
         return [pscustomobject]@{ Ok = $true; Kind = 'ok'; Message = '' }
     } catch {
         $e = Get-HttpErrorInfo $_
@@ -335,7 +336,7 @@ function Open-CloudPage([string]$name, [string]$url) {
 }
 
 # Closes this device's page windows when Settings ask for it. Returns how many processes ended.
-function Get-CloudPageProcesses([string[]]$folders) {
+function Initialize-CmcpProcessInspection {
     # WMI/CIM can stall even for a local query. Read only browser command lines
     # through process handles instead; inaccessible/exited processes are skipped.
     if (!('CmcpBrowserProcesses' -as [type])) {
@@ -347,34 +348,50 @@ public static class CmcpBrowserProcesses {
     [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr handle, int kind, IntPtr data, int length, out int needed);
-    public static bool Owns(int pid, string[] folders) {
+    [DllImport("shell32.dll", CharSet=CharSet.Unicode)] static extern IntPtr CommandLineToArgvW(string line, out int count);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
+    public static string ReadCommandLine(int pid) {
         IntPtr handle=OpenProcess(0x1000, false, pid), buffer=IntPtr.Zero;
-        if(handle==IntPtr.Zero) return false;
+        if(handle==IntPtr.Zero) return null;
         try {
             int size;
             NtQueryInformationProcess(handle, 60, IntPtr.Zero, 0, out size);
-            if(size<=0 || size>131072) return false;
+            if(size<=0 || size>131072) return null;
             buffer=Marshal.AllocHGlobal(size);
-            if(NtQueryInformationProcess(handle, 60, buffer, size, out size)!=0) return false;
+            if(NtQueryInformationProcess(handle, 60, buffer, size, out size)!=0) return null;
             int length=(ushort)Marshal.ReadInt16(buffer);
             IntPtr text=Marshal.ReadIntPtr(buffer, IntPtr.Size==8 ? 8 : 4);
             long offset=text.ToInt64()-buffer.ToInt64();
-            if(offset<0 || offset+length>size || length%2!=0) return false;
-            string line=Marshal.PtrToStringUni(text, length/2);
+            if(offset<0 || offset+length>size || length%2!=0) return null;
+            return Marshal.PtrToStringUni(text, length/2);
+        } finally {
+            if(buffer!=IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+            CloseHandle(handle);
+        }
+    }
+    public static string[] Arguments(string line) {
+        int count; IntPtr argv=CommandLineToArgvW(line,out count);
+        if(argv==IntPtr.Zero) return new string[0];
+        try { var result=new string[count]; for(int i=0;i<count;i++) result[i]=Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv,i*IntPtr.Size)); return result; }
+        finally { LocalFree(argv); }
+    }
+    public static bool Owns(int pid, string[] folders) {
+            string line=ReadCommandLine(pid);
+            if(line==null) return false;
             foreach(string folder in folders) {
                 int at=line.IndexOf(folder, StringComparison.OrdinalIgnoreCase), end=at+folder.Length;
                 if(at>=0 && (at==0 || line[at-1]=='=' || line[at-1]=='"' || Char.IsWhiteSpace(line[at-1])) &&
                     (end==line.Length || line[end]=='"' || Char.IsWhiteSpace(line[end]))) return true;
             }
             return false;
-        } finally {
-            if(buffer!=IntPtr.Zero) Marshal.FreeHGlobal(buffer);
-            CloseHandle(handle);
-        }
     }
 }
 '@
     }
+}
+
+function Get-CloudPageProcesses([string[]]$folders) {
+    Initialize-CmcpProcessInspection
     foreach ($browser in @('msedge','chrome','firefox')) {
         foreach ($process in @(Get-Process -Name $browser -ErrorAction SilentlyContinue)) {
             if ([CmcpBrowserProcesses]::Owns($process.Id, $folders)) { $process }
@@ -571,34 +588,66 @@ function Get-SavedNodeArgs {
 #   - node 运行的 server.mjs（同目录下有 windows-tools.mjs 才算本工具的）
 #   - 旧版的 cloudflared.exe（同一工具目录下的 bin\cloudflared.exe）
 function Get-ServiceProcesses {
+    Initialize-CmcpProcessInspection
     $result = @()
-    foreach ($p in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
-        $cmd = [string]$p.CommandLine
-        if (!$cmd) { continue }
-        if ($p.Name -notin @('node.exe', 'powershell.exe', 'pwsh.exe', 'cloudflared.exe')) { continue }
-        $m = [regex]::Match($cmd, '(?i)"?([A-Za-z]:\\[^"]*?)\\(server\.mjs|run-service\.ps1|run-session\.ps1)"?')
-        if ($m.Success) {
-            $dir = $m.Groups[1].Value
-            $marker = if ($m.Groups[2].Value -ieq 'server.mjs') { 'windows-tools.mjs' } else { 'common.ps1' }
-            if (Test-Path -LiteralPath (Join-Path $dir $marker)) { $result += $p }
-            elseif (!(Test-Path -LiteralPath $dir)) { $result += $p }  # 文件夹已被删除的旧副本
-            continue
-        }
-        if ($p.Name -ieq 'cloudflared.exe' -and $p.ExecutablePath) {
-            $kit = Split-Path (Split-Path $p.ExecutablePath -Parent) -Parent
-            if ((Test-Path -LiteralPath (Join-Path $kit 'server.mjs')) -or !(Test-Path -LiteralPath $kit)) { $result += $p }
-        }
+    foreach ($process in @(Get-Process -Name node,powershell,pwsh,cloudflared -ErrorAction SilentlyContinue)) {
+        try {
+            $null = $process.Handle
+            $cmd = [CmcpBrowserProcesses]::ReadCommandLine($process.Id)
+            if (!$cmd -or $process.HasExited) { continue }
+            $arguments = [CmcpBrowserProcesses]::Arguments($cmd)
+            $scriptFile = $null
+            if ($process.ProcessName -ieq 'node') {
+                # Only the executed entry point counts, never a path embedded in -e code or a later argument.
+                for ($i=1; $i -lt $arguments.Length; $i++) {
+                    if ($arguments[$i] -match '^--(?:use-system-ca|enable-source-maps|no-warnings|trace-warnings|max-old-space-size=\d+)$') { continue }
+                    if ($arguments[$i] -notmatch '^-') { $scriptFile=$arguments[$i] }
+                    break
+                }
+                if (!$scriptFile -or [IO.Path]::GetFileName($scriptFile) -ine 'server.mjs') { continue }
+                $marker = 'windows-tools.mjs'
+            } elseif ($process.ProcessName -in @('powershell','pwsh')) {
+                for ($i=1; $i -lt $arguments.Length-1; $i++) { if ($arguments[$i] -ieq '-File') { $scriptFile=$arguments[$i+1]; break } }
+                if (!$scriptFile -or [IO.Path]::GetFileName($scriptFile) -notin @('run-service.ps1','run-session.ps1')) { continue }
+                $marker = 'common.ps1'
+            } else {
+                $kit = Split-Path (Split-Path $process.Path -Parent) -Parent
+                if ((Test-Path -LiteralPath (Join-Path $kit 'server.mjs')) -or !(Test-Path -LiteralPath $kit)) { $scriptFile=$process.Path; $marker=$null }
+                else { continue }
+            }
+            if (![IO.Path]::IsPathRooted($scriptFile)) { continue }
+            $dir = Split-Path $scriptFile -Parent
+            if ($marker -and (Test-Path -LiteralPath $dir) -and !(Test-Path -LiteralPath (Join-Path $dir $marker))) { continue }
+            $result += [pscustomobject]@{Name=$process.ProcessName+'.exe';ProcessId=$process.Id;CommandLine=$cmd;ExecutablePath=$process.Path;CreationDate=$process.StartTime;ScriptPath=$scriptFile}
+        } catch { } finally { $process.Dispose() }
     }
     return $result
 }
 
-function Invoke-LinkLifecycleLock([scriptblock]$Action) {
+# Verify a recorded PID through its still-open process handle before terminating it.
+# Do not use taskkill /T: tools can have launched unrelated desktop applications below the backend.
+function Stop-CmcpServiceProcess($record) {
+    $process = $null
+    try {
+        Initialize-CmcpProcessInspection
+        $process=Get-Process -Id ([int]$record.ProcessId) -ErrorAction Stop
+        $null=$process.Handle
+        if ($process.StartTime.ToUniversalTime().Ticks -ne $record.CreationDate.ToUniversalTime().Ticks) { return }
+        if ([CmcpBrowserProcesses]::ReadCommandLine($process.Id) -cne [string]$record.CommandLine -or $process.HasExited) { return }
+        $process.Kill()
+        $null=$process.WaitForExit(1000)
+    } catch {
+        if ($process -and !$process.HasExited) { throw }
+    } finally { if ($process) { $process.Dispose() } }
+}
+
+function Invoke-LinkLifecycleLock([scriptblock]$Action, [int]$TimeoutMilliseconds=90000) {
     $hash = [Security.Cryptography.SHA256]::Create()
     try { $key = ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($script:StateDir.ToLowerInvariant())))).Replace('-', '').Substring(0, 20) } finally { $hash.Dispose() }
     $mutex = New-Object Threading.Mutex($false, ('Local\ClaudeMcpLifecycle-' + $key))
     $owned = $false
     try {
-        try { $owned = $mutex.WaitOne(90000) } catch [Threading.AbandonedMutexException] { $owned = $true }
+        try { $owned = $mutex.WaitOne($TimeoutMilliseconds) } catch [Threading.AbandonedMutexException] { $owned = $true }
         if (!$owned) { throw 'Backend lifecycle operation busy' }
         & $Action
     } finally { if ($owned) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
@@ -628,7 +677,7 @@ function Stop-LinkService {
     # 先停守护进程，再停服务本身，避免守护进程把服务重新拉起
     $all = @(Get-ServiceProcesses | Sort-Object { if ([string]$_.CommandLine -match '(?i)\.ps1') { 0 } else { 1 } })
     foreach ($p in $all) {
-        $null = Invoke-Quiet 'taskkill.exe' @('/PID', [string]$p.ProcessId, '/T', '/F')
+        Stop-CmcpServiceProcess $p
     }
     # 等进程真正退出
     for ($i = 0; $i -lt 20; $i++) {

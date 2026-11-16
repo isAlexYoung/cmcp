@@ -9,6 +9,17 @@ namespace CMCP {
         internal static event Action Changed;
         internal static void Set(string value){Language=value=="en"?"en":"zh-CN";if(Changed!=null)Changed();}
         static readonly Dictionary<string,string> words=new Dictionary<string,string>{
+            {"网络代理","Network proxy"},{"代理模式","Proxy mode"},{"自动（系统 / 环境变量）","Automatic (system / environment)"},{"手动 HTTP 代理","Manual HTTP proxy"},{"直接连接","Direct connection"},
+            {"代理地址","Proxy host"},{"代理端口","Proxy port"},{"应用代理","Apply proxy"},{"保存代理","Save proxy"},
+            {"手动模式连接失败时会报错，不会回退直连。","Manual proxy failures are reported; connections never fall back to direct."},
+            {"只填写主机名或 IP，不含 http://。支持 HTTP 代理和 Clash 混合端口。","Enter a hostname or IP without http://. HTTP proxies and Clash mixed ports are supported."},
+            {"填写代理软件的监听端口（1–65535）。","Enter the proxy listener port (1–65535)."},
+            {"用于云电脑 HTTP/WebSocket 连接及更新下载。保存后自动重连网页设备；SSH 和外部浏览器使用各自的网络设置。","Applies to cloud HTTP/WebSocket connections and updates. Saving reconnects web devices; SSH and external browsers use their own network settings."},
+            {"请填写有效的代理主机和 1–65535 的端口。","Enter a valid proxy host and a port from 1 to 65535."},
+            {"代理设置已保存，网页设备将使用新设置重连。","Proxy saved. Web devices will reconnect using the new settings."},
+            {"正在登录云电脑（已使用代理）","Signing in to cloud PC (using proxy)"},
+            {"无法读取代理设置，请在设置 → 连接中检查；不会回退直连。","Cannot read proxy settings. Check Settings > Connection. Direct fallback is disabled."},
+            {"代理连接失败，请检查代理地址和端口；不会回退直连。","Proxy connection failed. Check the proxy host and port. Direct fallback is disabled."},
             {"连接已停止，但网页窗口未能自动关闭，请手动关闭。","The connection stopped, but the browser window could not close automatically. Please close it manually."},
             {"停止操作等待超时，请查看本机日志。","Stopping timed out. Please check the local logs."},
             {"SSH 主机指纹自动恢复失败，请检查服务器及本机 known_hosts 文件权限。","Automatic SSH host key recovery failed. Check the server and local known_hosts file permissions."},

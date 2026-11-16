@@ -20,16 +20,18 @@ $script:TargetsFile=Join-Path $StateDir 'cloudpc-targets.json'
 $script:StatusFile=Join-Path $StateDir 'link-status.json'
 $script:StopFlag=Join-Path $StateDir 'stopped.flag'
 $script:ErrorLog=Join-Path $StateDir 'error.log'
+$script:NativeServices=${function:Get-ServiceProcesses}
 function Get-ServiceProcesses {
     $server='"'+(Join-Path $KitDir 'server.mjs')+'"'
     if (Test-Path -LiteralPath (Join-Path $StateDir 'stuck.flag')) { return @([pscustomobject]@{Name='node.exe';ProcessId=999999;CommandLine='fixture'}) }
-    return @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains($server) })
+    return @(& $script:NativeServices | Where-Object { $_.Name -eq 'node.exe' -and ([string]$_.CommandLine).Contains($server) })
 }
 function Register-AutoStart {throw 'UNEXPECTED AUTOSTART WRITE'}
 function Unregister-AutoStart {throw 'UNEXPECTED AUTOSTART WRITE'}
 '@
 Put (Join-Path $kit 'common.ps1') $common.Replace('REAL_COMMON',(Join-Path $app 'common.ps1').Replace("'","''"))
 Copy-Item -LiteralPath (Join-Path $app 'manager-exit.ps1') -Destination $kit
+Put (Join-Path $kit 'windows-tools.mjs') '// fixture'
 $server=@'
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
 const state=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','state');

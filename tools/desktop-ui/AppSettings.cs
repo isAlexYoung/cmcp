@@ -11,10 +11,13 @@ namespace CMCP {
     internal sealed class AppSettings {
         public string language="zh-CN",theme="system",terminal="",browser="",cloudcliBrowser="";
         public bool autoStart,closeToTray=true,closeWeb,closeCloudcli,closeTerminal;
+        public string proxyMode="auto",proxyHost="127.0.0.1";
+        public int proxyPort=7890;
+        internal static bool ValidProxyHost(string host){return !String.IsNullOrWhiteSpace(host)&&host==host.Trim()&&host.IndexOfAny(new[]{'/','\\','@','?','#',' ','\r','\n','\t'})<0&&Uri.CheckHostName(host.Trim('[',']'))!=UriHostNameType.Unknown;}
         internal bool ReadError;
         Dictionary<string,object> extra=new Dictionary<string,object>();
         internal static string PathFor(string state){return Path.Combine(state,"application-preferences.json");}
-        internal AppSettings Copy(){return new AppSettings{language=language,theme=theme,terminal=terminal,browser=browser,cloudcliBrowser=cloudcliBrowser,closeCloudcli=closeCloudcli,autoStart=autoStart,closeToTray=closeToTray,closeWeb=closeWeb,closeTerminal=closeTerminal,ReadError=ReadError,extra=new Dictionary<string,object>(extra)};}
+        internal AppSettings Copy(){return new AppSettings{language=language,theme=theme,terminal=terminal,browser=browser,cloudcliBrowser=cloudcliBrowser,closeCloudcli=closeCloudcli,autoStart=autoStart,closeToTray=closeToTray,closeWeb=closeWeb,closeTerminal=closeTerminal,proxyMode=proxyMode,proxyHost=proxyHost,proxyPort=proxyPort,ReadError=ReadError,extra=new Dictionary<string,object>(extra)};}
         internal static AppSettings Load(string state,bool defaultStartup=false){
             var result=new AppSettings{autoStart=defaultStartup};string file=PathFor(state);
             try{
@@ -22,6 +25,9 @@ namespace CMCP {
                 if(new FileInfo(file).Length>32768)throw new IOException();
                 var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(file,Encoding.UTF8));
                 object value;if(data==null||!data.TryGetValue("schema",out value)||Convert.ToString(value)!="1")throw new IOException();
+                if(data.TryGetValue("proxyMode",out value)){if(!(value is string)||!new[]{"auto","manual","direct"}.Contains((string)value))throw new IOException();result.proxyMode=(string)value;}
+                if(data.TryGetValue("proxyHost",out value)){if(!(value is string)||!ValidProxyHost((string)value))throw new IOException();result.proxyHost=(string)value;}
+                if(data.TryGetValue("proxyPort",out value)){if(!(value is int)||(int)value<1||(int)value>65535)throw new IOException();result.proxyPort=(int)value;}
                 if(data.TryGetValue("language",out value)){if(!(value is string)||((string)value!="zh-CN"&&(string)value!="en"))throw new IOException();result.language=(string)value;}
                 if(data.TryGetValue("theme",out value)){if(!(value is string)||((string)value!=""&&(string)value!="light"&&(string)value!="dark"&&(string)value!="system"))throw new IOException();result.theme=(string)value==""?"system":(string)value;}
                 if(data.TryGetValue("terminal",out value)){if(!(value is string))throw new IOException();result.terminal=(string)value;}
@@ -40,12 +46,14 @@ namespace CMCP {
             }catch{result.ReadError=true;return result;}
         }
         internal void Save(string state){
+            if(!new[]{"auto","manual","direct"}.Contains(proxyMode)||!ValidProxyHost(proxyHost)||proxyPort<1||proxyPort>65535)throw new IOException("Invalid proxy settings");
             if(ReadError)throw new IOException("设置文件损坏，未覆盖原文件。");
             Directory.CreateDirectory(state);string file=PathFor(state),temp=file+"."+Guid.NewGuid().ToString("N")+".tmp";
             using(var mutex=new Mutex(false,"Local\\CMCP-AppSettings-"+DesktopKey(state))){bool owned=false;try{
                 try{owned=mutex.WaitOne(5000);}catch(AbandonedMutexException){owned=true;}if(!owned)throw new IOException("设置正在保存。");
                 var current=Load(state);if(current.ReadError)throw new IOException("设置文件损坏，未覆盖原文件。");
                 var data=current.extra;data["schema"]=1;data["language"]=language;data["theme"]=theme;data["terminal"]=terminal;data["browser"]=browser;data["cloudcliBrowser"]=cloudcliBrowser;data["closeCloudcli"]=closeCloudcli;data["closeWeb"]=closeWeb;data["closeTerminal"]=closeTerminal;data["autoStart"]=autoStart;data["closeToTray"]=closeToTray;data["closeAction"]=closeToTray?"tray":"exit";
+                data["proxyMode"]=proxyMode;data["proxyHost"]=proxyHost;data["proxyPort"]=proxyPort;
                 string json=new JavaScriptSerializer().Serialize(data);if(Encoding.UTF8.GetByteCount(json)>32768)throw new IOException("设置文件过大。");
                 File.WriteAllText(temp,json,new UTF8Encoding(false));
                 if(File.Exists(file))File.Replace(temp,file,null);else File.Move(temp,file);

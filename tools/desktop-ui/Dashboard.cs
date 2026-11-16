@@ -231,7 +231,13 @@ namespace CMCP {
             foreach(var pending in children){pending.Superseded=true;try{if(!pending.Process.HasExited)pending.Process.Kill();}catch{}}
             // Initialization must finish before shutdown, otherwise it can start a
             // new backend after the user's explicit exit has already stopped it.
-            if(backendInitialization!=null)try{await backendInitialization;}catch{}
+            if(backendInitialization!=null)try{
+                if(await Task.WhenAny(backendInitialization,Task.Delay(30000))!=backendInitialization){
+                    BackendRestart.Log(kit,"manager-exit.ps1","startup did not settle within 30 seconds; exit cancelled without racing a new backend");
+                    ExitPending=false;if(!IsDisposed){Enabled=true;timer.Start();RestoreManager();Error("后台启动仍未完成，退出已超时；请稍后重试，详情见 user\\manager-lifecycle.log。");}return;
+                }
+                await backendInitialization;
+            }catch{}
             BackendStarting=false;
             bool stopped=false;try{stopped=isolated?ExitBackend():await Task.Run(()=>ExitBackend());}catch{}
             if(IsDisposed)return;

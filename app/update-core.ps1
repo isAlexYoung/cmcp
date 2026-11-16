@@ -1,5 +1,6 @@
 ﻿# Pure update validation/transaction functions. Importing this file changes no state.
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'network-settings.ps1')
 function Get-CmcpVersion([string]$Value) {
     if ($Value -notmatch '^v?(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})$') { throw 'Invalid stable version' }
     return [version]($Value.TrimStart('v'))
@@ -25,9 +26,7 @@ function Receive-CmcpFile([string]$Url,[string]$Destination,[long]$Limit,[script
         if ($uri.Scheme -cne 'https' -or !$uri.IsDefaultPort -or $uri.UserInfo -or $uri.Host -notin @('api.github.com','github.com','release-assets.githubusercontent.com','objects.githubusercontent.com')) { throw 'Untrusted download host' }
         $request = [Net.HttpWebRequest]::Create($uri); $request.AllowAutoRedirect=$false; $request.UserAgent='CMCP-updater/4.1';$request.Timeout=45000;$request.ReadWriteTimeout=45000
         $request.Headers['Cache-Control']='no-cache'
-        # Same network policy as the existing connector: explicit proxy, then Windows proxy.
-        $proxyValue = $env:HTTPS_PROXY; if (!$proxyValue) { $proxyValue=$env:ALL_PROXY }
-        if ($proxyValue) { $proxyUri=[uri]$proxyValue; if ($proxyUri.Scheme -notin @('http','https')) { throw 'Unsupported proxy scheme' };$request.Proxy=New-Object Net.WebProxy($proxyUri) }
+        $request.Proxy=Get-CmcpWebProxy $uri.AbsoluteUri
         $response=$request.GetResponse()
         try {
             if ([int]$response.StatusCode -in @(301,302,303,307,308)) { $uri=New-Object uri($uri,$response.Headers['Location']); continue }

@@ -34,6 +34,7 @@ function Run-Case([string]$Name,[bool]$Healthy,[bool]$WrongPid,[bool]$RetiredLau
     $pidValue=2147483647;$start='0';if($WrongPid){$pidValue=$PID;$start=(Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks.ToString()}
     Put-File (Join-Path $directory 'request.json') (@{schema=1;installRoot=$install;staged=$stage;backup=$backup;version='4.2.0';oldVersion='4.1.0';managerPid=$pidValue;managerStart=$start;token=$token}|ConvertTo-Json)
     Copy-Item -LiteralPath (Join-Path $app 'update-core.ps1') -Destination (Join-Path $directory 'update-core.ps1')
+    Copy-Item -LiteralPath (Join-Path $app 'network-settings.ps1') -Destination (Join-Path $directory 'network-settings.ps1')
     $helper=Get-Content -LiteralPath (Join-Path $app 'update-apply.ps1') -Raw
     $helper=$helper.Replace('$state=Join-Path ([Environment]::GetFolderPath(''LocalApplicationData'')) ''ClaudeLocalMcp''',('$state='''+$state.Replace("'","''")+''''))
     $helper=$helper.Replace('Local\CMCP-UpdateApply',('Local\CMCP-UpdateFixture-'+$id))

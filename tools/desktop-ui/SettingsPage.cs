@@ -140,6 +140,7 @@ namespace CMCP {
         }
         // What a connection opens, and whether stopping it closes that window again.
         void BuildConnect(){
+            BuildNetwork();
             {
             var web=AddSection("网页桌面");
             var browsers=Browsers.Detect();
@@ -187,6 +188,28 @@ namespace CMCP {
             refresh.Add(delegate{var current=Terminals.Resolve(settings.terminal,installed);terminal.Value=current==null?"":current.Id;terminal.AccessibleName=L.Text("终端");terminal.Invalidate();});
             AddRow(console,"终端","SSH 登录时使用的终端。这里只列出这台电脑已安装的终端。",terminal);
             AddRow(console,"断开连接后关闭终端","断开连接时结束这台设备的 SSH 会话，终端窗口或标签页随之关闭。只对之后打开的终端生效。",Switch("断开连接后关闭终端",()=>settings.closeTerminal,(s,on)=>s.closeTerminal=on));
+        }
+        void BuildNetwork(){
+            var network=AddSection("网络代理");
+            var mode=new DropdownField(new[]{new KeyValuePair<string,string>("auto","自动（系统 / 环境变量）"),new KeyValuePair<string,string>("manual","手动 HTTP 代理"),new KeyValuePair<string,string>("direct","直接连接")}){Font=sheet.Font,Size=new Size(216,36),Value=settings.proxyMode,Colors=colors};
+            var host=new EditorInput{Width=216,Cue="127.0.0.1"};host.Box.Text=settings.proxyHost;host.Box.MaxLength=253;
+            var port=new EditorInput{Width=128,Cue="7890"};port.Box.Text=settings.proxyPort.ToString();port.Box.MaxLength=5;
+            Action enabled=delegate{host.Enabled=port.Enabled=mode.Value=="manual";};
+            mode.Chosen+=key=>{mode.Value=key;mode.Invalidate();enabled();};enabled();
+            refresh.Add(delegate{mode.AccessibleName=L.Text("代理模式");host.Box.AccessibleName=L.Text("代理地址");port.Box.AccessibleName=L.Text("代理端口");});
+            AddRow(network,"代理模式","手动模式连接失败时会报错，不会回退直连。",mode);
+            AddRow(network,"代理地址","只填写主机名或 IP，不含 http://。支持 HTTP 代理和 Clash 混合端口。",host);
+            AddRow(network,"代理端口","填写代理软件的监听端口（1–65535）。",port);
+            AddRow(network,"应用代理","用于云电脑 HTTP/WebSocket 连接及更新下载。保存后自动重连网页设备；SSH 和外部浏览器使用各自的网络设置。",Command("保存代理",delegate{
+                int number=settings.proxyPort;string address=settings.proxyHost;
+                if(mode.Value=="manual"){
+                    address=host.Box.Text.Trim();
+                    if(!AppSettings.ValidProxyHost(address)||!Int32.TryParse(port.Box.Text,out number)||number<1||number>65535){SetFeedback("请填写有效的代理主机和 1–65535 的端口。",true);return;}
+                }
+                var next=settings.Copy();next.proxyMode=mode.Value;next.proxyHost=address;next.proxyPort=number;
+                try{change(next);settings.proxyMode=next.proxyMode;settings.proxyHost=next.proxyHost;settings.proxyPort=next.proxyPort;RefreshControls();SetFeedback("代理设置已保存，网页设备将使用新设置重连。",false);}
+                catch{SetFeedback("设置未能保存，请检查本机文件和注册表权限。",true);}
+            }));
         }
         void BuildAbout(){
             var updates=AddSection("更新");
@@ -261,6 +284,7 @@ namespace CMCP {
             Invalidate(true);updateView.Apply(colors);
         }
         void ApplyControl(Control control){
+            var input=control as EditorInput;if(input!=null){input.Apply(colors);return;}
             var b=control as ModernButton;var track=control as RoundedSheet;var toggle=control as ToggleSwitch;var field=control as DropdownField;var actions=control as ToolRowActions;
             if(actions!=null){actions.BackColor=colors.Surface;foreach(Control child in actions.Controls)ApplyControl(child);}
             if(b!=null){b.Colors=colors;b.BackColor=colors.Surface;b.Invalidate();}

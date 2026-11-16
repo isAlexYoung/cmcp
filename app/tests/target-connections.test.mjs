@@ -20,6 +20,16 @@ async function until(check, timeout=10000) {
 }
 function board() { return {data:new Map(), set(name,state,message,revision) { this.data.set(name,{state,message,revision}); }}; }
 function controls(...names) { return new Map(names.map(name=>[name,{name,enabled:true,revision:name+'-1'}])); }
+
+test('proxy changes reconnect enabled web targets while preserving SSH tunnels and disabled targets',async t=>{
+  let network='auto';const starts=[],stops=[];
+  const targets=[{name:'web',url:'https://web.test'},{name:'tunnel',url:'http://127.0.0.1:1',tunnel:{id:'ssh'}},{name:'off',url:'https://off.test'}];
+  const c=createTargetConnections({readTargets:()=>targets,readControls:()=>controls('web','tunnel'),readNetworkRevision:()=>network,status:board(),interval:10,
+    create:async target=>{starts.push(target.name);return {stop:()=>stops.push(target.name)};}});
+  t.after(()=>c.close());await until(()=>starts.length===2);
+  network='manual:127.0.0.1:7897';c.tick();await until(()=>starts.length===3);
+  assert.deepEqual(stops,['web']);assert.equal(starts.filter(n=>n==='tunnel').length,1);assert.equal(starts.includes('off'),false);
+});
 async function desktop(t) {
   const state={pong:true,session:'',logins:0,upgrades:0,sockets:[],requests:0,setups:0};
   const server=http.createServer(async(req,res)=>{

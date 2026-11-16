@@ -28,11 +28,13 @@ import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
 import {marketView,installPreset,updatePreset} from '../app/mcp-market.mjs';
 import {startToolHost} from '../app/tool-host.mjs';
 import {spawn} from 'node:child_process';
+import {proxyKey} from './ui/network-settings.js';
 
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),'ui');
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 export async function createManager({directory=STATE,secrets=keychain,proxy=proxyFor,dispatcher:injected,detectShared,install,installation=currentInstallation(directory),removeCloud,version=VERSION,platform=process.platform,arch=process.arch,launchTerminal=openTerminal,terminals=detectTerminals,channelState=sshWorkerState,stopChannel=stopSshWorker,browsers=detectBrowsers,openBrowserPage=openPage,closeBrowserPages=closePages,closeTerminals=closeSessions,checkUpdate=checkRelease,prepareUpdate=downloadUpdate,startChannel,setupCloudcli=runSetup,toolSecrets}={}){
   const store=new ManagerState(directory,secrets),token=randomBytes(32).toString('hex'),states={};
+  const networkProxy=url=>proxy(url,{preferences:store.preferences,directory});
   const dispatcher=injected||await createDispatcher({roots:store.config.roots,stateDir:directory});
   // SSH channel workers use this process's third-party tools instead of starting their own copies.
   const toolHost=dispatcher.registry?await startToolHost({stateDir:directory,registry:dispatcher.registry}).catch(()=>null):null;
@@ -40,8 +42,8 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   let machine;try{machine=fs.readFileSync(machineFile,'utf8').trim();if(!/^[a-f0-9-]{36}$/.test(machine))throw Error();}catch{machine=randomUUID();atomicWrite(machineFile,machine);}
   const status={set(name,state,message){if(state==='password')message='保存的密码不正确或不可用。请停止此连接后编辑密码。';states[name]={state,message,at:new Date().toISOString(),clients:states[name]?.clients};},clients(name,value){if(states[name])states[name].clients=value;}};
   const log=text=>{try{const file=path.join(directory,'service.log');safeFile(file);if(fs.existsSync(file)&&fs.statSync(file).size>2*1024*1024){safeFile(file+'.1');fs.renameSync(file,file+'.1');}const name=/^\[([a-f0-9-]{36})\] ([a-z-]+)/.exec(text),close=/\bclose=(\d{1,4})\b/.exec(text);const recovery=/\] ((?:web (?:document|api|asset) (?:(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) attempt=[1-5] code=(?:ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|HTTP_50[234]) tls=(?:true|false)|recovered attempts=[2-5]|cache hit|failed code=NON_TRANSIENT))|heartbeat (?:delayed; retaining connection|recovered without reconnect))$/.exec(text);fs.appendFileSync(file,new Date().toISOString()+' '+(name?name[1]+' '+(recovery?recovery[1]:name[2]):'transport event')+(close?' close='+close[1]:'')+'\n',{mode:0o600});}catch{}};
-  const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),status,
-    create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:webTunnelEnvironment(login,directory)});},proxyFor:proxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,catalog:dispatcher.registry,
+  const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),readNetworkRevision:()=>proxyKey(store.preferences),status,
+    create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:webTunnelEnvironment(login,directory)});},proxyFor:networkProxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,catalog:dispatcher.registry,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),onCloudcliKind:(id,kind)=>recordCloudcliKind(directory,id,kind),
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   // The device's background SSH channel, as a terminal would start it, but with no window.
@@ -68,7 +70,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const snapshot=()=>({...devices(),version,platform:'macos-'+arch,updates,terminals:terminals().map(({id,label})=>({id,label})),browsers:browsers().map(({id,label})=>({id,label}))});
   const json=(res,status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(value));};
   const readBody=async req=>{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>1024*1024)throw Error('请求过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');};
-  const protocol=detectShared|| (async url=>{const agent=agentFor(url,await proxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
+  const protocol=detectShared|| (async url=>{const agent=agentFor(url,await networkProxy(url));try{return await requiresSharedSession(url,agent);}finally{agent?.destroy();}});
   const connectionName=id=>store.connectionName(id);
   const browserPreferences=id=>store.loginMode(id)==='cloudcli'?{...store.preferences,browser:store.preferences.cloudcliBrowser||'',closeWeb:store.preferences.closeCloudcli===true}:store.preferences;
   async function entry(id){const name=connectionName(id);if(!store.linkTargets().some(t=>t.name===name))throw Error(store.route(id)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':store.loginMode(id)==='cloudcli'?'还没有填写 CloudCLI 地址，请编辑设备后再连接。':'还没有填写网页桌面地址，请编辑设备后再连接。');for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===name);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(name)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
@@ -77,7 +79,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     const record=connections.values().find(t=>t.name===target.id);
     if(record?.auth)return new Cloud(record.url,record.auth,record.agent).uninstall();
     if(target.authMode==='cloudcli')throw Error('CloudCLI must be connected to remove its cloud configuration');
-    const cloud=await Cloud.connect(target.url,await store.password(target.id),await proxy(target.url));
+    const cloud=await Cloud.connect(target.url,await store.password(target.id),await networkProxy(target.url));
     try{await cloud.uninstall();}finally{cloud.close();}
   });
   async function uninstallApplication(appPid){
@@ -132,14 +134,14 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     '/api/update/check':async()=>{
       if(updating)return updates;if(checking)return checking;
       checking=(async()=>{try{
-        const release=await checkUpdate(version,arch,await proxy('https://api.github.com'));
+        const release=await checkUpdate(version,arch,await networkProxy('https://api.github.com'));
         if(release&&preparedUpdate?.version===release.version)updates={state:'ready',phase:'ready',version:release.version,received:1,total:1};
         else{preparedUpdate=null;updates={state:release?'available':'latest',version:release?.version||null};}
       }catch{updates=checkFailed(updates);}return updates;})();
       try{return await checking;}finally{checking=null;}
     },
     '/api/update/download':async()=>{if(updating||checking)throw Error('更新正在进行');updating=true;try{
-      preparedUpdate=await prepareUpdate({current:version,arch,proxy:await proxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}});
+      preparedUpdate=await prepareUpdate({current:version,arch,proxy:await networkProxy('https://api.github.com'),directory,onProgress:value=>{updates={state:'updating',version:updates.version,...value};}});
       updates={state:'ready',phase:'ready',version:preparedUpdate.version,received:1,total:1};return {directory:preparedUpdate};
     }catch(error){updates={state:'failed',version:updates.version,code:error.code||'prepare',phase:error.phase||'release'};throw error;}finally{updating=false;}},
     '/api/update/prepared':async()=>{if(updating||checking||updates.state!=='ready'||!preparedUpdate)throw Error('请先下载并校验更新');return {directory:preparedUpdate};},

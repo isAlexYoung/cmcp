@@ -9,7 +9,7 @@ function Test-ManagerBackend {
     try {
         $age = [Math]::Abs(([DateTime]::UtcNow - [DateTime]::Parse([string]$status.at).ToUniversalTime()).TotalSeconds)
         if ($age -gt 30) { return $false }
-        $process = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + [int]$status.pid) -ErrorAction Stop
+        $process = @(Get-ServiceProcesses | Where-Object { $_.ProcessId -eq [int]$status.pid }) | Select-Object -First 1
         $expected = [IO.Path]::GetFullPath((Join-Path $KitDir 'server.mjs'))
         if (!$process -or $process.Name -ine 'node.exe' -or !([string]$process.CommandLine).Contains('"' + $expected + '"')) { return $false }
         # A process predating installed backend code must load that code once.

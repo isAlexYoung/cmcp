@@ -1,11 +1,19 @@
 import {markChosen,MENU_MS,menuKey,menuPlace,pageDirection,revealGuard,turn} from '/ui/motion.js';
 import {updateRing,updateSchedule,updateView} from '/ui/update-state.js';
 import {createSwitchSaver} from '/ui/tool-saver.js';
+import {proxySettings} from '/ui/network-settings.js';
+let proxyDraft;
 const root=document.querySelector('#app'),notice=document.querySelector('#notice'),reveal=revealGuard();
 let token=location.hash.slice(1),data={targets:[],preferences:{language:'zh-CN',theme:'system',closeAction:'tray',autoStart:false}},page='home',selected='',expanded=new Set(),busy=new Set(),editor=null,dragId=null,noticeTimer,nativeSequence=0,homeScroll=0,renderedView='';
 history.replaceState(null,'',location.pathname);
 let ringState={};
 const english={
+  '网络代理':'Network proxy','代理模式':'Proxy mode','自动（系统 / 环境变量）':'Automatic (system / environment)','手动 HTTP 代理':'Manual HTTP proxy','直接连接':'Direct connection','代理地址':'Proxy host','代理端口':'Proxy port','应用代理':'Apply proxy','保存代理':'Save proxy',
+  '手动模式连接失败时会报错，不会回退直连。':'Manual proxy failures are reported; connections never fall back to direct.',
+  '只填写主机名或 IP，不含 http://。支持 HTTP 代理和 Clash 混合端口。':'Enter a hostname or IP without http://. HTTP proxies and Clash mixed ports are supported.',
+  '填写代理软件的监听端口（1–65535）。':'Enter the proxy listener port (1–65535).',
+  '用于云电脑 HTTP/WebSocket 连接及更新下载。保存后自动重连网页设备；SSH 和外部浏览器使用各自的网络设置。':'Applies to cloud HTTP/WebSocket connections and updates. Saving reconnects web devices; SSH and external browsers use their own network settings.',
+  '请填写有效的代理主机和 1–65535 的端口。':'Enter a valid proxy host and a port from 1 to 65535.',
   'SSH 主机指纹自动恢复失败，请检查服务器及本机 known_hosts 文件权限。':'Automatic SSH host key recovery failed. Check the server and local known_hosts file permissions.',
   '正在恢复':'Recovering',
   '未运行':'Not running','正在重连':'Reconnecting','已断开':'Disconnected','设备':'Devices','添加设备':'Add device','编辑设备':'Edit device','设置':'Settings','通用':'General','关于':'About','返回':'Back','正在恢复':'Recovering','已连接':'Connected','已停止':'Stopped','连接中':'Connecting','连接异常':'Connection error','等待网页登录':'Waiting for browser sign-in','连接已被接管':'Connection replaced','成功连接':'Connected','未连接':'Connect','停止连接':'Disconnect','打开云电脑':'Open desktop','查看日志':'View logs','复制地址':'Copy address','编辑':'Edit','删除':'Delete','展开详情':'Expand details','收起详情':'Collapse details','连接状态':'Connection status','登录方式':'Sign-in method','网页桌面登录':'Web desktop sign-in','网页桌面自动登录':'Automatic browser sign-in','自动识别 / 旧版':'Legacy sign-in','名称 / 备注':'Name / note','网页地址':'Web address','密码':'Password','选择图片':'Choose image','恢复默认':'Reset icon','保存':'Save','添加':'Add','取消':'Cancel','记住密码并自动登录':'Remember password and sign in automatically','密码已保存在钥匙串，同一地址留空保留。':'Password is in Keychain. Leave blank to keep it for the same address.','未勾选时使用网页桌面手动登录；保存时不会提交共享密码。':'Unchecked uses manual browser sign-in. Saving never submits the shared password.','界面语言':'Language','浅色':'Light','深色':'Dark','跟随系统':'System','开机自启':'Start at login','桌面快捷方式':'Desktop shortcut','检查更新':'Check for updates','已是最新版':'Already up to date','更新':'Updates','程序文件夹':'Application folder','日志文件夹':'Log folder','暂无设备，点击右上角添加。':'No devices yet. Add one using the button above.','每台设备独立控制':'Each connection is controlled independently','已复制':'Copied','设置已保存':'Settings saved','请选择 PNG、JPEG 或 ICO 图片。':'Choose a PNG, JPEG or ICO image.','图标过大，请选择较小的图片。':'Icon is too large. Choose a smaller image.','确定删除此连接？':'Delete this connection?','输入新密码':'Enter a new password','启动连接后，进度会显示在这里。':'Connection progress appears here after starting.','正在等待连接恢复。':'Waiting for the connection to recover.','请在打开的网页桌面中完成登录。':'Complete sign-in in the shared browser page.','已连接，可以使用本机工具。':'Connected. Local tools are ready.','已停止连接。':'Connection is stopped.','操作未完成，请检查连接状态后重试。':'Action failed. Check the connection state and try again.','正在配置 Claude':'Configuring Claude','需要更新密码':'Password needs updating','显示密码':'Show password','排序':'Reorder','运行环境':'Platform','本次更新已下载并校验，正在重启程序。':'Update downloaded and verified. Restarting the app.','卸载':'Uninstall','卸载 CMCP':'Uninstall CMCP','卸载 CMCP？这会断开全部连接，尽量移除云电脑上的 Claude 配置，并删除本机的程序、设置和保存的密码。':'Uninstall CMCP? This disconnects everything, removes the Claude configuration from cloud PCs where it can, and deletes the app, its settings and saved passwords from this Mac.'
@@ -205,6 +213,17 @@ function settingsColumn(){const column=el('div','settings-column');updateUI=null
     section('窗口',row('开机自启','登录 Mac 后在菜单栏运行，不打开窗口；可以从菜单栏图标打开主界面。',toggle('autoStart',data.preferences.autoStart,on=>saveSettings({autoStart:on}))),row('关闭时最小化到菜单栏','开启时窗口隐藏到菜单栏，已连接的设备保持连接；关闭后，关闭窗口会退出并断开全部连接。',toggle('closeAction',data.preferences.closeAction==='tray',on=>saveSettings({closeAction:on?'tray':'exit'}))));
     section('快捷方式',row('桌面快捷方式','在桌面创建 CMCP 的替身。',button('创建',async()=>{await native('shortcut');toast('快捷方式已创建。');},{classes:'soft',title:'桌面快捷方式'})));
   }else if(page==='connect'){
+    proxyDraft??={...proxySettings(data.preferences)};
+    const host=el('input','proxy-host'),port=el('input','proxy-port');host.value=proxyDraft.proxyHost;host.maxLength=253;host.placeholder='127.0.0.1';port.value=proxyDraft.proxyPort;port.type='number';port.min='1';port.max='65535';port.step='1';
+    host.dataset.focusKey='proxy:host';port.dataset.focusKey='proxy:port';host.setAttribute('aria-label',t('代理地址'));port.setAttribute('aria-label',t('代理端口'));
+    host.addEventListener('input',()=>{proxyDraft.proxyHost=host.value;});port.addEventListener('input',()=>{proxyDraft.proxyPort=port.value;});
+    const enable=()=>{host.disabled=port.disabled=proxyDraft.proxyMode!=='manual';};enable();
+    const mode=dropdown('代理模式',[['auto',t('自动（系统 / 环境变量）')],['manual',t('手动 HTTP 代理')],['direct',t('直接连接')]],proxyDraft.proxyMode,async value=>{proxyDraft.proxyMode=value;enable();});mode.classList.add('wide');mode.dataset.proxyMode='true';
+    const save=button('保存代理',async()=>{
+      const value=proxySettings(proxyDraft.proxyMode==='manual'?{proxyMode:'manual',proxyHost:host.value.trim(),proxyPort:Number(port.value)}:{...proxySettings(data.preferences),proxyMode:proxyDraft.proxyMode});
+      save.disabled=true;try{await saveSettings(value);proxyDraft={...value};host.value=value.proxyHost;port.value=value.proxyPort;}finally{save.disabled=false;}
+    },{classes:'soft'});save.dataset.focusKey='proxy:save';
+    section('网络代理',row('代理模式','手动模式连接失败时会报错，不会回退直连。',mode),row('代理地址','只填写主机名或 IP，不含 http://。支持 HTTP 代理和 Clash 混合端口。',host),row('代理端口','填写代理软件的监听端口（1–65535）。',port),row('应用代理','用于云电脑 HTTP/WebSocket 连接及更新下载。保存后自动重连网页设备；SSH 和外部浏览器使用各自的网络设置。',save));
     // A page CMCP may close opens with a profile of its own; Safari and the system default cannot.
     {
     const browsers=data.browsers||[],chosen=browsers.find(item=>item.id===data.preferences.browser),closable=['chrome','edge','firefox'].includes(chosen?.id);

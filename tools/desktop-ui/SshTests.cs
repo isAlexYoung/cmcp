@@ -324,7 +324,7 @@ namespace CMCP {
                 form.TrayAction(only.Target.Name,"connect");Pump();check(only.Target.State=="stopped","connecting from the tray only opens a terminal for an SSH-only device");
                 only.Delete.PerformClick();Pump();check(!form.Cards.ContainsKey(only.Target.Name)&&form.Ssh.Get(only.Target.Name)==null,"deleting an SSH-only device removes its details");
                 form.OpenSettings();Pump();form.Settings.ShowConnect();Pump();
-                var fields=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().ToArray();
+                var fields=form.Settings.Viewport.Controls[0].Controls.OfType<DropdownField>().Where(f=>f.AccessibleName!=L.Text("代理模式")).ToArray();
                 check(fields.Length==3&&fields[0].Value==""&&fields[1].Value==""&&fields[2].Value==Terminals.Resolve("",Terminals.Detect()).Id,"the connection page shows the browser and terminal dropdowns");
                 fields[2].Choose("cmd");Pump();check(form.Options.terminal=="cmd"&&fields[2].Value=="cmd","the chosen terminal is kept");
                 var switches=form.Settings.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().ToArray();

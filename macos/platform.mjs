@@ -4,8 +4,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {proxySettings,proxyAddress} from './ui/network-settings.js';
 
-export const VERSION = '4.23.1';
+export const VERSION = '4.23.2';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'CMCP');
 const requestedState = process.env.CMCP_STATE_DIR || DEFAULT_STATE;
@@ -99,13 +100,21 @@ export function parseScutil(text) {
   if (values.ProxyAutoConfigEnable === '1' || values.SOCKSEnable === '1' || values.ProxyAutoDiscoveryEnable === '1') throw new Error('请为本程序配置 HTTPS_PROXY 的 HTTP CONNECT 代理；暂不支持 PAC/WPAD/SOCKS');
   return '';
 }
-export async function proxyFor() {
-  const value = process.env.CLAUDE_MCP_PROXY ?? process.env.HTTPS_PROXY ?? process.env.https_proxy;
+export async function proxyFor(_url,{preferences,directory=STATE,env=process.env,runner=runFile}={}) {
+  if(preferences===undefined){
+    const file=path.join(directory,'application-preferences.json');safeFile(file);
+    try{if(fs.statSync(file).size>32768)throw Error('Invalid proxy preferences');preferences=JSON.parse(fs.readFileSync(file,'utf8'));if(preferences.schema!==1)throw Error('Invalid proxy preferences');}
+    catch(error){if(error.code==='ENOENT')preferences={};else throw Object.assign(Error('无法读取代理设置，请在设置 → 连接中检查；不会回退直连。'),{code:'CMCP_PROXY_SETTINGS'});}
+  }
+  const settings=proxySettings(preferences);
+  if(settings.proxyMode==='direct')return '';
+  if(settings.proxyMode==='manual')return proxyAddress(settings);
+  const value = env.CLAUDE_MCP_PROXY ?? env.HTTPS_PROXY ?? env.https_proxy ?? env.HTTP_PROXY ?? env.http_proxy ?? env.ALL_PROXY ?? env.all_proxy;
   if (value !== undefined) {
     if (!value) return '';
     const u = new URL(value);
     if (!['http:','https:'].includes(u.protocol) || u.pathname !== '/' || u.search || u.hash) throw new Error('仅支持 HTTP/HTTPS CONNECT 代理');
     return u.href;
   }
-  return parseScutil(await runFile('/usr/sbin/scutil', ['--proxy']));
+  return parseScutil(await runner('/usr/sbin/scutil', ['--proxy']));
 }

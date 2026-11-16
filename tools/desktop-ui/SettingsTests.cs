@@ -13,6 +13,7 @@ namespace CMCP {
         static ModernButton Option(Control sheet,string text){return sheet.Controls.OfType<RoundedSheet>().SelectMany(group=>group.Controls.OfType<ModernButton>()).Single(b=>b.Text==text);}
         static void NativeWheel(Control target,int delta){var point=target.PointToScreen(new Point(10,10));SendMessage(target.Handle,0x20a,new IntPtr(delta<<16),new IntPtr((point.Y<<16)|(point.X&0xffff)));Application.DoEvents();}
         internal static void Run(string directory,Action<bool,string> check){
+            NetworkTests(directory,check);
             ToggleScrollTests(check);
             string state=Path.Combine(directory,"settings-test");Directory.CreateDirectory(state);
             var options=AppSettings.Load(state);check(!options.autoStart&&options.closeToTray&&options.language=="zh-CN","fresh settings use Chinese and default to hiding in tray");
@@ -92,6 +93,28 @@ namespace CMCP {
                 uninstallForm.RunUninstall=()=>{runs++;return 0;};click();wait(()=>uninstallForm.IsDisposed);check(runs==2&&stops==0&&uninstallForm.IsDisposed,"a finished uninstall closes the manager without running the exit backend again");
             }
             L.Set("zh-CN");check(!File.Exists(Path.Combine(state,"cloudpc-targets.json"))&&!File.Exists(Path.Combine(state,"config.json")),"settings tests never create target or credential state");
+        }
+        static void NetworkTests(string directory,Action<bool,string> check){
+            string state=Path.Combine(directory,"network-settings");Directory.CreateDirectory(state);
+            var saved=new AppSettings();check(AppSettings.Load(state).proxyMode=="auto","legacy and new settings default to automatic proxy discovery");
+            saved.proxyMode="manual";saved.proxyHost="::1";saved.proxyPort=7897;saved.Save(state);var loaded=AppSettings.Load(state);
+            check(!loaded.ReadError&&loaded.proxyMode=="manual"&&loaded.proxyHost=="::1"&&loaded.proxyPort==7897&&loaded.Copy().proxyPort==7897,"manual proxy and IPv6 persist across settings copies and reloads");
+            string original=File.ReadAllText(AppSettings.PathFor(state));saved.proxyPort=65536;bool rejected=false;try{saved.Save(state);}catch{rejected=true;}
+            check(rejected&&File.ReadAllText(AppSettings.PathFor(state))==original,"invalid proxy ports cannot overwrite saved preferences");
+            check(!AppSettings.ValidProxyHost("http://127.0.0.1")&&!AppSettings.ValidProxyHost("user@host")&&!AppSettings.ValidProxyHost("host\r\nInjected"),"proxy host rejects URLs, credentials and control characters");
+            using(var form=new Form{ClientSize=new Size(760,600)}){
+                int changes=0;AppSettings result=null;
+                var page=new SettingsPage(new AppSettings(),Palette.Create(false),next=>{changes++;result=next;},delegate{});form.Controls.Add(page);form.Show();page.ShowConnect();Application.DoEvents();
+                var sheet=page.Viewport.Controls[0];var mode=sheet.Controls.OfType<DropdownField>().Single(f=>f.AccessibleName=="代理模式");
+                var host=sheet.Controls.OfType<EditorInput>().Single(f=>f.Box.AccessibleName=="代理地址");var port=sheet.Controls.OfType<EditorInput>().Single(f=>f.Box.AccessibleName=="代理端口");
+                var save=sheet.Controls.OfType<ModernButton>().Single(b=>b.Text=="保存代理");
+                check(!host.Enabled&&!port.Enabled,"automatic proxy mode disables manual address inputs");
+                mode.Choose("manual");check(host.Enabled&&port.Enabled&&changes==0,"choosing manual mode allows drafting without starting a connection");
+                host.Box.Text="127.0.0.1";port.Box.Text="0";save.AccessibilityObject.DoDefaultAction();check(changes==0,"invalid proxy form values are rejected before saving");
+                port.Box.Text="7897";save.AccessibilityObject.DoDefaultAction();check(changes==1&&result.proxyMode=="manual"&&result.proxyPort==7897,"explicit Save applies the complete proxy draft once");
+                mode.Choose("direct");save.AccessibilityObject.DoDefaultAction();check(changes==2&&result.proxyMode=="direct"&&!host.Enabled,"direct mode is an explicit saved choice");
+                foreach(int width in new[]{660,1100}){form.ClientSize=new Size(width,600);Application.DoEvents();check(host.Right<=sheet.ClientSize.Width&&port.Right<=sheet.ClientSize.Width&&!page.Viewport.NativeBarsVisible,"proxy form fits the settings viewport at "+width);}
+            }
         }
         static void ToggleScrollTests(Action<bool,string> check){
             foreach(bool dark in new[]{false,true})using(var form=new Manager(true)){

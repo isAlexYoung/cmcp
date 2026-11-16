@@ -341,22 +341,25 @@ namespace CMCP {
 
     internal sealed class FakeToolBackend : IToolBackend {
         internal readonly ToolSnapshot State=new ToolSnapshot{Root=Path.Combine(Path.GetTempPath(),"cmcp-fake-mcp-tools")};
-        internal readonly List<string> Calls=new List<string>();
+        // UI checks read while fake backend callbacks append on a worker thread.
+        readonly System.Collections.Concurrent.ConcurrentQueue<string> calls=new System.Collections.Concurrent.ConcurrentQueue<string>();
+        internal string[] Calls { get { return calls.ToArray(); } }
+        void Record(string call){calls.Enqueue(call);}
         internal FakeToolBackend(){foreach(var g in new[]{"files","commands","processes","toolchains","desktop"})State.Groups[g]=true;State.Groups["blender"]=false;}
         internal readonly Dictionary<string,Dictionary<string,bool>> GroupOverrides=new Dictionary<string,Dictionary<string,bool>>(),ToolOverrides=new Dictionary<string,Dictionary<string,bool>>();
         // A new copy each time, as the command line returns; a device sees its overrides.
-        public ToolSnapshot Status(string device){Calls.Add("status"+(device==null?"":"@"+device));lock(State){
+        public ToolSnapshot Status(string device){Record("status"+(device==null?"":"@"+device));lock(State){
             var copy=new ToolSnapshot{Root=State.Root,Blender=State.Blender,BlenderOfferDone=State.BlenderOfferDone,IdleMinutes=State.IdleMinutes,Device=device};
             Dictionary<string,bool> groups=null,tools=null;if(device!=null){GroupOverrides.TryGetValue(device,out groups);ToolOverrides.TryGetValue(device,out tools);}
             foreach(var g in State.Groups){bool own;bool has=groups!=null&&groups.TryGetValue(g.Key,out own);copy.GlobalGroups[g.Key]=g.Value;copy.Groups[g.Key]=has?groups[g.Key]:g.Value;if(has)copy.OverriddenGroups.Add(g.Key);}
             foreach(var t in State.Tools){bool has=tools!=null&&tools.ContainsKey(t.Id);
                 copy.Tools.Add(new ToolInfo{Id=t.Id,Name=t.Name,Description=t.Description,Version=t.Version,Log=t.Log,DescribeZh=t.DescribeZh,DescribeEn=t.DescribeEn,Enabled=has?tools[t.Id]:t.Enabled,Global=t.Enabled,Overridden=has,Approved=t.Approved,Errors=t.Errors,Warnings=t.Warnings,MissingSecrets=t.MissingSecrets,Tools=t.Tools,Remote=t.Remote,SignIn=t.SignIn,SignedIn=t.SignedIn,SignInNeeded=t.SignInNeeded});}
             return copy;}}
-        public void SetGroup(string group,bool on){Calls.Add("group "+group+" "+on);State.Groups[group]=on;}
-        public void SetTool(string id,bool on){Calls.Add("tool "+id+" "+on);var t=State.Tools.First(x=>x.Id==id);t.Enabled=on;if(on)t.Approved=true;}
+        public void SetGroup(string group,bool on){Record("group "+group+" "+on);State.Groups[group]=on;}
+        public void SetTool(string id,bool on){Record("tool "+id+" "+on);var t=State.Tools.First(x=>x.Id==id);t.Enabled=on;if(on)t.Approved=true;}
         internal int Delay;
         public void Apply(IDictionary<string,bool?> groups,IDictionary<string,bool?> tools,string device){
-            Calls.Add("apply"+(device==null?"":"@"+device)+" "+String.Join(",",groups.Select(p=>p.Key+"="+(p.Value.HasValue?p.Value.ToString():"null")).Concat(tools.Select(p=>p.Key+"="+(p.Value.HasValue?p.Value.ToString():"null")))));
+            Record("apply"+(device==null?"":"@"+device)+" "+String.Join(",",groups.Select(p=>p.Key+"="+(p.Value.HasValue?p.Value.ToString():"null")).Concat(tools.Select(p=>p.Key+"="+(p.Value.HasValue?p.Value.ToString():"null")))));
             if(Delay>0)Thread.Sleep(Delay);
             lock(State){
                 if(device==null){foreach(var p in groups)State.Groups[p.Key]=p.Value.Value;foreach(var p in tools){var t=State.Tools.First(x=>x.Id==p.Key);t.Enabled=p.Value.Value;if(p.Value.Value)t.Approved=true;}return;}
@@ -365,13 +368,13 @@ namespace CMCP {
                 foreach(var p in tools){if(p.Value.HasValue){ToolOverrides[device][p.Key]=p.Value.Value;if(p.Value.Value)State.Tools.First(x=>x.Id==p.Key).Approved=true;}else ToolOverrides[device].Remove(p.Key);}
             }
         }
-        public void SetIdle(int minutes){Calls.Add("idle "+minutes);State.IdleMinutes=minutes;}
-        public void SetExposure(string exposure){Calls.Add("exposure "+exposure);State.Exposure=exposure;}
-        public void BlenderOfferDone(){Calls.Add("offer");State.BlenderOfferDone=true;}
-        public void Refresh(){Calls.Add("refresh");}
-        public string Import(string text,bool apply){Calls.Add("import "+apply);if(apply)lock(State)State.Tools.Add(new ToolInfo{Id="added",Name="Added",Description="new",DescribeZh="新",DescribeEn="new"});return "{\"items\":[{\"id\":\"blender_mcp\",\"describe\":{\"zh\":\"运行 uvx\",\"en\":\"runs uvx\"},\"errors\":[],\"warnings\":[]}]}";}
-        public void Remove(string id){Calls.Add("remove "+id);State.Tools.RemoveAll(t=>t.Id==id);}
-        public void SignIn(string id){Calls.Add("login "+id);lock(State){var t=State.Tools.First(x=>x.Id==id);t.SignedIn=true;t.SignInNeeded=false;}}
+        public void SetIdle(int minutes){Record("idle "+minutes);State.IdleMinutes=minutes;}
+        public void SetExposure(string exposure){Record("exposure "+exposure);State.Exposure=exposure;}
+        public void BlenderOfferDone(){Record("offer");State.BlenderOfferDone=true;}
+        public void Refresh(){Record("refresh");}
+        public string Import(string text,bool apply){Record("import "+apply);if(apply)lock(State)State.Tools.Add(new ToolInfo{Id="added",Name="Added",Description="new",DescribeZh="新",DescribeEn="new"});return "{\"items\":[{\"id\":\"blender_mcp\",\"describe\":{\"zh\":\"运行 uvx\",\"en\":\"runs uvx\"},\"errors\":[],\"warnings\":[]}]}";}
+        public void Remove(string id){Record("remove "+id);State.Tools.RemoveAll(t=>t.Id==id);}
+        public void SignIn(string id){Record("login "+id);lock(State){var t=State.Tools.First(x=>x.Id==id);t.SignedIn=true;t.SignInNeeded=false;}}
     }
     internal static class ToolsPageTests {
         static void Pump(Func<bool> done){var clock=Stopwatch.StartNew();while(!done()&&clock.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(5);}}
