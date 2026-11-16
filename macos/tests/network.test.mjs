@@ -40,6 +40,7 @@ test('settings API supplies the saved proxy to updates and rejects bad input wit
   const directory=folder(t),seen=[];
   const manager=await createManager({directory,secrets:async()=>{},dispatcher:{forward:async()=>null,close:async()=>{}},checkUpdate:async(version,arch,proxy)=>{seen.push(proxy);return null;}});
   t.after(()=>manager.close());
+  const module=await fetch(manager.origin+'/ui/network-settings.js');assert.equal(module.status,200);assert.match(module.headers.get('content-type'),/javascript/);assert.match(await module.text(),/export function proxySettings/);
   const call=async(route,value={})=>{const response=await fetch(manager.origin+'/api/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':manager.token},body:JSON.stringify(value)});return {status:response.status,data:await response.json()};};
   assert.equal((await call('settings',{proxyMode:'manual',proxyHost:'127.0.0.1',proxyPort:7897})).status,200);
   await call('update/check');assert.equal(seen.at(-1),'http://127.0.0.1:7897');

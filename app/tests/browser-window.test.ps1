@@ -50,6 +50,7 @@ try{
     $source+="`r`nfunction Close-CloudPageWindow { param([string]`$name) [IO.File]::WriteAllText((Join-Path `$script:StateDir 'cleanup-pid'),[string]`$PID); Start-Sleep -Seconds 60; return 0 }`r`n"
     [IO.File]::WriteAllText((Join-Path $fixture 'common.ps1'),$source,[Text.UTF8Encoding]::new($true))
     Copy-Item -LiteralPath (Join-Path $app 'target-controls.ps1') -Destination $fixture
+    Copy-Item -LiteralPath (Join-Path $app 'network-settings.ps1') -Destination $fixture
     $savedKit=$script:KitDir;$script:KitDir=$fixture
     $clock=[Diagnostics.Stopwatch]::StartNew();$timedOut=$false
     try { $null=Close-CloudPage "dev'ice" } catch [TimeoutException] { $timedOut=$true } finally { $script:KitDir=$savedKit }
