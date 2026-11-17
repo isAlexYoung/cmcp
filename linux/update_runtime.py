@@ -289,4 +289,3 @@ def apply(file, base=Path('/opt/cmcp'), launch=None, healthy=None, wait_seconds=
         if folder.is_dir() and not folder.is_symlink() and set(folder.iterdir()) == {archive} and archive.is_file() and not archive.is_symlink():
             archive.unlink()
             folder.rmdir()
-
