@@ -1,0 +1,47 @@
+name: Validate Ubuntu CMCP development client
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [codex/ubuntu-client]
+  pull_request:
+    paths: ['linux/**', 'app/**', 'macos/**', 'tools/package-linux.py', '.github/workflows/linux.yml']
+permissions:
+  contents: read
+jobs:
+  ubuntu-22:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/node-version.txt
+          cache: npm
+          cache-dependency-path: linux/package-lock.json
+      - name: Install GNOME application dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libsecret-tools gnome-keyring openssh-client xdg-utils gnome-terminal xvfb dbus-x11
+      - run: npm --prefix app ci --ignore-scripts
+      - run: npm --prefix macos ci --ignore-scripts
+      - run: npm --prefix linux ci --ignore-scripts
+      - name: Linux and shared protocol tests
+        run: node --test linux/tests/*.test.mjs macos/tests/*.test.mjs app/tests/ssh-mcp.test.mjs app/tests/mcp-tools.test.mjs app/tests/mcp-host.test.mjs app/tests/mcp-market.test.mjs
+      - name: Python connector and package tests
+        run: python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+      - name: Build verified Linux packages
+        run: python3 tools/package-linux.py --output build-results/linux --release --commit "$GITHUB_SHA"
+      - name: Install and exercise the real GTK host as a normal user
+        run: |
+          sudo apt-get install -y ./build-results/linux/CMCP-*-linux-x64.deb
+          dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_smoke.py
+          dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_update_smoke.py build-results/linux/CMCP-*-linux-x64.zip
+      - name: Retain Linux packages for the unified release
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmcp-linux-x64-${{ github.sha }}
+          path: |
+            build-results/linux/*.deb
+            build-results/linux/*.zip
+            build-results/linux/*.sha256

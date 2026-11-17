@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CMCP
+Comment=Connect cloud assistants to this Ubuntu computer
+Exec=/usr/bin/cmcp
+Icon=cmcp
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true
+StartupWMClass=com.cmcp.Ubuntu

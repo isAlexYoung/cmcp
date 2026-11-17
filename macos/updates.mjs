@@ -39,10 +39,10 @@ export function receive(url,{proxy='',limit=2*1024*1024,onProgress=()=>{}}={},re
 // A network failure says nothing about a version already found, and its notice should stay.
 export function checkFailed(updates){return updates.state==='ready'?{...updates,checkError:true}:updates.version?{state:'available',version:updates.version,checkError:true}:{state:'error',version:null};}
 export async function checkRelease(current,arch,proxy='',fetch=receive){return selectRelease(JSON.parse((await fetch('https://api.github.com/repos/isAlexYoung/cmcp/releases/latest',{proxy})).toString('utf8')),current,arch);}
-export async function downloadUpdate({current,arch,proxy,directory,fetch=receive,onProgress=()=>{}}){
+export async function downloadUpdate({current,arch,proxy,directory,fetch=receive,onProgress=()=>{},releaseFor=checkRelease}){
   let stage='release';const progress=(next,received=0,total=0)=>{stage=next;onProgress({phase:next,received,total});};
   try{
-  progress('release');const release=await checkRelease(current,arch,proxy,fetch);if(!release)throw Error('已是最新版');
+  progress('release');const release=await releaseFor(current,arch,proxy,fetch);if(!release)throw Error('已是最新版');
   progress('checksum');
   const sum=(await fetch(release.checksum.browser_download_url,{proxy,limit:1024})).toString('utf8').trim();
   const match=/^([a-f0-9]{64})\s+\*?([^\r\n]+)$/.exec(sum);if(!match||match[2]!==release.name)throw Error('更新校验文件无效');

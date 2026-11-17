@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {createLinuxTools, createLinuxBinaryTools} from '../tools.mjs';
+import {createDispatcher} from '../dispatcher.mjs';
+test('Linux binary uploads verify hash before publishing and reject paths outside roots', async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cmcp-linux-binary-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const binary = createLinuxBinaryTools({roots: [root]}); t.after(() => binary.close());
+  const bytes = Buffer.from('Linux binary\0中文'), file = path.join(root, 'out.bin'), sha256 = createHash('sha256').update(bytes).digest('hex');
+  const begin = (await binary.call('linux_binary_begin', {path: file, size: bytes.length, sha256})).structuredContent;
+  assert.equal(fs.existsSync(file), false);
+  await binary.call('linux_binary_write', {upload_id: begin.upload_id, offset: 0, data: bytes.toString('base64')});
+  await binary.call('linux_binary_finish', {upload_id: begin.upload_id});
+  assert.deepEqual(fs.readFileSync(file), bytes);
+  await assert.rejects(binary.call('linux_binary_info', {path: path.join(root, '..', 'not-allowed')}), /outside/);
+});
+test('dispatcher exposes Linux names and real filesystem tools, with remote/local instructions', async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cmcp-linux-dispatch-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.writeFileSync(path.join(root, 'fixture.txt'), 'local-file');
+  const dispatcher = await createDispatcher({roots: [root], stateDir: root, registryOptions: {watch: false}}); t.after(() => dispatcher.close());
+  const initialized = await dispatcher.forward({jsonrpc: '2.0', id: 1, method: 'initialize', params: {protocolVersion: '2025-11-25'}});
+  assert.match(initialized.result.instructions, /physical Linux PC/);
+  const names = dispatcher.definitions.map(item => item.name);
+  assert.ok(names.includes('linux_execute')); assert.ok(names.includes('read_file'));
+  assert.ok(!names.some(name => /^mac_|^windows_/.test(name)));
+  assert.ok(!names.includes('linux_screenshot'));
+  const response = await dispatcher.forward({jsonrpc: '2.0', id: 2, method: 'tools/call', params: {name: 'read_file', arguments: {path: path.join(root, 'fixture.txt')}}});
+  assert.match(JSON.stringify(response.result), /local-file/);
+});
+test('real Linux command and process supervisor run locally and clean up', {skip: process.platform !== 'linux'}, async t => {
+  const tools = createLinuxTools({roots: [os.homedir()]}); t.after(() => tools.close());
+  const command = await tools.call('linux_execute', {command: 'printf local-linux'});
+  assert.equal(command.structuredContent.output, 'local-linux');
+  const job = (await tools.call('linux_start_process', {program: process.execPath, args: ['-e', 'setTimeout(()=>{},30000)']})).structuredContent;
+  assert.equal(job.running, true);
+  await tools.call('linux_stop_process', {session_id: job.session_id});
+});

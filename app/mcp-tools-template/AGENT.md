@@ -57,7 +57,7 @@ The full JSON Schema is in `cmcp-tool.schema.json` next to this file.
 | `auth` | no | http/sse: `{"type": "oauth", "scope"?: "...", "clientId"?: "...", "callbackPort"?: 1024-65535}` for a browser sign-in (see section 4b). |
 | `capabilities` | yes | What the tool can do: any of `files`, `exec`, `python`, `network`, `gui`, `hardware`, `credentials`. State it honestly; the user sees it before turning the tool on. `[]` means none of these. |
 | `version`, `homepage`, `license` | no | Shown to the user. `homepage` must be https. |
-| `platforms` | no | `["win32", "darwin"]` (default: both). |
+| `platforms` | no | A subset of `["win32", "darwin", "linux"]`; omit for all supported platforms. |
 | `requires` | no | `[{"runtime": "uv"}, {"runtime": "app", "name": "Blender", "hint": "..."}]`, shown when something is missing. |
 | `instructions` | no | At most 300 characters, appended to every tool description. |
 | `lifecycle` | no | `on-demand` (default: stops after the idle time set in CMCP, 30 minutes unless changed) or `persistent`. |

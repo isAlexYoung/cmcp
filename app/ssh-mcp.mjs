@@ -9,6 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {TerminalLink} from './terminal-link.mjs';
 import {RequestRecovery} from './request-recovery.mjs';
 import {spawnSshWithRecovery,HOST_KEY_RECOVERY_ERROR} from './ssh-host-key.mjs';
+import {connectorSource as linuxConnectorSource} from './posix-connector.mjs';
 
 export const sshConnectorName = key => 'cmcp-ssh-'+createHash('sha256').update(key).digest('hex').slice(0,16);
 const quote = value => "'"+String(value).replace(/'/g,"'\\''")+"'";
@@ -44,7 +45,7 @@ export const remoteCommand=(bootstrap,runAs)=>'sh -c '+quote(runAs?runAsHandoff(
 export function bootstrapPayload(key, catalog,platform=process.platform) {
   return {name:sshConnectorName(key), catalog,
     relay:fs.readFileSync(new URL('./cloudpc-relay.py',import.meta.url),'utf8'),
-    connector:fs.readFileSync(new URL(platform==='darwin'?'../macos/cloudpc-connector.py':'./cloudpc-connector.py',import.meta.url),'utf8')};
+    connector:platform==='linux'?linuxConnectorSource():fs.readFileSync(new URL(platform==='darwin'?'../macos/cloudpc-connector.py':'./cloudpc-connector.py',import.meta.url),'utf8')};
 }
 
 export function sshExitCode(stderr) {

@@ -14,7 +14,7 @@ export const GROUPS=['files','commands','processes','toolchains','desktop','blen
 export const DEFAULT_GROUPS={files:true,commands:true,processes:true,toolchains:true,desktop:true,blender:false};
 export const DEFAULT_IDLE_MINUTES=30;
 export const ID=/^[a-z][a-z0-9_]{0,19}$/;
-export const RESERVED=new Set(['cmcp','windows','mac','files','binary','blender','system']);
+export const RESERVED=new Set(['cmcp','windows','mac','linux','files','binary','blender','system']);
 export const LOCAL_NAME_LIMIT=32;
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -30,7 +30,7 @@ const PLATFORM_GROUPS={
 };
 export function groupOf(name){
   if(/^blender_/.test(name))return 'blender';
-  const platform=/^(?:windows|mac)_(.+)$/.exec(name);
+  const platform=/^(?:windows|mac|linux)_(.+)$/.exec(name);
   if(!platform)return 'files';
   if(/^binary_/.test(platform[1])||/_(?:to|from)_cloud$/.test(platform[1]))return 'files';
   return PLATFORM_GROUPS[platform[1]]||'system';
@@ -160,7 +160,7 @@ export function parseManifest(text,{id,dir,platform=process.platform}={}){
   } else if(m.auth!==undefined)errors.push('auth is only for http and sse servers');
   if(m.cwd!==undefined&&!(str(m.cwd,1024)&&(!dir||inside(dir,path.resolve(dir,m.cwd)))))errors.push('cwd must stay inside the tool folder');
   checkValues(m.env,'env',errors,warnings,secrets);
-  if(m.platforms!==undefined&&(!Array.isArray(m.platforms)||!m.platforms.length||m.platforms.some(p=>!['win32','darwin'].includes(p))))errors.push('platforms must list win32 and/or darwin');
+  if(m.platforms!==undefined&&(!Array.isArray(m.platforms)||!m.platforms.length||m.platforms.some(p=>!['win32','darwin','linux'].includes(p))))errors.push('platforms must list win32, darwin and/or linux');
   if(m.requires!==undefined&&(!Array.isArray(m.requires)||m.requires.length>16||m.requires.some(r=>!r||typeof r!=='object'||!str(r.runtime,32)||(r.min!==undefined&&!str(r.min,32))||(r.name!==undefined&&!str(r.name,60))||(r.hint!==undefined&&!str(r.hint,512)))))errors.push('requires must be a list of {runtime, min?, name?, hint?}');
   if(!Array.isArray(m.capabilities)||m.capabilities.some(c=>!CAPABILITIES.includes(c)))errors.push('capabilities must list any of '+CAPABILITIES.join(', '));
   if(m.instructions!==undefined&&!str(m.instructions,300))errors.push('instructions must be at most 300 characters');
@@ -173,7 +173,7 @@ export function parseManifest(text,{id,dir,platform=process.platform}={}){
   }
   if(id!==undefined&&!ID.test(id))errors.push('folder name must match '+ID+' (lower-case letters, digits, _; at most 20)');
   else if(id!==undefined&&(RESERVED.has(id)||id.includes('__')))errors.push('folder name "'+id+'" is reserved');
-  if(m.platforms&&!m.platforms.includes(platform)&&['win32','darwin'].includes(platform))errors.push('not available on this computer ('+platform+')');
+  if(m.platforms&&!m.platforms.includes(platform)&&['win32','darwin','linux'].includes(platform))errors.push('not available on this computer ('+platform+')');
   return {manifest:errors.length?undefined:m,errors,warnings,secrets};
 }
 export function isRemote(m){try{return ['http','sse'].includes(m.transport)&&!LOOPBACK.has(new URL(m.url).hostname);}catch{return false;}}
@@ -353,6 +353,11 @@ export async function removeSecrets(stateDir,id,store){
   fs.rmSync(secretsFile(stateDir,id),{force:true});
 }
 export function defaultSecretStore(platform=process.platform){
+  if(platform==='linux')return {
+    protect:async(plain,previous)=>{const {keychain}=await import('../linux/platform.mjs');const id=/^secret-service:([a-f0-9-]{36})$/.exec(previous||'')?.[1]||randomUUID();await keychain('set',id,plain);return 'secret-service:'+id;},
+    unprotect:async stored=>{const {keychain}=await import('../linux/platform.mjs');const id=/^secret-service:([a-f0-9-]{36})$/.exec(stored)?.[1];if(!id)throw Error('Unknown secret format');return keychain('get',id);},
+    remove:async stored=>{const {keychain}=await import('../linux/platform.mjs');const id=/^secret-service:([a-f0-9-]{36})$/.exec(stored)?.[1];if(id)await keychain('delete',id);},
+  };
   if(platform==='win32')return {
     protect:async plain=>'dpapi:'+powershellDpapi('Protect',plain),
     unprotect:async stored=>{if(!stored.startsWith('dpapi:'))throw Error('Unknown secret format');return powershellDpapi('Unprotect',stored.slice(6));},

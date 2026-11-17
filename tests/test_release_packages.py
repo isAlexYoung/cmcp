@@ -21,8 +21,9 @@ class UnifiedReleaseTests(unittest.TestCase):
 
     def package(self, platform='macos-arm64', change=None):
         mac = platform.startswith('macos-')
-        prefix = 'CMCP.app/' if mac else 'CMCP-4.1.1-windows-x64/'
-        names = ['Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs'] if mac else ['CMCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json']
+        linux = platform == 'linux-x64'
+        prefix = 'CMCP/' if linux else 'CMCP.app/' if mac else 'CMCP-4.1.1-windows-x64/'
+        names = ['runtime/node', 'linux/desktop.py', 'linux/desktop.mjs', 'linux/launcher.py', 'linux/update_runtime.py', 'linux/apply_update.py'] if linux else ['Contents/Info.plist', 'Contents/MacOS/CMCP', 'Contents/Resources/runtime/node', 'Contents/Resources/macos/desktop.mjs'] if mac else ['CMCP.exe', 'app/runtime/node.exe', 'app/server.mjs', 'app/build-info.json']
         payload = {prefix + name: b'content' for name in names}
         files = [{'path': name, 'sha256': hashlib.sha256(b'content').hexdigest()} for name in names]
         manifest = {'schema': 1, 'version': '4.1.1', 'sourceCommit': COMMIT, 'platform': platform, 'files': files}
@@ -31,14 +32,14 @@ class UnifiedReleaseTests(unittest.TestCase):
             files[1] = {'path': names[1], 'codeSignature': True}
         if change:
             change(payload, manifest, prefix)
-        name = prefix + ('Contents/Resources/distribution-manifest.json' if mac else 'app/distribution-manifest.json')
+        name = prefix + ('distribution-manifest.json' if linux else 'Contents/Resources/distribution-manifest.json' if mac else 'app/distribution-manifest.json')
         payload[name] = json.dumps(manifest).encode()
         with zipfile.ZipFile(self.file, 'w') as archive:
             for name, data in payload.items():
                 archive.writestr(name, data)
 
     def test_all_three_platforms_accept_the_common_source(self):
-        for platform in ('windows-x64', 'macos-arm64', 'macos-x64'):
+        for platform in ('windows-x64', 'macos-arm64', 'macos-x64', 'linux-x64'):
             with self.subTest(platform=platform):
                 self.package(platform)
                 inspect_package(self.file, '4.1.1', COMMIT, platform)
@@ -70,11 +71,12 @@ class UnifiedReleaseTests(unittest.TestCase):
             inspect_package(self.file, '4.1.1', COMMIT, 'macos-arm64')
 
     def test_each_kind_of_release_holds_only_its_own_side(self):
-        self.assertEqual(planned('all'), (('windows-x64', 'macos-arm64', 'macos-x64'), ('windows-x64-setup.exe', 'macos-arm64.dmg', 'macos-x64.dmg'), True))
+        self.assertEqual(planned('all'), (('windows-x64', 'macos-arm64', 'macos-x64', 'linux-x64'), ('windows-x64-setup.exe', 'macos-arm64.dmg', 'macos-x64.dmg', 'linux-x64.deb'), True))
         self.assertEqual(planned('windows'), (('windows-x64',), ('windows-x64-setup.exe',), True))
         self.assertEqual(planned('macos'), (('macos-arm64', 'macos-x64'), ('macos-arm64.dmg', 'macos-x64.dmg'), False))
+        self.assertEqual(planned('linux'), (('linux-x64',), ('linux-x64.deb',), True))
         with self.assertRaises(ValueError):
-            planned('linux')
+            planned('unknown')
 
     def test_only_a_real_disk_image_is_accepted(self):
         self.file.write_bytes(b'x' * 4096 + b'koly' + b'\0' * 508)

@@ -53,7 +53,9 @@ class ConnectorTests(unittest.TestCase):
         target = self.root / 'claude.json'
         original = {'mcpServers': {'other': {'command': 'keep'}}, 'theme': 'dark'}
         target.write_text(json.dumps(original), encoding='utf-8')
-        private = self.root / 'private'
+        # Match the installed layout: the connector records the cloud home four
+        # parents above its private directory (a shallow /tmp fixture cannot).
+        private = self.root / 'home' / '.local' / 'share' / 'cloudpc-link' / 'mac-pc-files'
         changed, updated = c.apply_install(private, [target], {'tools': []}, 'mac-pc-files')
         self.assertEqual(changed, 1)
         self.assertTrue(updated)

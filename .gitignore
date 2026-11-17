@@ -3,6 +3,8 @@
 /Claude-MCP.exe
 /CMCP-UI-Preview.exe
 /app/node_modules/
+/linux/node_modules/
+/runtime/
 /tests/browser-fixture/node_modules/
 /app/runtime/node.exe
 /app/build-info.json

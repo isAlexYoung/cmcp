@@ -1,0 +1,68 @@
+# CMCP Ubuntu 开发版
+
+本目录实现 [工作目标](WORK_GOALS.md) 的第一阶段与界面内更新。支持目标：Ubuntu 22.04 LTS、x86_64、GNOME、X11。已通过 Ubuntu 22.04.5 / WSL2 下的 Linux 测试、真实 GTK / WebKit 启动和更新重启检查，原生 GNOME / X11 和真实云端连接仍需验收。
+
+## 在 Ubuntu 上构建和启动
+
+在项目根目录执行。需要 Node 22+（与 `app/node-version.txt` 一致的运行时）以及系统 Python 3.10+：
+
+```bash
+sudo apt update
+sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libsecret-tools gnome-keyring openssh-client xdg-utils gnome-terminal fonts-noto-cjk
+npm --prefix app ci --ignore-scripts
+npm --prefix macos ci --ignore-scripts
+npm --prefix linux ci --ignore-scripts
+node --test linux/tests/*.test.mjs
+python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+python3 tools/package-linux.py --output build-results/linux --release --commit "$(git rev-parse HEAD)"
+sudo apt install ./build-results/linux/CMCP-*-linux-x64.deb
+cmcp
+```
+
+从应用菜单也可打开 CMCP。不要用 `sudo cmcp`。源码启动时，可在根目录创建 `runtime/` 并把本机 Linux Node 可执行文件复制为 `runtime/node`，再运行 `/usr/bin/python3 linux/desktop.py`。不要复制 Windows 的 `node.exe`。
+
+## 当前机器的 WSL 测试环境
+
+已安装的发行版是 `Ubuntu-22.04`，开发包安装到 `/opt/cmcp`，命令入口为 `/usr/bin/cmcp`。在 Windows PowerShell 中打开窗口：
+
+```powershell
+wsl -d Ubuntu-22.04 -- cmcp
+```
+
+窗口通过 WSLg 显示，不需要安装整套 Ubuntu Desktop。测试源码与 Linux Node 分别放在 `/home/lenovo/cmcp-linux-test/src` 和 `/home/lenovo/cmcp-linux-test/node`，没有使用 Windows 的 `node.exe` 或 `node_modules`。WSL 内重复专项测试：
+
+```bash
+export PATH="$HOME/cmcp-linux-test/node/bin:$PATH"
+cd "$HOME/cmcp-linux-test/src"
+node --test linux/tests/*.test.mjs
+python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+```
+
+安装包后的窗口检查会使用临时空白配置、自动退出，不连接真实设备：
+
+```bash
+# 仅测试所需依赖；截图额外需要 python3-gi-cairo。
+sudo apt install xvfb dbus-x11
+dbus-run-session -- xvfb-run -a python3 linux/tests/native_smoke.py
+# 在 WSLg 中显示窗口并检查；结束后自动关闭。
+python3 linux/tests/native_smoke.py
+```
+
+WSL 的密钥环可能需要首次创建 / 解锁；这与双系统 Ubuntu 的登录密钥环相互独立。真实密钥环自动测试使用独立会话和随机测试凭据，不会把 sudo 密码当作云端密码。完整检查范围和结果见 [开发记录](DEVELOPMENT_REPORT.md)。
+
+## 密码、配置和退出
+
+- 用户状态：`${XDG_STATE_HOME:-$HOME/.local/state}/cmcp`，可用 `CMCP_STATE_DIR` 指定私有目录；目录必须属于当前用户，不能是符号链接。
+- 密码只保存到当前桌面会话的 Secret Service / 登录密钥环；配置文件只存引用。锁定或缺少密钥环时明确报错，不回退明文。不要将另一系统的配置和加密密码文件直接覆盖过来。
+- 本机 MCP 名称以 `linux_` 开头。本机与 VPS 都是 Linux，仍是两台电脑；云端内置 Bash 不代表操作本机。
+- 关闭窗口会停止 CMCP 连接并退出，没有最小化到托盘。系统默认浏览器的已有窗口不会被关闭；选择具体浏览器并启用关闭选项时，只结束 CMCP 独立配置目录对应的窗口。
+- Snap 版 Firefox / Chromium 的独立浏览器配置放在 `$HOME/snap/<浏览器>/common/cmcp/`，避免 Snap 无法访问隐藏的 XDG 状态目录；普通 `.deb` 浏览器使用 CMCP 状态目录内的独立配置。这些浏览器登录数据随配置保留，不混用日常浏览器配置。
+- 无托盘、开机自启和桌面控制，这些入口不会假装可用。更新使用「设置 → 关于」中的检查、下载和安装按钮；详见 [更新机制](UPDATES.md)。也可手动安装新 `.deb`。
+- 卸载：`sudo apt remove cmcp`，保留用户设置及密钥环密码。先在 CMCP 删除设备可清理它保存的设备密码。卸载不会未经确认操作 VPS 或删除用户自定义 MCP 工具。
+
+## 依赖与接口依据
+
+- [Ubuntu Secret Tool 手册](https://manpages.ubuntu.com/manpages/jammy/man1/secret-tool.1.html)：口令通过标准输入传递。
+- [Ubuntu 22.04 WebKitGTK 包](https://packages.ubuntu.com/jammy/gir1.2-webkit2-4.0)。
+- [WebKitGTK 脚本消息接口](https://webkitgtk.org/reference/webkit2gtk/stable/method.UserContentManager.register_script_message_handler.html)。
+- [Snap 用户数据目录](https://snapcraft.io/docs/reference/administration/data-locations/)与 [home 接口限制](https://snapcraft.io/docs/reference/interfaces/home-interface/)。

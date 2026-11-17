@@ -158,7 +158,8 @@
       "items": {
         "enum": [
           "win32",
-          "darwin"
+          "darwin",
+          "linux"
         ]
       }
     },

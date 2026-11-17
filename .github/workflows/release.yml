@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version shared by Windows and macOS, for example 4.1.2'
+        description: 'Version shared by Windows, macOS and Linux, for example 4.23.2'
         required: true
         type: string
       notes:
@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       platforms:
-        description: 'all, or windows now and macos later under the same version'
+        description: 'all platforms, or add macos/linux assets to an existing version'
         required: false
         default: all
         type: choice
@@ -19,6 +19,7 @@ on:
           - all
           - windows
           - macos
+          - linux
 permissions:
   contents: read
 concurrency:
@@ -39,7 +40,7 @@ jobs:
           from pathlib import Path
           v=os.environ['RELEASE_VERSION']
           assert re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)',v), 'Use a single canonical version'
-          for folder in ('app','macos'):
+          for folder in ('app','macos','linux'):
               assert json.loads(Path(folder+'/package.json').read_text())['version']==v
               lock=json.loads(Path(folder+'/package-lock.json').read_text())
               assert lock['version']==v and lock['packages']['']['version']==v
@@ -58,7 +59,7 @@ jobs:
         with:
           script: |
             // Adding the Mac side needs the release to exist already.
-            if (process.env.RELEASE_PLATFORMS === 'macos') {
+            if (['macos', 'linux'].includes(process.env.RELEASE_PLATFORMS)) {
               await github.rest.repos.getReleaseByTag({...context.repo,tag:'v'+process.env.RELEASE_VERSION});
               return;
             }
@@ -68,16 +69,20 @@ jobs:
             } catch (error) { if (error.status !== 404) throw error; }
   windows:
     needs: version
-    if: ${{ inputs.platforms != 'macos' }}
+    if: ${{ inputs.platforms == 'all' || inputs.platforms == 'windows' }}
     uses: ./.github/workflows/validate.yml
   macos:
     needs: version
-    if: ${{ inputs.platforms != 'windows' }}
+    if: ${{ inputs.platforms == 'all' || inputs.platforms == 'macos' }}
     uses: ./.github/workflows/macos.yml
+  linux:
+    needs: version
+    if: ${{ inputs.platforms == 'all' || inputs.platforms == 'linux' }}
+    uses: ./.github/workflows/linux.yml
   publish:
-    needs: [version, windows, macos]
+    needs: [version, windows, macos, linux]
     # A side left out on purpose is skipped; anything else must have passed.
-    if: ${{ always() && !cancelled() && needs.version.result == 'success' && (inputs.platforms == 'macos' || needs.windows.result == 'success') && (inputs.platforms == 'windows' || needs.macos.result == 'success') }}
+    if: ${{ always() && !cancelled() && needs.version.result == 'success' && (!(inputs.platforms == 'all' || inputs.platforms == 'windows') || needs.windows.result == 'success') && (!(inputs.platforms == 'all' || inputs.platforms == 'macos') || needs.macos.result == 'success') && (!(inputs.platforms == 'all' || inputs.platforms == 'linux') || needs.linux.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,20 +91,25 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms != 'macos' }}
+        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'windows' }}
         with:
           name: cmcp-windows-x64-${{ github.sha }}
           path: incoming/windows
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms != 'windows' }}
+        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'macos' }}
         with:
           name: cmcp-macos-arm64-${{ github.sha }}
           path: incoming/arm64
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms != 'windows' }}
+        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'macos' }}
         with:
           name: cmcp-macos-x64-${{ github.sha }}
           path: incoming/x64
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'linux' }}
+        with:
+          name: cmcp-linux-x64-${{ github.sha }}
+          path: incoming/linux
       - name: Verify a common source and stage the chosen platforms
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -122,18 +132,18 @@ jobs:
             const {owner, repo} = context.repo;
             const body = process.env.RELEASE_NOTES.replace(/^\uFEFF/,'').trim();
             const files = fs.readdirSync('release-packages').sort();
-            const counts = {all: 14, windows: 6, macos: 8};
+            const counts = {all: 18, windows: 6, macos: 8, linux: 6};
             if (files.length !== counts[platforms]) throw Error('Expected '+counts[platforms]+' assets for '+platforms+', found '+files.length);
             const upload = async (release_id, name, data, hash) => {
-              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':name.endsWith('.dmg')?'application/x-apple-diskimage':'text/plain','content-length':data.length}});
+              const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.deb')?'application/vnd.debian.binary-package':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':name.endsWith('.dmg')?'application/x-apple-diskimage':'text/plain','content-length':data.length}});
               if (asset.state !== 'uploaded' || asset.size !== data.length || asset.digest !== 'sha256:'+hash) throw Error('Asset verification failed: '+name);
             };
-            if (platforms === 'macos') {
+            if (['macos', 'linux'].includes(platforms)) {
               // Windows assets are never touched. Re-running after a failed upload skips what already arrived intact.
               const {data: release} = await github.rest.repos.getReleaseByTag({owner,repo,tag});
-              if (release.draft) throw Error('The release is still a draft');
+              if (release.draft || release.prerelease) throw Error('A stable published release is required');
               for (const name of files) {
-                if (!name.includes('-macos-')) throw Error('Not a Mac asset: '+name);
+                if (!name.includes('-'+platforms+'-')) throw Error('Unexpected platform asset: '+name);
                 const data = fs.readFileSync('release-packages/'+name);
                 const hash = crypto.createHash('sha256').update(data).digest('hex');
                 const existing = release.assets.find(asset => asset.name === name);
@@ -141,7 +151,7 @@ jobs:
                 await upload(release.id, name, data, hash);
               }
               if (!(release.body || '').includes(body)) await github.rest.repos.updateRelease({owner,repo,release_id:release.id,body:(release.body || '').trim()+'\n\n'+body});
-              core.notice('Added the Mac assets to '+release.html_url);
+              core.notice('Added '+platforms+' assets to '+release.html_url);
               return;
             }
             try { await github.rest.repos.getReleaseByTag({owner,repo,tag}); throw Error('Release already exists; refusing to replace it'); }

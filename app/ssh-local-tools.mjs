@@ -12,7 +12,7 @@ import {hostClient,HostedProxy} from './tool-host.mjs';
 
 export function sshRoots(directory,platform=process.platform) {
   try {
-    const config=JSON.parse(fs.readFileSync(path.join(directory,platform==='darwin'?'targets.json':'config.json'),'utf8').replace(/^\uFEFF/,''));
+    const config=JSON.parse(fs.readFileSync(path.join(directory,platform==='darwin'||platform==='linux'?'targets.json':'config.json'),'utf8').replace(/^\uFEFF/,''));
     if(!Array.isArray(config.roots)||!config.roots.length||config.roots.some(root=>typeof root!=='string'||!path.isAbsolute(root)))throw Error('Invalid local file roots');
     return config.roots;
   } catch(error){if(error.code!=='ENOENT')throw error;}
@@ -22,6 +22,11 @@ export function sshRoots(directory,platform=process.platform) {
 
 export async function createSshDispatcher(directory) {
   const roots=sshRoots(directory);
+  if(process.platform==='linux') {
+    const {createDispatcher}=await import('../linux/dispatcher.mjs');
+    const client=hostClient(directory);
+    return createDispatcher({roots,stateDir:directory,registryOptions:{makeProxy:options=>new HostedProxy(options,client)}});
+  }
   if(process.platform==='darwin') {
     const {createDispatcher}=await import('../macos/dispatcher.mjs');
     // Third-party tools run once, in the main CMCP process, when it is there.
