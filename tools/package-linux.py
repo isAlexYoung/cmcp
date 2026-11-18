@@ -96,11 +96,11 @@ Architecture: amd64
 Maintainer: CMCP developers
 Section: devel
 Priority: optional
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0, gir1.2-dbusmenu-glib-0.4, libsecret-tools, gnome-keyring, openssh-client, xdg-utils
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0, gir1.2-dbusmenu-glib-0.4, libsecret-tools, gnome-keyring, openssh-client, xdg-utils, xdotool
 Recommends: gnome-terminal, fonts-noto-cjk
 Description: CMCP Ubuntu desktop client
  Connect cloud assistants to local Linux files and developer tools.
- Ubuntu 22.04 client with verified in-app updates; no desktop control.
+ Ubuntu 22.04 client with verified in-app updates and X11 desktop tools.
 """)
         manifest = [{"path": file.relative_to(target).as_posix(), "sha256": hashlib.sha256(file.read_bytes()).hexdigest()} for file in sorted(target.rglob("*")) if file.is_file()]
         (target / "distribution-manifest.json").write_text(json.dumps({"schema": 1, "version": version, "platform": "linux-x64", "sourceCommit": commit, "development": not release, "files": manifest}, indent=2))

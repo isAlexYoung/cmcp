@@ -12,7 +12,7 @@ process.on('message',m=>{
   let done=false;
   const finish=(code,signal,error)=>{if(done)return;done=true;process.send?.({t:'complete',code,signal,error});};
   try{
-    const child=spawn(m.program,m.args,{cwd:m.cwd,env:process.env,stdio:'inherit',detached:false});
+    const child=spawn(m.program,m.args,{cwd:m.cwd,env:m.env?{...process.env,...m.env}:process.env,stdio:'inherit',detached:false});
     child.on('error',e=>finish(null,null,e.code));
     child.on('exit',(code,signal)=>finish(code,signal));
   }catch(e){finish(null,null,e.code||'SPAWN_ERROR');}

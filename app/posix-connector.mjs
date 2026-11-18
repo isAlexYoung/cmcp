@@ -12,7 +12,7 @@ export function connectorSource() {
       || !versionLine.test(source) || !/^\d+\.\d+\.\d+$/.test(version)) {
     throw Error('POSIX connector template changed; review Linux adaptation');
   }
-  // The GTK client does not provide desktop tools.
+  // Let the same connector work with earlier Linux clients that lack desktop tools.
   return source.replace(desktopRequirement, '')
     .replace(versionLine, 'VERSION = "' + version + '"')
     .replaceAll('/Users/name/project', '/home/name/project')

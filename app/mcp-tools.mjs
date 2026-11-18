@@ -446,6 +446,7 @@ export function resolveLaunch(command,args=[],{platform=process.platform,env=pro
 export function detectBlender(platform=process.platform,env=process.env){
   const exists=file=>{try{return fs.statSync(file).isFile()||fs.statSync(file).isDirectory();}catch{return false;}};
   if(platform==='darwin'){for(const app of ['/Applications/Blender.app',path.join(os.homedir(),'Applications/Blender.app')])if(exists(app))return app;return null;}
+  if(platform==='linux')return findExecutable('blender',{platform,env});
   if(platform!=='win32')return null;
   const roots=[env.ProgramFiles||'C:\\Program Files',env['ProgramFiles(x86)']||'C:\\Program Files (x86)'];
   for(const root of roots){
