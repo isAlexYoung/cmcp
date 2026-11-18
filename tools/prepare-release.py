@@ -118,12 +118,14 @@ def planned(platforms):
 def prepare(packages, output, version, commit, platforms='all'):
     if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', version) or not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('Canonical version and full source commit required')
-    for name in ('app/package.json', 'macos/package.json', *(('linux/package.json',) if platforms in ('all', 'linux') else ())):
+    package_platforms, installers, with_source = planned(platforms)
+    folders = {'windows': 'app', 'macos': 'macos', 'linux': 'linux'}
+    for folder in dict.fromkeys(folders[platform.split('-')[0]] for platform in package_platforms):
+        name = folder + '/package.json'
         package = json.loads(subprocess.check_output(['git', 'show', commit + ':' + name]))
         if package['version'] != version:
             raise ValueError('Source package version mismatch')
     selected = []
-    package_platforms, installers, with_source = planned(platforms)
     for platform in package_platforms:
         name = 'CMCP-' + version + '-' + platform + '.zip'
         files = list(packages.rglob(name))

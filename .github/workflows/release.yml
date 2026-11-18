@@ -1,9 +1,11 @@
-name: Publish unified CMCP release
+name: Publish CMCP release
 on:
+  push:
+    branches: ['release/ubuntu/v*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version shared by Windows, macOS and Linux, for example 4.23.2'
+        description: 'Stable version for the selected platforms, for example 4.23.3'
         required: true
         type: string
       notes:
@@ -11,7 +13,7 @@ on:
         required: true
         type: string
       platforms:
-        description: 'all platforms, or add macos/linux assets to an existing version'
+        description: 'Platforms to build and publish'
         required: false
         default: all
         type: choice
@@ -20,70 +22,98 @@ on:
           - windows
           - macos
           - linux
+      append:
+        description: 'Add macOS or Linux assets to a release from the same source commit'
+        type: boolean
+        default: false
 permissions:
   contents: read
-concurrency:
-  group: release-${{ inputs.version }}
-  cancel-in-progress: false
 jobs:
   version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+      append: ${{ steps.plan.outputs.append }}
+      notes: ${{ steps.plan.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
       - name: Check versions and release notes
+        id: plan
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_PLATFORMS: ${{ inputs.platforms }}
+          RELEASE_APPEND: ${{ inputs.append }}
         run: |
           python3 - <<'PY'
-          import json,os,re
+          import json,os,re,uuid
           from pathlib import Path
-          v=os.environ['RELEASE_VERSION']
-          assert re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)',v), 'Use a single canonical version'
-          for folder in ('app','macos','linux'):
+          branch_request = os.environ['GITHUB_EVENT_NAME'] == 'push'
+          ref = os.environ['GITHUB_REF_NAME']
+          if branch_request:
+              assert ref.startswith('release/ubuntu/v'), 'Unexpected release branch'
+          v = ref.removeprefix('release/ubuntu/v') if branch_request else os.environ['RELEASE_VERSION']
+          assert re.fullmatch(r'(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})', v), 'Use a canonical version'
+          platforms = 'linux' if branch_request else os.environ['RELEASE_PLATFORMS'] or 'all'
+          append = not branch_request and os.environ['RELEASE_APPEND'] == 'true'
+          folders = {'all': ('app', 'macos', 'linux'), 'windows': ('app',), 'macos': ('macos',), 'linux': ('linux',)}
+          assert not append or platforms in ('macos', 'linux')
+          for folder in folders[platforms]:
               assert json.loads(Path(folder+'/package.json').read_text())['version']==v
               lock=json.loads(Path(folder+'/package-lock.json').read_text())
               assert lock['version']==v and lock['packages']['']['version']==v
-          assert re.search(r"export const VERSION = '([^']+)'",Path('macos/platform.mjs').read_text()).group(1)==v
-          for filename in ('app/cloudpc-connector.py','macos/cloudpc-connector.py'):
-              assert re.search(r'(?m)^VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)',Path(filename).read_text(encoding='utf-8')).group(1)==v
-          assert os.environ['RELEASE_NOTES'].strip(), 'Release notes are required'
+              if folder != 'linux':
+                  source = Path(folder+'/cloudpc-connector.py').read_text(encoding='utf-8')
+                  assert re.search(r'(?m)^VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', source).group(1)==v
+              if folder == 'macos':
+                  assert re.search(r"export const VERSION = '([^']+)'",Path('macos/platform.mjs').read_text()).group(1)==v
+          notes = Path(f'linux/releases/{v}.md').read_text(encoding='utf-8') if branch_request else os.environ['RELEASE_NOTES']
+          assert notes.strip(), 'Release notes are required'
+          delimiter = uuid.uuid4().hex
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'version={v}\nplatforms={platforms}\nappend={str(append).lower()}\nnotes<<{delimiter}\n{notes.rstrip()}\n{delimiter}\n')
           PY
       - name: Check package validation boundaries
         run: python3 -m unittest discover -s tests -p test_release_packages.py -v
-      - name: Reject an already published version
+      - name: Verify the requested release operation
         uses: actions/github-script@v7
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_PLATFORMS: ${{ inputs.platforms }}
+          RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+          RELEASE_APPEND: ${{ steps.plan.outputs.append }}
         with:
           script: |
-            // Adding the Mac side needs the release to exist already.
-            if (['macos', 'linux'].includes(process.env.RELEASE_PLATFORMS)) {
-              await github.rest.repos.getReleaseByTag({...context.repo,tag:'v'+process.env.RELEASE_VERSION});
+            const tag = 'v' + process.env.RELEASE_VERSION;
+            if (process.env.RELEASE_APPEND === 'true') {
+              const {data: release} = await github.rest.repos.getReleaseByTag({...context.repo,tag});
+              const {data: commit} = await github.rest.repos.getCommit({...context.repo,ref:tag});
+              if (release.draft || release.prerelease || commit.sha !== context.sha) throw Error('Append requires a stable release from the selected commit');
               return;
             }
             try {
-              await github.rest.repos.getReleaseByTag({...context.repo,tag:'v'+process.env.RELEASE_VERSION});
-              throw Error('Version is already published; use the next shared version');
+              const {data: release} = await github.rest.repos.getReleaseByTag({...context.repo,tag});
+              if (!release.draft) throw Error('Version is already published; use the next version');
             } catch (error) { if (error.status !== 404) throw error; }
   windows:
     needs: version
-    if: ${{ inputs.platforms == 'all' || inputs.platforms == 'windows' }}
+    if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'windows' }}
     uses: ./.github/workflows/validate.yml
   macos:
     needs: version
-    if: ${{ inputs.platforms == 'all' || inputs.platforms == 'macos' }}
+    if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'macos' }}
     uses: ./.github/workflows/macos.yml
   linux:
     needs: version
-    if: ${{ inputs.platforms == 'all' || inputs.platforms == 'linux' }}
+    if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'linux' }}
     uses: ./.github/workflows/linux.yml
   publish:
     needs: [version, windows, macos, linux]
     # A side left out on purpose is skipped; anything else must have passed.
-    if: ${{ always() && !cancelled() && needs.version.result == 'success' && (!(inputs.platforms == 'all' || inputs.platforms == 'windows') || needs.windows.result == 'success') && (!(inputs.platforms == 'all' || inputs.platforms == 'macos') || needs.macos.result == 'success') && (!(inputs.platforms == 'all' || inputs.platforms == 'linux') || needs.linux.result == 'success') }}
+    if: ${{ always() && !cancelled() && needs.version.result == 'success' && (!(needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'windows') || needs.windows.result == 'success') && (!(needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'macos') || needs.macos.result == 'success') && (!(needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'linux') || needs.linux.result == 'success') }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-${{ needs.version.outputs.version }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -91,40 +121,41 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'windows' }}
+        if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'windows' }}
         with:
           name: cmcp-windows-x64-${{ github.sha }}
           path: incoming/windows
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'macos' }}
+        if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'macos' }}
         with:
           name: cmcp-macos-arm64-${{ github.sha }}
           path: incoming/arm64
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'macos' }}
+        if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'macos' }}
         with:
           name: cmcp-macos-x64-${{ github.sha }}
           path: incoming/x64
       - uses: actions/download-artifact@v4
-        if: ${{ inputs.platforms == 'all' || inputs.platforms == 'linux' }}
+        if: ${{ needs.version.outputs.platforms == 'all' || needs.version.outputs.platforms == 'linux' }}
         with:
           name: cmcp-linux-x64-${{ github.sha }}
           path: incoming/linux
       - name: Verify a common source and stage the chosen platforms
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_PLATFORMS: ${{ inputs.platforms }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_PLATFORMS: ${{ needs.version.outputs.platforms }}
         run: python3 tools/prepare-release.py --packages incoming --output release-packages --version "$RELEASE_VERSION" --commit "$GITHUB_SHA" --platforms "$RELEASE_PLATFORMS"
       - uses: actions/upload-artifact@v4
         with:
-          name: cmcp-unified-${{ inputs.version }}-${{ github.sha }}
+          name: cmcp-release-${{ needs.version.outputs.version }}-${{ github.sha }}
           path: release-packages/
       - name: Publish the chosen platform assets under one version
         uses: actions/github-script@v7
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_NOTES: ${{ inputs.notes }}
-          RELEASE_PLATFORMS: ${{ inputs.platforms }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_NOTES: ${{ needs.version.outputs.notes }}
+          RELEASE_PLATFORMS: ${{ needs.version.outputs.platforms }}
+          RELEASE_APPEND: ${{ needs.version.outputs.append }}
         with:
           script: |
             const fs = require('fs'), crypto = require('crypto');
@@ -138,10 +169,10 @@ jobs:
               const {data: asset} = await github.rest.repos.uploadReleaseAsset({owner,repo,release_id,name,data,headers:{'content-type':name.endsWith('.zip')?'application/zip':name.endsWith('.deb')?'application/vnd.debian.binary-package':name.endsWith('.exe')?'application/vnd.microsoft.portable-executable':name.endsWith('.dmg')?'application/x-apple-diskimage':'text/plain','content-length':data.length}});
               if (asset.state !== 'uploaded' || asset.size !== data.length || asset.digest !== 'sha256:'+hash) throw Error('Asset verification failed: '+name);
             };
-            if (['macos', 'linux'].includes(platforms)) {
-              // Windows assets are never touched. Re-running after a failed upload skips what already arrived intact.
+            if (process.env.RELEASE_APPEND === 'true') {
               const {data: release} = await github.rest.repos.getReleaseByTag({owner,repo,tag});
-              if (release.draft || release.prerelease) throw Error('A stable published release is required');
+              const {data: commit} = await github.rest.repos.getCommit({owner,repo,ref:tag});
+              if (release.draft || release.prerelease || commit.sha !== context.sha) throw Error('A stable release from the selected commit is required');
               for (const name of files) {
                 if (!name.includes('-'+platforms+'-')) throw Error('Unexpected platform asset: '+name);
                 const data = fs.readFileSync('release-packages/'+name);
@@ -154,16 +185,23 @@ jobs:
               core.notice('Added '+platforms+' assets to '+release.html_url);
               return;
             }
-            try { await github.rest.repos.getReleaseByTag({owner,repo,tag}); throw Error('Release already exists; refusing to replace it'); }
-            catch (error) { if (error.status !== 404) throw error; }
             try {
               const {data: ref} = await github.rest.git.getRef({owner,repo,ref:'tags/'+tag});
               if (ref.object.type !== 'commit' || ref.object.sha !== context.sha) throw Error('Tag points to a different source');
             } catch (error) { if (error.status !== 404) throw error; }
-            const {data: release} = await github.rest.repos.createRelease({owner,repo,tag_name:tag,target_commitish:context.sha,name:'CMCP '+version,body,draft:true,prerelease:false,make_latest:'false'});
+            let release = (await github.paginate(github.rest.repos.listReleases,{owner,repo,per_page:50})).find(item => item.tag_name === tag);
+            if (release && (!release.draft || release.prerelease || release.target_commitish !== context.sha)) throw Error('Release already exists for another operation');
+            if (!release) {
+              const {data} = await github.rest.repos.createRelease({owner,repo,tag_name:tag,target_commitish:context.sha,name:'CMCP '+version+(platforms==='linux'?' · Ubuntu x64':platforms==='macos'?' · macOS':platforms==='windows'?' · Windows x64':''),body,draft:true,prerelease:false,make_latest:'false'});
+              release = data;
+            }
+            if (release.assets.some(asset => !files.includes(asset.name))) throw Error('Draft contains an unexpected asset');
             for (const name of files) {
               const data = fs.readFileSync('release-packages/'+name);
-              await upload(release.id, name, data, crypto.createHash('sha256').update(data).digest('hex'));
+              const hash = crypto.createHash('sha256').update(data).digest('hex');
+              const existing = release.assets.find(asset => asset.name === name);
+              if (existing) { if (existing.digest !== 'sha256:'+hash || existing.size !== data.length || existing.state !== 'uploaded') throw Error('Draft asset differs from the verified build: '+name); continue; }
+              await upload(release.id, name, data, hash);
             }
-            await github.rest.repos.updateRelease({owner,repo,release_id:release.id,draft:false,prerelease:false,make_latest:'true'});
+            await github.rest.repos.updateRelease({owner,repo,release_id:release.id,draft:false,prerelease:false,make_latest:platforms==='all'?'true':'false'});
             core.notice('Published '+release.html_url);
