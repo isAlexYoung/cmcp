@@ -30,6 +30,7 @@ const PLATFORM_GROUPS={
 };
 export function groupOf(name){
   if(/^blender_/.test(name))return 'blender';
+  if(name==='linux_admin_kernel_log'||name==='linux_admin_install_package')return 'commands';
   const platform=/^(?:windows|mac|linux)_(.+)$/.exec(name);
   if(!platform)return 'files';
   if(/^binary_/.test(platform[1])||/_(?:to|from)_cloud$/.test(platform[1]))return 'files';

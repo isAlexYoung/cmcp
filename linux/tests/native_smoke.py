@@ -1,5 +1,6 @@
 """GTK/WebKit package smoke check, run as a normal user under Xvfb + D-Bus."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -99,6 +100,10 @@ def inspected(web, task):
                 return
             assert "开机自启" not in text
             assert "登录 Mac 后" not in text
+            assert "管理员操作（逐次授权）" in text
+            stage = "admin-settings"
+        elif stage == "admin-settings":
+            assert json.loads(text) == {"enabled": False, "warningRed": True}
             screenshot("settings")
             stage = "about"
             app.web.run_javascript("document.querySelector('button[data-value=\"about\"]').click()", None, None, None)
@@ -136,6 +141,12 @@ def tick():
     if getattr(app, "web", None) and not reading and not app.exiting:
         reading = True
         script = "String(window.__cmcpNativeSmoke === true)" if stage == "bridge" else "document.body.innerText"
+        if stage == "admin-settings":
+            script = """JSON.stringify({
+              enabled:document.querySelector('[data-focus-key="switch:linuxAdminRequests"]').checked,
+              warningRed:['rgb(177, 41, 59)', 'rgb(255, 139, 153)'].includes(
+                getComputedStyle(document.querySelector('.admin-warning')).color)
+            })"""
         app.web.run_javascript(script, None, inspected)
     return True
 

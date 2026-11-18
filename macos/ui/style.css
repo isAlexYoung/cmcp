@@ -22,3 +22,6 @@ input.switch{appearance:none;-webkit-appearance:none;position:relative;width:44p
 .tool-actions{display:flex;align-items:center;gap:8px}.tool-import textarea{width:100%;box-sizing:border-box;margin:8px 0;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--soft);color:var(--text);font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 .tool-actions [hidden]{display:none}
 .set-row>.proxy-host,.set-row>.proxy-port{flex:none;width:216px;max-width:100%;box-sizing:border-box;height:40px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);font:inherit}.set-row>.proxy-port{width:128px}.set-row>input:disabled{background:var(--soft);color:var(--muted)}
+
+.set-row .admin-warning{color:#b1293b}
+:root[data-theme=dark] .set-row .admin-warning{color:#ff8b99}

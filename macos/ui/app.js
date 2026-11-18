@@ -40,6 +40,9 @@ Object.assign(english,{
   '依赖安装未完成。可以重试或使用 .deb 安装。':'Dependencies could not be installed. Retry or use the .deb.',
   '已有安装或更新正在进行。':'An install or update is already running.',
   '请等依赖安装结束后再安装更新。':'Wait for dependency installation to finish before installing the update.',
+  '访问权限':'Access permissions',
+  '管理员操作（逐次授权）':'Administrator requests',
+  '开启后，Claude 可申请读取内核日志或安装指定软件包。每次操作都需要在本机确认和授权。日志会返回给发起请求的连接，软件安装会修改系统。':'Let Claude request kernel logs or installation of supported packages. Every request needs local confirmation and authorization. Logs are sent to the requesting connection. Installing packages changes this system.',
 });
 const paths={market:'M4 9h16v11H4z M8 9a4 4 0 0 1 8 0',tools:'M5 19l7-7 M13.6 10.4a4.5 4.5 0 1 0 5.4-5.4l-2.5 2.5-2-.5-.5-2 2.5-2.5',link:'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1 M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',settings:'M19.4 9.9L22.5 10.4L22.5 13.6L19.4 14.1L18.7 15.7L20.5 18.3L18.3 20.5L15.7 18.7L14.1 19.4L13.6 22.5L10.4 22.5L9.9 19.4L8.3 18.7L5.7 20.5L3.5 18.3L5.3 15.7L4.6 14.1L1.5 13.6L1.5 10.4L4.6 9.9L5.3 8.3L3.5 5.7L5.7 3.5L8.3 5.3L9.9 4.6L10.4 1.5L13.6 1.5L14.1 4.6L15.7 5.3L18.3 3.5L20.5 5.7L18.7 8.3z M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8',profile:'M4 5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M4 16a3 3 0 0 1 6 0 M13 9h6 M13 12h6 M13 16h4',sliders:'M4 7h10M18 7h2M4 17h2M10 17h10 M16 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M8 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 11v5 M12 7.5v.01',sun:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M19.5 12H22 M17.3 17.3l1.8 1.8 M12 19.5V22 M6.7 17.3l-1.8 1.8 M4.5 12H2 M6.7 6.7L4.9 4.9 M12 4.5V2 M17.3 6.7l1.8-1.8',moon:'M20.5 14.2A8.4 8.4 0 1 1 9.8 3.5a6.7 6.7 0 0 0 10.7 10.7z',monitor:'M3 4h18v12H3z M12 16v4 M8 20h8',back:'M19 12H5m6-6-6 6 6 6',plus:'M12 5v14M5 12h14',edit:'m4 16 11-11 4 4L8 20H4v-4 M14 6l4 4',copy:'M9 8h11v13H9z M5 17H3V3h13v2',delete:'M4 6h16 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7m4-7v7',down:'m6 9 6 6 6-6',up:'m6 15 6-6 6 6',play:'m7 4 13 8-13 8V4z',stop:'M6 6h12v12H6z',check:'m4 12 5 5L20 6',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7 M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6',terminal:'M3 5h18v14H3z M7 9l3 3-3 3 M13 15h4',swap:'M5 8h14 M15 4l4 4-4 4 M19 16H5 M9 12l-4 4 4 4'};
 function el(tag,classes,text){const node=document.createElement(tag);if(classes)node.className=classes;if(text!==undefined)node.textContent=text;return node;}
@@ -274,6 +277,19 @@ function settingsColumn(){const column=el('div','settings-column');updateUI=null
       toggle('closeAction',data.preferences.closeAction==='tray',on=>saveSettings({closeAction:on?'tray':'exit'}))));
     else windowRows.push(row('关闭窗口','关闭窗口会退出 CMCP 并停止本机连接。',el('span')));
     section('窗口',...windowRows);
+    if(data.capabilities?.adminRequests){
+      const warning='开启后，Claude 可申请读取内核日志或安装指定软件包。每次操作都需要在本机确认和授权。日志会返回给发起请求的连接，软件安装会修改系统。';
+      const access=toggle('linuxAdminRequests',data.preferences.linuxAdminRequests===true,async enabled=>{
+        if(enabled&&!await native('confirm',{text:t(warning)})){
+          access.checked=false;
+          return;
+        }
+        await saveSettings({linuxAdminRequests:enabled});
+      });
+      const adminRow=row('管理员操作（逐次授权）',warning,access);
+      adminRow.querySelector('.row-detail').classList.add('admin-warning');
+      section('访问权限',adminRow);
+    }
     if(data.capabilities?.shortcut!==false)section('快捷方式',row('桌面快捷方式','在桌面创建 CMCP 的替身。',button('创建',async()=>{await native('shortcut');toast('快捷方式已创建。');},{classes:'soft',title:'桌面快捷方式'})));
   }else if(page==='connect'){
     proxyDraft??={...proxySettings(data.preferences)};

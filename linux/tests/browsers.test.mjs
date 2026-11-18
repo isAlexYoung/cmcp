@@ -27,6 +27,31 @@ test('browser detection and launch keep paths and metacharacters in separate arg
   assert.deepEqual(call[1], ['--no-remote', '--profile', pageFolder(dir, 'one', 'firefox'), '--new-window', url]);
   await assert.rejects(openPage({}, dir, 'one', 'file:///etc/passwd', {found, run}), /Invalid/);
 });
+test('Ubuntu 22.04 GNOME launches Chrome and Edge with a separate direct-keyring profile', async t => {
+  const dir = fixture(t), calls = [], run = async (...args) => { calls.push(args); };
+  const url = 'https://example.test/';
+  const found = ['chrome', 'edge'].map(id => ({id, path: '/usr/bin/' + id}));
+  for (const browser of found) {
+    const profile = pageFolder(dir, 'one', browser.id);
+    fs.mkdirSync(profile, {recursive: true});
+    const original = path.join(profile, 'Local State');
+    fs.writeFileSync(original, 'Existing browser state');
+    for (const closeWeb of [false, true]) {
+      await openPage({browser: browser.id, closeWeb}, dir, 'one', url, {found, run, jammyGnome: true});
+      assert.deepEqual(calls.pop(), [browser.path, [
+        '--disable-features=DbusSecretPortal', '--user-data-dir=' + profile + '-direct-keyring',
+        '--no-first-run', '--no-default-browser-check', '--new-window', url,
+      ]]);
+    }
+    assert.equal(fs.readFileSync(original, 'utf8'), 'Existing browser state');
+    assert.ok(fs.statSync(profile + '-direct-keyring').isDirectory());
+    await openPage({browser: browser.id}, dir, 'one', url, {found, run, jammyGnome: false});
+    assert.deepEqual(calls.pop(), [browser.path, ['--new-window', url]]);
+  }
+  const snap = {id: 'chrome', path: '/snap/bin/chromium', snap: 'chromium'};
+  await openPage({browser: 'chrome'}, dir, 'one', url, {found: [snap], run, jammyGnome: true});
+  assert.deepEqual(calls.pop(), [snap.path, ['--new-window', url]]);
+});
 test('disconnect only closes exact owned profiles and refuses a recycled PID', async t => {
   const dir = fixture(t), folder = pageFolder(dir, 'one', 'chrome'), kills = [];
   let processes = [
@@ -42,17 +67,20 @@ test('disconnect only closes exact owned profiles and refuses a recycled PID', a
 });
 test('disconnect recognizes a Chromium process title only with the matching local profile lock', async t => {
   const dir = path.join(fixture(t), 'state with spaces');
-  const folder = pageFolder(dir, 'one', 'chrome');
-  fs.mkdirSync(folder, {recursive: true});
+  const oldFolder = pageFolder(dir, 'one', 'chrome');
+  const folder = oldFolder + '-direct-keyring';
+  for (const profile of [oldFolder, folder]) fs.mkdirSync(profile, {recursive: true});
   const lock = path.join(folder, 'SingletonLock');
-  const title = profile => `/opt/google/chrome/chrome --user-data-dir=${profile} --no-first-run --no-default-browser-check --new-window https://example.test/`;
+  const title = (profile, flag = '') => `/opt/google/chrome/chrome ${flag}--user-data-dir=${profile} --no-first-run --no-default-browser-check --new-window https://example.test/`;
+  const flag = '--disable-features=DbusSecretPortal ';
   const kills = [];
   let processes = [
-    {pid: 1201, started: '1', argv: [title(folder)]},
-    {pid: 1202, started: '2', argv: [title(folder + '-other')]},
-    {pid: 1203, started: '3', argv: [title(folder)]},
+    {pid: 1201, started: '1', argv: [title(folder, flag)]},
+    {pid: 1202, started: '2', argv: [title(folder + '-other', flag)]},
+    {pid: 1203, started: '3', argv: [title(folder, flag)]},
+    {pid: 1204, started: '4', argv: [title(oldFolder)]},
   ];
-  const options = {list: async () => processes, wait: async () => {}, kill: (pid, signal) => {
+  const options = {jammyGnome: true, list: async () => processes, wait: async () => {}, kill: (pid, signal) => {
     kills.push([pid, signal]);
     processes = processes.filter(item => item.pid !== pid);
   }};
@@ -61,8 +89,10 @@ test('disconnect recognizes a Chromium process title only with the matching loca
   assert.equal(await closePages(preferences, dir, 'one', options), 0);
   fs.unlinkSync(lock);
   fs.symlinkSync(os.hostname() + '-1201', lock);
-  assert.equal(await closePages(preferences, dir, 'one', options), 1);
-  assert.deepEqual(kills, [[1201, 'SIGTERM']]);
+  fs.symlinkSync(os.hostname() + '-1204', path.join(oldFolder, 'SingletonLock'));
+  assert.equal(await closePages({...preferences, closeWeb: false}, dir, 'one', options), 0);
+  assert.equal(await closePages(preferences, dir, 'one', options), 2);
+  assert.deepEqual(kills, [[1201, 'SIGTERM'], [1204, 'SIGTERM']]);
 });
 test('Linux SSH launcher uses the Linux askpass path and never puts a password into argv or script', async t => {
   const dir = fixture(t), login = {id: 'd', host: 'example.test', port: 22, username: 'ubuntu', method: 'password', credentialId: 'secret-reference'};

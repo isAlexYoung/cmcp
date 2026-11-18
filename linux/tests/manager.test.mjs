@@ -28,6 +28,14 @@ test('Linux manager uses existing management API and rejects unauthenticated or 
   };
   assert.equal((await fetch(manager.origin + '/api/state')).status, 403);
   assert.equal((await call('targets/save', {}, {origin: 'https://evil.invalid'})).status, 403);
+  assert.equal((await call('settings', {linuxAdminRequests:true}, {origin: 'https://evil.invalid'})).status, 403);
+  assert.equal((await call('state')).value.capabilities.adminRequests, true);
+  assert.notEqual((await call('state')).value.preferences.linuxAdminRequests, true);
+  assert.equal((await call('settings', {linuxAdminRequests:'true'})).status, 400);
+  for (const enabled of [true, false]) {
+    assert.equal((await call('settings', {linuxAdminRequests:enabled})).status, 200);
+    assert.equal((await call('state')).value.preferences.linuxAdminRequests, enabled);
+  }
   const forged = await new Promise((resolve, reject) => {
     const request = http.get(manager.origin + '/api/state', {headers: {host: 'evil.invalid', 'x-cmcp-token': manager.token}}, response => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
     request.on('error', reject);
