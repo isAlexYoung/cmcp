@@ -96,7 +96,7 @@ Architecture: amd64
 Maintainer: CMCP developers
 Section: devel
 Priority: optional
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0, libsecret-tools, gnome-keyring, openssh-client, xdg-utils
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0, gir1.2-dbusmenu-glib-0.4, libsecret-tools, gnome-keyring, openssh-client, xdg-utils
 Recommends: gnome-terminal, fonts-noto-cjk
 Description: CMCP Ubuntu desktop client
  Connect cloud assistants to local Linux files and developer tools.

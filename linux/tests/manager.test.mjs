@@ -36,11 +36,17 @@ test('Linux manager uses existing management API and rejects unauthenticated or 
   const result = await call('targets/save', {url: 'https://fixture.invalid', label: 'Ubuntu', password: 'private-password', autoLogin: true, icon: ''});
   assert.equal(result.status, 200);
   const snapshot = (await call('state')).value;
-  assert.match(snapshot.platform, /^linux-/); assert.equal(snapshot.capabilities.tray, false); assert.equal(snapshot.capabilities.selfUpdate, true);
+  assert.match(snapshot.platform, /^linux-/); assert.equal(snapshot.capabilities.tray, true); assert.equal(snapshot.capabilities.selfUpdate, true);
   assert.ok(!JSON.stringify(snapshot).includes('private-password'));
   assert.ok(!fs.readFileSync(path.join(dir, 'targets.json'), 'utf8').includes('private-password'));
   const checked = await call('update/check', {});
   assert.equal(checked.status, 200); assert.equal(checked.value.state, 'latest');
+  const id = result.value.id;
+  const tray = (await call('tray', {})).value;
+  assert.deepEqual(tray.targets, [{id, label: 'Ubuntu', state: 'stopped', enabled: false, loginMode: 'web', connectable: true}]);
+  assert.equal((await call('targets/login', {id, mode: 'ssh', expectedMode: 'cloudcli'})).status, 400);
+  assert.equal((await call('targets/login', {id, mode: 'ssh', expectedMode: 'web'})).status, 200);
+  assert.deepEqual((await call('tray', {})).value.targets, [{id, label: 'Ubuntu', state: 'idle-ssh', enabled: false, loginMode: 'ssh', ssh: true, connectable: false}]);
   assert.equal((await call('uninstall', {})).status, 400);
   assert.equal((await call('targets/delete', {id: result.value.id})).status, 200);
   assert.equal(saved.size, 0);

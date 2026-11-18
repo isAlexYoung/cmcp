@@ -36,6 +36,7 @@ jobs:
         run: |
           sudo apt-get install -y ./build-results/linux/CMCP-*-linux-x64.deb
           dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_smoke.py
+          dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_tray_smoke.py
           dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_update_smoke.py build-results/linux/CMCP-*-linux-x64.zip
       - name: Retain Linux packages for the unified release
         uses: actions/upload-artifact@v4

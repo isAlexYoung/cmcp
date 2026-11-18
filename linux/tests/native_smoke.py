@@ -81,8 +81,9 @@ def inspected(web, task):
             stage = "settings"
             app.web.run_javascript("document.querySelector('button[aria-label=\"设置\"]').click()", None, None, None)
         elif stage == "settings":
-            if "关闭窗口会退出 CMCP" not in text:
+            if "关闭时最小化到托盘" not in text:
                 return
+            assert "开机自启" not in text
             assert "登录 Mac 后" not in text
             screenshot("settings")
             stage = "about"
@@ -94,7 +95,9 @@ def inspected(web, task):
             assert "CMCP " in text
             screenshot("about")
             finished = True
-            app.close_window()
+            assert app.close_to_tray, "Reading preferences should preserve the close-to-tray setting"
+            assert app.tray is None or not app.tray.available, "Run the window-only smoke check on its own bus"
+            app.on_window_close()
     except Exception as error:
         errors.append(str(error))
         app.close_window()

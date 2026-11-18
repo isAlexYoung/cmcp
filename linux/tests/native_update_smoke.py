@@ -25,7 +25,7 @@ def drive(prepared_file):
     from gi.repository import GLib
     app = desktop.Desktop()
     original_api, original_action, original_reply = app.api, app.action, app.reply
-    app.api = lambda route: {'directory': prepared} if route in ('update/download', 'update/prepared') else original_api(route)
+    app.api = lambda route, *args, **kwargs: {'directory': prepared} if route in ('update/download', 'update/prepared') else original_api(route, *args, **kwargs)
     confirmation = False
     app.action = lambda action, payload: confirmation if action == 'confirm' else original_action(action, payload)
     def post(ident, action):

@@ -6,7 +6,7 @@ import {webTunnelEnvironment, openTerminal, detectTerminals, closeSessions} from
 import {detectBrowsers, openPage, closePages} from './browsers.mjs';
 import {checkRelease, downloadUpdate} from './updates.mjs';
 
-export const CAPABILITIES = Object.freeze({tray: false, autostart: false, shortcut: false, selfUpdate: true, nativeUninstall: false, desktopControl: false, blender: false});
+export const CAPABILITIES = Object.freeze({tray: true, autostart: false, shortcut: false, selfUpdate: true, nativeUninstall: false, desktopControl: false, blender: false});
 export async function createManager(options = {}) {
   const directory = options.directory || STATE;
   const dispatcher = options.dispatcher || await createDispatcher({roots: (await import('../macos/platform.mjs')).readConfig(directory).roots, stateDir: directory});

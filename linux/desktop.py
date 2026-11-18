@@ -35,6 +35,8 @@ class Desktop(Gtk.Application):
         self.update_request = update_request
         self.update_busy = False
         self.prepared_version = None
+        self.close_to_tray = False
+        self.tray = None
 
     def error(self, text):
         dialog = Gtk.MessageDialog(transient_for=self.window, modal=True, message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE, text="CMCP")
@@ -44,7 +46,7 @@ class Desktop(Gtk.Application):
 
     def do_activate(self):
         if self.window:
-            self.window.present()
+            self.restore_window()
             return
         if os.getuid() == 0:
             self.error("请以普通桌面用户运行 CMCP，不要使用 sudo。")
@@ -64,7 +66,7 @@ class Desktop(Gtk.Application):
         ])
         self.window.set_default_size(1080, 760)
         self.window.set_size_request(640, 480)
-        self.window.connect("delete-event", self.close_window)
+        self.window.connect("delete-event", self.on_window_close)
         self.window.add(Gtk.Label(label="正在启动 CMCP…"))
         self.window.show_all()
         self.backend = subprocess.Popen([str(node), str(KIT / "desktop.mjs")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=str(KIT.parent), start_new_session=True)
@@ -114,6 +116,14 @@ class Desktop(Gtk.Application):
         self.window.add(self.web)
         self.web.load_uri(self.identity["origin"] + "/#" + self.identity["token"])
         self.window.show_all()
+        try:
+            from tray import Tray
+            self.tray = Tray(self.window.get_icon_list()[:2], self.api, self.restore_window, self.rename_from_tray,
+                             self.exit_from_tray, self.open_from_tray, self.tray_error, self.tray_lost,
+                             lambda: self.exiting or self.update_busy)
+        except (ImportError, ValueError, GLib.Error):
+            # A desktop without a menu service can still run CMCP in a window.
+            pass
         if self.update_request:
             GLib.timeout_add(300, self.acknowledge_update)
         return False
@@ -131,9 +141,10 @@ class Desktop(Gtk.Application):
         self.web.run_javascript("document.querySelector('#app .cards') !== null", None, inspected)
         return True
 
-    def api(self, route):
-        request = Request(self.identity['origin'] + '/api/' + route, data=b'{}', headers={'Content-Type': 'application/json', 'X-CMCP-Token': self.identity['token']})
-        with build_opener(ProxyHandler({})).open(request, timeout=8 * 60 + 15) as response:
+    def api(self, route, payload=None, timeout=8 * 60 + 15):
+        request = Request(self.identity['origin'] + '/api/' + route, data=json.dumps(payload or {}).encode(),
+                          headers={'Content-Type': 'application/json', 'X-CMCP-Token': self.identity['token']})
+        with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
             return json.loads(response.read())
 
     def begin_update(self, ident, action):
@@ -242,12 +253,52 @@ class Desktop(Gtk.Application):
             state = Path(os.environ.get("CMCP_STATE_DIR") or str(Path(os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")) / "cmcp"))
             Gio.AppInfo.launch_default_for_uri((KIT.parent if action == "program" else state).as_uri(), None)
             return True
-        if action in ("preferences", "icons"):
-            return {}  # No native settings are changed; GTK follows the desktop theme.
+        if action == "preferences":
+            choice = payload.get("closeAction")
+            if choice in ("tray", "exit"):
+                self.close_to_tray = choice == "tray"
+            return {}
+        if action == "icons":
+            return {}
         raise ValueError("Unsupported Linux action")
 
+    def restore_window(self):
+        if not self.exiting and self.window:
+            self.window.present()
+
+    def rename_from_tray(self, ident):
+        self.restore_window()
+        self.web.run_javascript("window.cmcpRenameTarget(" + json.dumps(ident) + ")", None, None, None)
+
+    def open_from_tray(self, url):
+        if not self.exiting:
+            self.action("open", {"url": url})
+
+    def tray_error(self):
+        if self.exiting:
+            return
+        self.restore_window()
+        self.web.run_javascript("window.cmcpTrayError()", None, None, None)
+
+    def tray_lost(self):
+        if self.window and not self.window.get_visible():
+            self.restore_window()
+
+    def on_window_close(self, *_):
+        if not self.exiting and self.close_to_tray and self.tray and self.tray.available:
+            self.window.hide()
+            return True
+        if self.update_busy and not self.exiting:
+            return True
+        return self.close_window()
+
+    def exit_from_tray(self):
+        if not self.update_busy:
+            self.close_window()
+
     def close_window(self, *_):
-        self.window.hide()
+        if self.window:
+            self.window.hide()
         if not self.exiting:
             self.exiting = True
             threading.Thread(target=self.stop_and_quit, daemon=True).start()
@@ -256,9 +307,7 @@ class Desktop(Gtk.Application):
     def stop_and_quit(self):
         try:
             if self.identity and self.backend.poll() is None:
-                request = Request(self.identity["origin"] + "/api/exit", data=b"{}", headers={"Content-Type": "application/json", "X-CMCP-Token": self.identity["token"]})
-                with build_opener(ProxyHandler({})).open(request, timeout=5):
-                    pass
+                self.api("exit", timeout=5)
         except Exception:
             pass
         self.shutdown_backend()
@@ -278,6 +327,8 @@ class Desktop(Gtk.Application):
                     self.backend.kill()
 
     def do_shutdown(self):
+        if self.tray:
+            self.tray.close()
         self.shutdown_backend()
         Gtk.Application.do_shutdown(self)
 
