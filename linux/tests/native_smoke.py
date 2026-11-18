@@ -16,6 +16,20 @@ desktop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop)
 from gi.repository import GLib, WebKit2
 
+dependency_calls = []
+
+
+def dependency_status():
+    return {"missing": [] if dependency_calls else ["xdotool"], "canInstall": True}
+
+
+def install_dependencies():
+    dependency_calls.append("install")
+    return dependency_status()
+
+
+desktop.desktop_dependency_status = dependency_status
+desktop.install_desktop_dependencies = install_dependencies
 app = desktop.Desktop()
 deadline = time.monotonic() + 45
 errors = []
@@ -89,11 +103,19 @@ def inspected(web, task):
             stage = "about"
             app.web.run_javascript("document.querySelector('button[data-value=\"about\"]').click()", None, None, None)
         elif stage == "about":
-            if "检查更新" not in text:
+            if "安装依赖" not in text:
                 return
             assert "系统包管理器" in text
             assert "CMCP " in text
+            assert "检查更新" in text
+            assert "xdotool" in text and not dependency_calls
             screenshot("about")
+            stage = "dependencies"
+            app.web.run_javascript("document.querySelector('[data-focus-key=\"update:dependencies\"]').click()", None, None, None)
+        elif stage == "dependencies":
+            if "安装依赖" in text or "依赖已安装。" not in text:
+                return
+            assert dependency_calls == ["install"]
             finished = True
             assert app.close_to_tray, "Reading preferences should preserve the close-to-tray setting"
             assert app.tray is None or not app.tray.available, "Run the window-only smoke check on its own bus"
@@ -124,7 +146,7 @@ try:
     assert finished and not errors, errors or "Native host exited before ready"
     assert app.backend.poll() is not None, "Backend survived window close"
     assert not (Path(temporary.name) / "manager.lock").exists(), "Backend lock survived clean exit"
-    print("Installed GTK/WebKit home/settings/about, native bridge, local backend and clean exit: passed")
+    print("Installed GTK/WebKit home/settings/about, dependency install UI, native bridge and clean exit: passed")
 finally:
     app.shutdown_backend()
     temporary.cleanup()

@@ -40,6 +40,30 @@ test('disconnect only closes exact owned profiles and refuses a recycled PID', a
   }});
   assert.deepEqual(kills, [[1201, 'SIGTERM']]);
 });
+test('disconnect recognizes a Chromium process title only with the matching local profile lock', async t => {
+  const dir = path.join(fixture(t), 'state with spaces');
+  const folder = pageFolder(dir, 'one', 'chrome');
+  fs.mkdirSync(folder, {recursive: true});
+  const lock = path.join(folder, 'SingletonLock');
+  const title = profile => `/opt/google/chrome/chrome --user-data-dir=${profile} --no-first-run --no-default-browser-check --new-window https://example.test/`;
+  const kills = [];
+  let processes = [
+    {pid: 1201, started: '1', argv: [title(folder)]},
+    {pid: 1202, started: '2', argv: [title(folder + '-other')]},
+    {pid: 1203, started: '3', argv: [title(folder)]},
+  ];
+  const options = {list: async () => processes, wait: async () => {}, kill: (pid, signal) => {
+    kills.push([pid, signal]);
+    processes = processes.filter(item => item.pid !== pid);
+  }};
+  const preferences = {browser: 'chrome', closeWeb: true};
+  fs.symlinkSync(os.hostname() + '-1202', lock);
+  assert.equal(await closePages(preferences, dir, 'one', options), 0);
+  fs.unlinkSync(lock);
+  fs.symlinkSync(os.hostname() + '-1201', lock);
+  assert.equal(await closePages(preferences, dir, 'one', options), 1);
+  assert.deepEqual(kills, [[1201, 'SIGTERM']]);
+});
 test('Linux SSH launcher uses the Linux askpass path and never puts a password into argv or script', async t => {
   const dir = fixture(t), login = {id: 'd', host: 'example.test', port: 22, username: 'ubuntu', method: 'password', credentialId: 'secret-reference'};
   const env = webTunnelEnvironment(login, dir);

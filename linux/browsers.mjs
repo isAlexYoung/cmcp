@@ -38,7 +38,7 @@ export async function openPage(preferences, directory, id, url, {found = detectB
   await run(browser.path, openArguments(browser, url, folder));
   return true;
 }
-/** /proc gives exact argv boundaries and a birth marker; never match a path substring. */
+/** Read the process arguments and birth marker used when closing a window. */
 export async function listProcesses(proc = '/proc') {
   const result = [];
   for (const name of fs.readdirSync(proc).filter(name => /^\d+$/.test(name))) {
@@ -52,10 +52,30 @@ export async function listProcesses(proc = '/proc') {
   }
   return result;
 }
+
+function chromiumLockPid(folder) {
+  try {
+    const lock = fs.readlinkSync(path.join(folder, 'SingletonLock'));
+    const prefix = os.hostname() + '-';
+    if (!lock.startsWith(prefix)) return null;
+    const pid = Number(lock.slice(prefix.length));
+    return Number.isSafeInteger(pid) && pid > 1 && lock === prefix + pid ? pid : null;
+  } catch { return null; }
+}
+
 export async function closePages(preferences, directory, id, {list = listProcesses, found = detectBrowsers(), kill = (pid, signal) => process.kill(pid, signal), wait = ms => new Promise(resolve => setTimeout(resolve, ms))} = {}) {
   if (preferences.closeWeb !== true || !['chrome', 'edge', 'firefox'].includes(preferences.browser)) return 0;
-  const folder = profileFolder(directory, id, found.find(item => item.id === preferences.browser) || {id: preferences.browser});
-  const owns = item => item.pid !== process.pid && item.argv?.some((arg, i, args) => arg === '--user-data-dir=' + folder || (['-profile', '--profile'].includes(arg) && args[i + 1] === folder));
+  const browser = found.find(item => item.id === preferences.browser) || {id: preferences.browser};
+  const folder = profileFolder(directory, id, browser);
+  const profileArgument = '--user-data-dir=' + folder;
+  const lockPid = browser.id === 'firefox' ? null : chromiumLockPid(folder);
+  // Recent Chromium builds replace argv with a single process title. Require
+  // both the profile's lock PID and CMCP's complete launch flags in that case.
+  const launchFlags = ` ${profileArgument} --no-first-run --no-default-browser-check --new-window `;
+  const owns = ({pid, argv}) => pid !== process.pid && argv && (
+    argv.some((arg, i) => arg === profileArgument || (['-profile', '--profile'].includes(arg) && argv[i + 1] === folder)) ||
+    (pid === lockPid && argv.length === 1 && argv[0].includes(launchFlags))
+  );
   const original = (await list()).filter(owns);
   const signal = async kind => {
     for (const item of (await list()).filter(owns)) {

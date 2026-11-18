@@ -30,6 +30,16 @@ Object.assign(english,{
   '关闭时最小化到托盘':'Minimize to tray when closing',
   '隐藏主窗口并保持连接。可以从托盘重新打开主界面或退出。托盘不可用时，关闭窗口会退出。':'Hide the window and keep connections running. Reopen or exit from the tray. Closing exits when the tray is unavailable.',
   '关闭窗口会退出 CMCP 并停止本机连接。':'Closing the window exits CMCP and stops its connections.',
+  '桌面工具依赖':'Desktop tool dependencies',
+  '安装依赖':'Install dependencies',
+  '缺少系统包':'Missing system packages',
+  '请使用 .deb 安装系统依赖。':'Use the .deb to install system dependencies.',
+  '正在等待系统授权或安装依赖…':'Waiting for system authorization or installing dependencies…',
+  '依赖已安装。':'Dependencies installed.',
+  '已取消依赖安装。':'Dependency installation canceled.',
+  '依赖安装未完成。可以重试或使用 .deb 安装。':'Dependencies could not be installed. Retry or use the .deb.',
+  '已有安装或更新正在进行。':'An install or update is already running.',
+  '请等依赖安装结束后再安装更新。':'Wait for dependency installation to finish before installing the update.',
 });
 const paths={market:'M4 9h16v11H4z M8 9a4 4 0 0 1 8 0',tools:'M5 19l7-7 M13.6 10.4a4.5 4.5 0 1 0 5.4-5.4l-2.5 2.5-2-.5-.5-2 2.5-2.5',link:'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1 M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',settings:'M19.4 9.9L22.5 10.4L22.5 13.6L19.4 14.1L18.7 15.7L20.5 18.3L18.3 20.5L15.7 18.7L14.1 19.4L13.6 22.5L10.4 22.5L9.9 19.4L8.3 18.7L5.7 20.5L3.5 18.3L5.3 15.7L4.6 14.1L1.5 13.6L1.5 10.4L4.6 9.9L5.3 8.3L3.5 5.7L5.7 3.5L8.3 5.3L9.9 4.6L10.4 1.5L13.6 1.5L14.1 4.6L15.7 5.3L18.3 3.5L20.5 5.7L18.7 8.3z M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8',profile:'M4 5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M4 16a3 3 0 0 1 6 0 M13 9h6 M13 12h6 M13 16h4',sliders:'M4 7h10M18 7h2M4 17h2M10 17h10 M16 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M8 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 11v5 M12 7.5v.01',sun:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M19.5 12H22 M17.3 17.3l1.8 1.8 M12 19.5V22 M6.7 17.3l-1.8 1.8 M4.5 12H2 M6.7 6.7L4.9 4.9 M12 4.5V2 M17.3 6.7l1.8-1.8',moon:'M20.5 14.2A8.4 8.4 0 1 1 9.8 3.5a6.7 6.7 0 0 0 10.7 10.7z',monitor:'M3 4h18v12H3z M12 16v4 M8 20h8',back:'M19 12H5m6-6-6 6 6 6',plus:'M12 5v14M5 12h14',edit:'m4 16 11-11 4 4L8 20H4v-4 M14 6l4 4',copy:'M9 8h11v13H9z M5 17H3V3h13v2',delete:'M4 6h16 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7m4-7v7',down:'m6 9 6 6 6-6',up:'m6 15 6-6 6 6',play:'m7 4 13 8-13 8V4z',stop:'M6 6h12v12H6z',check:'m4 12 5 5L20 6',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7 M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6',terminal:'M3 5h18v14H3z M7 9l3 3-3 3 M13 15h4',swap:'M5 8h14 M15 4l4 4-4 4 M19 16H5 M9 12l-4 4 4 4'};
 function el(tag,classes,text){const node=document.createElement(tag);if(classes)node.className=classes;if(text!==undefined)node.textContent=text;return node;}
@@ -38,7 +48,7 @@ function button(text,action,{icon,classes='',title}={}){const b=el('button',clas
 async function api(route,body){const res=await fetch('/api/'+route,{method:body===undefined?'GET':'POST',headers:{'x-cmcp-token':token,...(body===undefined?{}:{'content-type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});const value=await res.json();if(!res.ok)throw Error(data.preferences.language==='en'?(english[value.error]||t('操作未完成，请检查连接状态后重试。')):value.error);return value;}
 window.cmcpNativeReply=(id,value,error)=>{const pending=nativePending.get(id);if(!pending)return;nativePending.delete(id);clearTimeout(pending.timer);error?pending.reject(Error(error)):pending.resolve(value);};
 const nativePending=new Map();
-function native(action,payload={}){if(!window.webkit?.messageHandlers?.cmcp)return Promise.reject(Error('Native host unavailable'));return new Promise((resolve,reject)=>{const id=++nativeSequence;const timer=['update','install-update'].includes(action)?null:setTimeout(()=>{nativePending.delete(id);reject(Error('Native action timed out'));},180000);nativePending.set(id,{resolve,reject,timer});window.webkit.messageHandlers.cmcp.postMessage({id,action,payload});});}
+function native(action,payload={}){if(!window.webkit?.messageHandlers?.cmcp)return Promise.reject(Error('Native host unavailable'));return new Promise((resolve,reject)=>{const id=++nativeSequence;const timer=['update','install-update','install-desktop-dependencies'].includes(action)?null:setTimeout(()=>{nativePending.delete(id);reject(Error('Native action timed out'));},180000);nativePending.set(id,{resolve,reject,timer});window.webkit.messageHandlers.cmcp.postMessage({id,action,payload});});}
 function toast(message){notice.textContent=t(message);notice.classList.add('visible');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>notice.classList.remove('visible'),5000);}
 function theme(){const chosen=data.preferences.theme;document.documentElement.dataset.theme=chosen==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):chosen;document.documentElement.lang=data.preferences.language;}
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',theme);
@@ -72,7 +82,7 @@ function syncUpdates(){
   const view=updateView(data.updates,updateChecking,updateActive);
   for(const node of root.querySelectorAll('.dot'))node.hidden=!view.offered;
   const gear=root.querySelector('.gear');if(gear){const label=t(view.offered?'设置 · 有可用更新':'设置');gear.removeAttribute('title');delete gear.dataset.tooltip;gear.setAttribute('aria-label',label);}
-  if(updateUI){const {run,check,checkDetail,title,detail}=updateUI,label=t(view.button);title.textContent=view.offered?`${t('发现新版本')} ${view.version||''}`.trim():'CMCP '+data.version;detail.textContent=view.offered?`${t('当前版本')} ${data.version} · ${t(view.prepared?'更新已下载并校验，可稍后安装。':'下载并校验后，由你确认是否安装。')}`:[String(data.platform||'').replace('macos-','macOS '),view.status&&t(view.status)].filter(Boolean).join(' · ');run.textContent=label;run.title=label;run.setAttribute('aria-label',label);run.disabled=view.busy||!view.offered;const checkLabel=t(updateChecking?'正在检查…':'检查更新');check.textContent=checkLabel;check.title=checkLabel;check.setAttribute('aria-label',checkLabel);check.disabled=view.busy;checkDetail.textContent=t(view.status||'重新获取最新版本，包括已发现更新之后发布的版本。');}
+  if(updateUI){const {run,check,checkDetail,title,detail}=updateUI,label=t(view.button);title.textContent=view.offered?`${t('发现新版本')} ${view.version||''}`.trim():'CMCP '+data.version;detail.textContent=view.offered?`${t('当前版本')} ${data.version} · ${t(view.prepared?'更新已下载并校验，可稍后安装。':'下载并校验后，由你确认是否安装。')}`:[String(data.platform||'').replace('macos-','macOS '),view.status&&t(view.status)].filter(Boolean).join(' · ');run.textContent=label;run.title=label;run.setAttribute('aria-label',label);run.disabled=view.busy||!view.offered||(view.prepared&&!!dependencyInstall);const checkLabel=t(updateChecking?'正在检查…':'检查更新');check.textContent=checkLabel;check.title=checkLabel;check.setAttribute('aria-label',checkLabel);check.disabled=view.busy;checkDetail.textContent=t(view.status||'重新获取最新版本，包括已发现更新之后发布的版本。');}
   renderUpdateProgress();
 }
 // While an update runs the backend reports its old state until the download starts.
@@ -210,6 +220,43 @@ function settings(){const layout=el('div','settings-page'),side=el('aside','sett
   side.append(button('返回',()=>go('home'),{icon:'back'}),el('div','side-label',t('设置')),nav,el('div','side-version','CMCP v'+data.version));settingsHeading(head);main.append(settingsColumn());body.append(head,main);layout.append(side,body);root.replaceChildren(layout);}
 // Only the content below the heading moves; the sidebar and keyboard focus stay put.
 function showTab(next,nav,head){hideMenu();const direction=pageDirection(page,next);page=next;markChosen(nav,next);settingsHeading(head);const column=settingsColumn();root.querySelector('.settings-column').replaceWith(column);syncUpdates();window.scrollTo(0,0);turn(column,direction);}
+let dependencyInstall;
+function showDesktopDependencies(card,row){
+  const install=button('安装依赖',async()=>{
+    if(dependencyInstall)return;
+    showInstalling();
+    dependencyInstall=native('install-desktop-dependencies').finally(()=>{dependencyInstall=null;syncUpdates();});
+    syncUpdates();
+    try{
+      const state=await dependencyInstall;
+      show(state);
+      if(!state.missing.length)toast('依赖已安装。');
+      else toast(state.cancelled?'已取消依赖安装。':'依赖安装未完成。可以重试或使用 .deb 安装。');
+    }catch(error){
+      await refresh();
+      throw error;
+    }
+  },{classes:'soft'});
+  install.dataset.focusKey='update:dependencies';
+  const dependencyRow=row('桌面工具依赖','',install),detail=dependencyRow.querySelector('.row-detail');
+  function showInstalling(){
+    install.disabled=true;
+    detail.textContent=t('正在等待系统授权或安装依赖…');
+  }
+  function show(state){
+    if(!state.missing.length){dependencyRow.remove();return;}
+    if(!dependencyRow.parentNode)card.append(dependencyRow);
+    install.disabled=!state.canInstall;
+    detail.textContent=t('缺少系统包')+' '+state.missing.join('、');
+    if(!state.canInstall)detail.textContent+='。'+t('请使用 .deb 安装系统依赖。');
+  }
+  const refresh=()=>native('desktop-dependencies').then(show).catch(()=>{install.disabled=false;});
+  if(dependencyInstall){
+    card.append(dependencyRow);
+    showInstalling();
+    dependencyInstall.then(show,refresh);
+  }else refresh();
+}
 function settingsColumn(){const column=el('div','settings-column');updateUI=null;
   const section=(title,...rows)=>{const s=el('section','settings-section'),card=el('div','set-card');card.append(...rows);s.append(el('h3','',t(title)),card);column.append(s);return s;};
   const row=(title,detail,control)=>{const node=el(control.type==='checkbox'?'label':'div','set-row'),text=el('span','row-text');text.append(el('span','row-title',title&&t(title)),el('span','row-detail',detail&&t(detail)));node.append(text,control);return node;};
@@ -267,8 +314,10 @@ function settingsColumn(){const column=el('div','settings-column');updateUI=null
     const run=button('下载更新',installUpdate,{classes:'primary'});run.dataset.focusKey='update:run';const status=row('','',run);
     const check=button('检查更新',checkUpdates);check.dataset.focusKey='update:check';const checkRow=row('检查更新','重新获取最新版本，包括已发现更新之后发布的版本。',check);
     updateUI={run,check,checkDetail:checkRow.querySelector('.row-detail'),title:status.querySelector('.row-title'),detail:status.querySelector('.row-detail')};
-    if(data.capabilities?.selfUpdate!==false){const updates=section('更新',status,checkRow,row('发布页','查看每个版本的更新内容。',open('发布页',()=>native('open',{url:RELEASES}))));updates.querySelector('.set-card').before(el('div','update-slot'));}
-    else {updateUI=null;section('版本',row('CMCP '+data.version,'Ubuntu 开发版；后续通过 .deb 包更新。',el('span')));}
+    let versionSection;
+    if(data.capabilities?.selfUpdate!==false){versionSection=section('更新',status,checkRow,row('发布页','查看每个版本的更新内容。',open('发布页',()=>native('open',{url:RELEASES}))));versionSection.querySelector('.set-card').before(el('div','update-slot'));}
+    else {updateUI=null;versionSection=section('版本',row('CMCP '+data.version,'Ubuntu 开发版；后续通过 .deb 包更新。',el('span')));}
+    if(data.platform?.startsWith('linux-'))showDesktopDependencies(versionSection.querySelector('.set-card'),row);
     section('本机文件夹',row('程序文件夹','',open('程序文件夹',()=>native('program'))),row('日志文件夹','',open('日志文件夹',()=>native('logs'))));
     if(data.capabilities?.nativeUninstall!==false)section('卸载',row('卸载 CMCP','断开全部连接，尽量移除云电脑上的 Claude 配置，并删除本机的程序、设置和保存的密码。',button('卸载',uninstall,{classes:'danger-outline uninstall',title:'卸载 CMCP'})));
     else section('卸载',row('系统包管理器','使用 sudo apt remove cmcp 卸载；用户配置和系统密钥环中的密码会保留。',el('span')));

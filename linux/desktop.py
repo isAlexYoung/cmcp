@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen, ProxyHandler, build_opener
 sys.dont_write_bytecode = True
 from update_runtime import acknowledge, atomic, private, process_stamp, state_directory
+from desktop_dependencies import desktop_dependency_status, install_desktop_dependencies
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -34,6 +35,7 @@ class Desktop(Gtk.Application):
         self.exiting = False
         self.update_request = update_request
         self.update_busy = False
+        self.dependency_busy = False
         self.prepared_version = None
         self.close_to_tray = False
         self.tray = None
@@ -116,6 +118,14 @@ class Desktop(Gtk.Application):
         self.window.add(self.web)
         self.web.load_uri(self.identity["origin"] + "/#" + self.identity["token"])
         self.window.show_all()
+        self.start_tray()
+        if self.update_request:
+            GLib.timeout_add(300, self.acknowledge_update)
+        return False
+
+    def start_tray(self):
+        if self.tray is not None or self.exiting:
+            return
         try:
             from tray import Tray
             self.tray = Tray(self.window.get_icon_list()[:2], self.api, self.restore_window, self.rename_from_tray,
@@ -124,9 +134,6 @@ class Desktop(Gtk.Application):
         except (ImportError, ValueError, GLib.Error):
             # A desktop without a menu service can still run CMCP in a window.
             pass
-        if self.update_request:
-            GLib.timeout_add(300, self.acknowledge_update)
-        return False
 
     def acknowledge_update(self):
         if self.exiting or not self.update_request:
@@ -148,6 +155,9 @@ class Desktop(Gtk.Application):
             return json.loads(response.read())
 
     def begin_update(self, ident, action):
+        if action == "install-update" and self.dependency_busy:
+            self.reply(ident, error="请等依赖安装结束后再安装更新。")
+            return
         if self.update_busy:
             raise ValueError('Update already running')
         if action == 'install-update' and not self.action('confirm', {'text': '更新已下载并校验。现在安装并重启 CMCP？当前连接会暂时断开；启动失败将恢复原版本。'}):
@@ -192,6 +202,30 @@ class Desktop(Gtk.Application):
                 GLib.idle_add(failed)
         threading.Thread(target=worker, daemon=True).start()
 
+    def begin_dependency_install(self, ident):
+        if self.dependency_busy or self.update_busy:
+            self.reply(ident, error="已有安装或更新正在进行。")
+            return
+        self.dependency_busy = True
+
+        def completed(status=None):
+            self.dependency_busy = False
+            if status is None:
+                self.reply(ident, error="依赖安装未完成。可以重试或使用 .deb 安装。")
+                return
+            if not status["missing"]:
+                self.start_tray()
+            self.reply(ident, status)
+
+        def worker():
+            try:
+                status = install_desktop_dependencies()
+            except Exception:
+                status = None
+            GLib.idle_add(completed, status)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def navigation(self, _web, decision, kind):
         if kind in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
             uri = decision.get_navigation_action().get_request().get_uri()
@@ -220,12 +254,17 @@ class Desktop(Gtk.Application):
             if action in ('update', 'install-update'):
                 self.begin_update(ident, action)
                 return
+            if action == "install-desktop-dependencies" and not payload:
+                self.begin_dependency_install(ident)
+                return
             value = self.action(action, payload)
             self.reply(ident, value)
         except Exception:
             self.reply(data.get("id") if isinstance(locals().get("data"), dict) else None, error="操作失败，请检查桌面环境与安装依赖。")
 
     def action(self, action, payload):
+        if action == "desktop-dependencies" and not payload:
+            return desktop_dependency_status()
         if action == "open":
             uri = str(payload.get("url", ""))
             parsed = urlsplit(uri)
