@@ -3,9 +3,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import {createHash} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {once} from 'node:events';
+import {createInterface} from 'node:readline';
+import {promisify} from 'node:util';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {createLinuxTools, createLinuxBinaryTools} from '../tools.mjs';
 import {createDispatcher} from '../dispatcher.mjs';
+import {connectorSource} from '../connector-source.mjs';
+import {VERSION} from '../platform.mjs';
 test('Linux binary uploads verify hash before publishing and reject paths outside roots', async t => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cmcp-linux-binary-')));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -31,6 +40,58 @@ test('dispatcher exposes Linux names and real filesystem tools, with remote/loca
   assert.ok(!names.includes('linux_screenshot'));
   const response = await dispatcher.forward({jsonrpc: '2.0', id: 2, method: 'tools/call', params: {name: 'read_file', arguments: {path: path.join(root, 'fixture.txt')}}});
   assert.match(JSON.stringify(response.result), /local-file/);
+});
+test('Linux connector installs with the default catalog and serves Claude file writes and Bash', {skip: process.platform !== 'linux', timeout: 15000}, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cmcp-posix-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const local = path.join(root, 'local'), home = path.join(root, 'cloud');
+  fs.mkdirSync(local);
+  fs.mkdirSync(home);
+  const dispatcher = await createDispatcher({roots: [local], stateDir: path.join(root, 'state'), registryOptions: {watch: false}});
+  t.after(() => dispatcher.close());
+  const socketPath = path.join(root, 'link.sock');
+  const relay = net.createServer(socket => {
+    const input = createInterface({input: socket});
+    input.once('line', async line => {
+      input.close();
+      const request = JSON.parse(line);
+      const reply = request.op === 'status' ? {ok: true, connected: true} :
+        request.op === 'call' ? {ok: true, msg: await dispatcher.forward(request.msg)} :
+          {ok: false, code: 'unsupported'};
+      socket.end(JSON.stringify(reply) + '\n', () => socket.destroy());
+    });
+  }).listen(socketPath);
+  t.after(() => new Promise(resolve => relay.close(resolve)));
+  await once(relay, 'listening');
+  const source = path.join(root, 'connector.py');
+  fs.writeFileSync(source, connectorSource());
+  const codeConfig = path.join(home, '.claude.json');
+  const desktopConfig = path.join(home, '.config/Claude/claude_desktop_config.json');
+  const existing = {'windows-pc-files': {command: '/legacy/connector'}};
+  fs.writeFileSync(codeConfig, JSON.stringify({mcpServers: existing}));
+  const env = {...process.env, CLOUDPC_LINK_SOCKET: socketPath, CLOUDPC_CC_SHARED: '0'};
+  await promisify(execFile)('python3', ['-B', source, 'install', '--home', home, '--client', 'both', '--wait', '3'], {env, timeout: 8000});
+  const readServers = file => JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers;
+  const codeServers = readServers(codeConfig), entry = codeServers['linux-pc-files'];
+  assert.deepEqual(entry, readServers(desktopConfig)['linux-pc-files']);
+  assert.deepEqual(codeServers['windows-pc-files'], existing['windows-pc-files']);
+
+  const client = new Client({name: 'claude-code', version: '2.1.304'});
+  t.after(() => client.close());
+  await client.connect(new StdioClientTransport({...entry, env: {...env, ...entry.env}, stderr: 'ignore'}));
+  assert.equal(client.getServerVersion().name, 'linux-pc-files');
+  assert.equal(client.getServerVersion().version, VERSION);
+  const names = (await client.listTools()).tools.map(item => item.name);
+  assert.ok(names.includes('write_file') && names.includes('linux_execute'));
+  assert.ok(!names.includes('linux_screenshot') && !names.includes('windows_execute'));
+  const localFile = path.join(local, 'fixture.txt');
+  const answer = await client.callTool({name: 'write_file', arguments: {path: localFile, content: 'written through MCP'}});
+  assert.ok(!answer.isError);
+  assert.equal(fs.readFileSync(localFile, 'utf8'), 'written through MCP');
+  const denied = await client.callTool({name: 'write_file', arguments: {path: path.join(home, 'outside.txt'), content: 'denied'}});
+  assert.equal(denied.isError, true);
+  const executed = await client.callTool({name: 'linux_execute', arguments: {command: 'printf linux-bash', cwd: local}});
+  assert.equal(executed.structuredContent.output, 'linux-bash');
 });
 test('real Linux command and process supervisor run locally and clean up', {skip: process.platform !== 'linux'}, async t => {
   const tools = createLinuxTools({roots: [os.homedir()]}); t.after(() => tools.close());

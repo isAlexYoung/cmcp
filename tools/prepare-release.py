@@ -80,7 +80,7 @@ def inspect_deb(file, version, commit):
         manifest = json.loads(files[manifest_name])
         if (manifest.get('schema'), manifest.get('version'), manifest.get('sourceCommit'), manifest.get('platform'), manifest.get('development')) != (1, version, commit, 'linux-x64', False):
             raise ValueError('Wrong Debian manifest')
-        expected = {manifest_name, 'usr/bin/cmcp', 'usr/share/applications/cmcp.desktop', 'usr/share/icons/hicolor/1024x1024/apps/cmcp.png'}
+        expected = {manifest_name, 'usr/bin/cmcp', 'usr/share/applications/cmcp.desktop', 'usr/share/icons/hicolor/scalable/apps/cmcp.svg'}
         for entry in manifest['files']:
             name = 'opt/cmcp/' + entry['path']
             if name in expected or name not in files or sha256(files[name]) != entry['sha256']:

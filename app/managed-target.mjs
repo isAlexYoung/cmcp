@@ -100,7 +100,11 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
         } catch (error) {
           if (sameSession()&&record.connected) {
             publish(t.name, 'config-error', '共享连接已建立，但 Claude 配置失败，30 秒后重试');
-            log(`[${t.name}] shared connector setup failed (${error.status || error.code || 'setup'}) ${connectionDetail(error)}`);
+            const stage = /^(?:relay-[a-z-]{1,24}|connector-(?:upload|install|confirm))$/.test(error.stage || '') ? error.stage : 'unknown';
+            const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code || '') ? error.code : 'SETUP_FAILED';
+            const http = Number.isInteger(error.status) && error.status >= 100 && error.status <= 599 ? error.status : 0;
+            const exit = Number.isInteger(error.commandExit) && error.commandExit >= 0 && error.commandExit <= 255 ? error.commandExit : '-';
+            log(`[${t.name}] connector-setup stage=${stage} code=${code} http=${http} exit=${exit} ${connectionDetail(error)}`);
             record.retryAt = Date.now() + 30000;
           }
         } finally { record.installing = false; }

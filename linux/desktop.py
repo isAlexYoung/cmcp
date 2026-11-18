@@ -16,15 +16,18 @@ from update_runtime import acknowledge, atomic, private, process_stamp, state_di
 
 import gi
 gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("WebKit2", "4.0")
-from gi.repository import Gio, GLib, Gtk, WebKit2
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, WebKit2
 
 KIT = Path(__file__).resolve().parent
+APP_ID = "com.cmcp.Ubuntu"
 
 
 class Desktop(Gtk.Application):
     def __init__(self, update_request=None):
-        super().__init__(application_id="com.cmcp.Ubuntu", flags=Gio.ApplicationFlags.FLAGS_NONE)
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
         self.window = None
         self.backend = None
         self.identity = None
@@ -52,8 +55,13 @@ class Desktop(Gtk.Application):
             self.error("缺少捆绑的 Node 运行时。请安装构建好的 .deb 包，或按 Linux 开发说明启动。")
             self.quit()
             return
+        Gdk.set_program_class(APP_ID)
         self.window = Gtk.ApplicationWindow(application=self, title="CMCP · Ubuntu")
-        self.window.set_icon_name("cmcp")
+        icon = KIT.parent / "app/assets/cmcp-icon.svg"
+        self.window.set_icon_list([
+            GdkPixbuf.Pixbuf.new_from_file_at_scale(str(icon), size, size, True)
+            for size in (32, 64, 128)
+        ])
         self.window.set_default_size(1080, 760)
         self.window.set_size_request(640, 480)
         self.window.connect("delete-event", self.close_window)

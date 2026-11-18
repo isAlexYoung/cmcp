@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import {once} from 'node:events';
 import {createManager} from '../manager.mjs';
+import {Cloud} from '../cloud-api.mjs';
 test('Linux manager uses existing management API and rejects unauthenticated or cross-origin mutations', async t => {
   const address = http.Server.prototype.address;
   let blockedOnce = false;
@@ -42,4 +44,35 @@ test('Linux manager uses existing management API and rejects unauthenticated or 
   assert.equal((await call('uninstall', {})).status, 400);
   assert.equal((await call('targets/delete', {id: result.value.id})).status, 200);
   assert.equal(saved.size, 0);
+});
+
+test('CC setup uploads the Linux connector and registers both Claude clients', async t => {
+  const uploads = [];
+  const home = '/home/wdguest';
+  const server = http.createServer(async (request, response) => {
+    const pathname = new URL(request.url, 'http://localhost').pathname;
+    let result;
+    if (pathname === '/api/sys/info') result = {home, cmcp: {protocol: 1, available: true}};
+    else if (request.method === 'GET') result = {entries: ['.local', 'share', 'cloudpc-link'].map(name => ({name, kind: 'folder'}))};
+    else {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      uploads.push(JSON.parse(Buffer.concat(chunks)));
+      result = {ok: true};
+    }
+    response.end(JSON.stringify(result));
+  }).listen(0, '127.0.0.1');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  await once(server, 'listening');
+  const cloud = new Cloud('http://127.0.0.1:' + server.address().port, 'test-cookie', undefined, AbortSignal.timeout(5000));
+  const command = t.mock.method(cloud, 'command', async (script, cwd) => {
+    assert.equal(cwd, home);
+    assert.match(script, /CLOUDPC_CC_SHARED=1 python3 .*cloudpc-connector-linux\.py' install --name linux-pc-files --client both --wait 60$/);
+    return 'Connected: 12 local Linux PC tools\nConfig changed: 2\nConnector updated: yes\n';
+  });
+  assert.equal(await cloud.install(), true);
+  assert.equal(command.mock.callCount(), 1);
+  const connector = uploads.find(upload => upload.name === 'cloudpc-connector-linux.py');
+  assert.equal(connector.dir, home + '/.local/share/cloudpc-link');
+  assert.match(connector.content, /"serverInfo": \{"name": "linux-pc-files"/);
 });

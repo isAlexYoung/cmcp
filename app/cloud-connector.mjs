@@ -24,12 +24,17 @@ export class Cloud {
       let done=false,bytes=0;const chunks=[];
       const abort=()=>finish(Error('此云电脑连接已停止'));
       const finish=(error)=>{if(done)return;done=true;clearTimeout(timer);this.signal?.removeEventListener('abort',abort);try{if(ws.readyState===WebSocket.OPEN){ws.send(JSON.stringify({t:'kill'}));ws.close();}else ws.terminate();}catch{};if(error)reject(error);else resolve(Buffer.concat(chunks).toString('utf8'));};
-      const timer=setTimeout(()=>finish(Error('云端配置超时')),timeout);
+      const timer=setTimeout(()=>finish(Object.assign(Error('云端配置超时'),{code:'CLOUD_COMMAND_TIMEOUT'})),timeout);
       this.signal?.addEventListener('abort',abort,{once:true});
       ws.on('message',(data,binary)=>{if(binary){bytes+=data.length;if(bytes>2*1024*1024)return finish(Error('云端输出过大'));chunks.push(data);return;}
-        let m;try{m=JSON.parse(data);}catch{return;}if(!m||typeof m!=='object'||Array.isArray(m))return;if(m.t==='exit')finish(m.code===0?null:Error('云端命令失败（退出码 '+m.code+'），请检查 Python 3.9 和 Claude 配置'));else if(m.t==='error')finish(Error('无法启动云端配置终端'));
+        let m;try{m=JSON.parse(data);}catch{return;}if(!m||typeof m!=='object'||Array.isArray(m))return;
+        if(m.t==='exit'){
+          const commandExit=Number.isInteger(m.code)&&m.code>=0&&m.code<=255?m.code:null;
+          const detail=commandExit===null?'':'（退出码 '+commandExit+'）';
+          finish(commandExit===0?null:Object.assign(Error('云端命令失败'+detail+'，请检查 Python 3.9 和 Claude 配置'),{code:'CLOUD_COMMAND_EXIT',commandExit}));
+        }else if(m.t==='error')finish(Object.assign(Error('无法启动云端配置终端'),{code:'CLOUD_COMMAND_START'}));
       });
-      ws.on('error',error=>finish(Object.assign(Error('云端配置连接失败'),{code:error.code,connectionPhase:error.connectionPhase,connectionMs:error.connectionMs,reusedConnection:error.reusedConnection})));ws.on('close',()=>finish(Error('云端配置连接提前关闭')));
+      ws.on('error',error=>finish(Object.assign(Error('云端配置连接失败'),{code:error.code,connectionPhase:error.connectionPhase,connectionMs:error.connectionMs,reusedConnection:error.reusedConnection})));ws.on('close',()=>finish(Object.assign(Error('云端配置连接提前关闭'),{code:'CLOUD_COMMAND_CLOSED'})));
     });
   }
   async install(){

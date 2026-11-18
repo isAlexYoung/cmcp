@@ -15,13 +15,15 @@ test('Snap browser profiles use their own writable common area and remain device
 });
 test('browser detection and launch keep paths and metacharacters in separate arguments', async t => {
   const dir = fixture(t), calls = [], run = async (...args) => { calls.push(args); };
-  const found = detectBrowsers(name => name === 'firefox' ? '/usr/bin/firefox' : null);
+  const firefox = path.join(dir, 'firefox');
+  fs.writeFileSync(firefox, '#!/bin/sh\nexit 0\n', {mode: 0o755});
+  const found = detectBrowsers(name => name === 'firefox' ? firefox : null);
   assert.deepEqual(found.map(item => item.id), ['firefox']);
   const url = 'https://example.test/?value=$(echo+bad)';
   await openPage({}, dir, 'one', url, {found, run});
   assert.deepEqual(calls.pop(), ['xdg-open', [url]]);
   await openPage({browser: 'firefox', closeWeb: true}, dir, 'one', url, {found, run});
-  const call = calls.pop(); assert.equal(call[0], '/usr/bin/firefox');
+  const call = calls.pop(); assert.equal(call[0], firefox);
   assert.deepEqual(call[1], ['--no-remote', '--profile', pageFolder(dir, 'one', 'firefox'), '--new-window', url]);
   await assert.rejects(openPage({}, dir, 'one', 'file:///etc/passwd', {found, run}), /Invalid/);
 });

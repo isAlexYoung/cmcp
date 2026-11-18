@@ -13,6 +13,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+ICON = Path("app/assets/cmcp-icon.svg")
 
 
 def copy_source(root, target, node):
@@ -32,6 +33,8 @@ def copy_source(root, target, node):
         shutil.copytree(root / "macos" / name, target / "macos" / name)
     for name in ("mcp-tools-template", "mcp-presets"):
         shutil.copytree(root / "app" / name, target / "app" / name)
+    (target / ICON).parent.mkdir()
+    shutil.copy2(root / ICON, target / ICON)
     dependencies = root / "linux/node_modules"
     if not dependencies.is_dir():
         raise ValueError("Run npm --prefix linux ci --ignore-scripts first")
@@ -82,9 +85,9 @@ def build(output, node, commit=None, release=False):
         applications = stage / "usr/share/applications"
         applications.mkdir(parents=True)
         shutil.copy2(ROOT / "linux/cmcp.desktop", applications / "cmcp.desktop")
-        icon = stage / "usr/share/icons/hicolor/1024x1024/apps"
+        icon = stage / "usr/share/icons/hicolor/scalable/apps"
         icon.mkdir(parents=True)
-        shutil.copy2(ROOT / "app/assets/cmcp-icon-1024.png", icon / "cmcp.png")
+        shutil.copy2(ROOT / ICON, icon / "cmcp.svg")
         control = stage / "DEBIAN"
         control.mkdir()
         (control / "control").write_text(f"""Package: cmcp

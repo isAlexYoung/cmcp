@@ -1,4 +1,4 @@
-"""Installed GTK/WebKit smoke check, run as a normal user under Xvfb + D-Bus."""
+"""GTK/WebKit package smoke check, run as a normal user under Xvfb + D-Bus."""
 import importlib.util
 import os
 from pathlib import Path
@@ -6,11 +6,12 @@ import tempfile
 import time
 import sys
 sys.dont_write_bytecode = True
-sys.path.insert(0, '/opt/cmcp/linux')
+linux = Path(os.environ.get("CMCP_SMOKE_ROOT", "/opt/cmcp")) / "linux"
+sys.path.insert(0, str(linux))
 
 temporary = tempfile.TemporaryDirectory(prefix="cmcp-native-test-")
 os.environ["CMCP_STATE_DIR"] = temporary.name
-spec = importlib.util.spec_from_file_location("desktop", Path("/opt/cmcp/linux/desktop.py"))
+spec = importlib.util.spec_from_file_location("desktop", linux / "desktop.py")
 desktop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop)
 from gi.repository import GLib, WebKit2
@@ -56,6 +57,8 @@ def inspected(web, task):
         if stage == "home":
             if "暂无设备" not in text:
                 return
+            assert [icon.get_width() for icon in app.window.get_icon_list()] == [32, 64, 128]
+            assert desktop.Gdk.get_program_class() == desktop.APP_ID
             assert "开机自启" not in text
             assert "CMCP" in text
             screenshot("home")
