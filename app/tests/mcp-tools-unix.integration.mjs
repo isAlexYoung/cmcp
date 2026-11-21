@@ -31,7 +31,7 @@ test('turning a local tool on notifies the cloud client through the real relay, 
   const controller=new AbortController(),children=[],states=[],key='tools-device';
   const bootstrap=fileURLToPath(new URL('../ssh-bootstrap.py',import.meta.url));
   const task=startSshMcp({key,signal:controller.signal,catalog,changes:registry,login:{},retryDelay:50,status:s=>states.push(s),forward:registry.forward,
-    transport:()=>new SshPipe({login:{host:'fixture.invalid',username:'fixture',port:22,method:'password'},payload:bootstrapPayload(key,catalog),
+    transport:()=>new SshPipe({login:{host:'fixture.invalid',username:'fixture',port:22,method:'password'},payload:bootstrapPayload(key,catalog,'win32'),
       spawnProcess:(_file,_args,options)=>{const child=spawn('python3',['-I','-B','-u',bootstrap],{...options,env:{...options.env,HOME:home}});children.push(child);return child;}})});
   let client;
   t.after(async()=>{
@@ -95,7 +95,7 @@ test('a client that cannot show questions gets them declined at once',{skip:proc
   const controller=new AbortController(),children=[],states=[],key='questions-device';
   const bootstrap=fileURLToPath(new URL('../ssh-bootstrap.py',import.meta.url));
   const task=startSshMcp({key,signal:controller.signal,catalog,changes:registry,login:{},retryDelay:50,status:s=>states.push(s),forward:registry.forward,
-    transport:()=>new SshPipe({login:{host:'fixture.invalid',username:'fixture',port:22,method:'password'},payload:bootstrapPayload(key,catalog),
+    transport:()=>new SshPipe({login:{host:'fixture.invalid',username:'fixture',port:22,method:'password'},payload:bootstrapPayload(key,catalog,'win32'),
       spawnProcess:(_file,_args,options)=>{const child=spawn('python3',['-I','-B','-u',bootstrap],{...options,env:{...options.env,HOME:home}});children.push(child);return child;}})});
   let client;
   t.after(async()=>{controller.abort();await task;if(client&&client.exitCode===null)client.kill();await registry.close();
