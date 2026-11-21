@@ -1,6 +1,6 @@
 {
   "name": "cmcp-linux",
-  "version": "4.24.0",
+  "version": "4.24.1",
   "description": "CMCP Ubuntu 22.04 development client",
   "private": true,
   "type": "commonjs",

@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {proxySettings,proxyAddress} from './ui/network-settings.js';
 
-export const VERSION = '4.24.0';
+export const VERSION = '4.24.1';
 export const KIT = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_STATE = path.join(os.homedir(), 'Library', 'Application Support', 'CMCP');
 const requestedState = process.env.CMCP_STATE_DIR || DEFAULT_STATE;
