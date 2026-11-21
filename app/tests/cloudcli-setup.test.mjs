@@ -7,7 +7,7 @@ import http from 'node:http';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {discoverCloudcli,readCloudcliKinds,recordCloudcliKind,cloudcliDevice,createLaunchPage} from '../cloudcli.mjs';
-import {managedTargetFactory,SELF_HOSTED_READY} from '../managed-target.mjs';
+import {managedTargetFactory,SELF_HOSTED_READY,CLAUDEWEB_READY,CLAUDEWEB_PASSWORD,CLAUDEWEB_LOCKED} from '../managed-target.mjs';
 import {planSetup,runSetup,runRemote,setupCommand} from '../cloudcli-setup.mjs';
 import {remoteCommand,runAsHandoff,validRunAs,sharedSessionHandoff,SshPipe} from '../ssh-mcp.mjs';
 import {profileRevision,readSshLogin,sshWorkerRecord} from '../ssh-terminal.mjs';
@@ -30,7 +30,7 @@ test('a self-hosted CloudCLI page is told apart from WebDesktop and from errors 
 test('a self-hosted CloudCLI connects without a web MCP link and opens through a plain local entrance',async t=>{
   const origin=await serve(t,(_req,res)=>{res.writeHead(200,{'content-type':'text/html'});res.end('<!doctype html>');});
   const kinds=[],states=[],controller=new AbortController();
-  const create=managedTargetFactory({proxyFor:async()=>'',machine:'test',version:'test',forward:()=>assert.fail('no web MCP for a self-hosted CloudCLI'),askPassword:async()=>false,notify:()=>{},log:()=>{},passwordFor:()=>assert.fail('CloudCLI signs in by itself'),onCloudcliKind:(id,kind)=>kinds.push([id,kind]),selfHostedProbeMs:20});
+  const create=managedTargetFactory({proxyFor:async()=>'',machine:'test',version:'test',forward:()=>assert.fail('no web MCP for a self-hosted CloudCLI'),askPassword:async()=>false,notify:()=>{},log:()=>{},passwordFor:()=>assert.fail('ClaudeWeb signs in by itself'),onCloudcliKind:(id,kind)=>kinds.push([id,kind]),selfHostedProbeMs:20});
   const record=await create({name:'cloudcli:device',url:origin,authMode:'cloudcli',autoLogin:true},{signal:controller.signal,current:()=>!controller.signal.aborted,status:{set:(name,state,message)=>states.push([name,state,message])}});
   t.after(()=>{controller.abort();return record.stop();});
   assert.deepEqual(kinds,[['device','self-hosted']]);assert.equal(record.link,undefined);assert.equal(record.selfHosted,true);
@@ -42,24 +42,84 @@ test('a self-hosted CloudCLI connects without a web MCP link and opens through a
   const shown=states.length;await new Promise(r=>setTimeout(r,60));assert.ok(states.length>shown,'the page keeps being checked');assert.ok(states.slice(shown).every(([,state])=>state==='connected'));
 });
 
-test('CloudCLI kinds are recorded per device and unreadable records count as unknown',t=>{
+// A stand-in for standalone ClaudeWeb: its discovery answer, the code exchange, and its page.
+async function standaloneClaudeweb(t){
+  const seen=[],state={answer:{status:200,body:{code:'c'.repeat(43),expiresInSeconds:120}}};
+  const origin=await serve(t,async(req,res)=>{
+    let body='';for await(const c of req)body+=c;seen.push([req.method,req.url,body]);
+    const send=(status,value)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));};
+    if(req.url==='/api/auth/cmcp')return send(200,{protocol:'claudeweb-cmcp',version:1});
+    if(req.url==='/api/auth/cmcp/code')return send(state.answer.status,state.answer.body);
+    res.writeHead(200,{'content-type':'text/html'});res.end('<!doctype html>');
+  });
+  return {origin,seen,state};
+}
+async function startStandalone(t,origin,{autoLogin,passwordFor}){
+  const kinds=[],states=[],controller=new AbortController();
+  const create=managedTargetFactory({proxyFor:async()=>'',machine:'test',version:'test',forward:()=>assert.fail('no web MCP for standalone ClaudeWeb'),askPassword:async()=>false,notify:()=>{},log:()=>{},passwordFor,onCloudcliKind:(id,kind)=>kinds.push([id,kind]),selfHostedProbeMs:20});
+  const record=await create({name:'cloudcli:device',url:origin,authMode:'cloudcli',autoLogin},{signal:controller.signal,current:()=>!controller.signal.aborted,status:{set:(name,state,message)=>states.push([name,state,message])}});
+  t.after(()=>{controller.abort();return record.stop();});
+  const entrance=new URL(record.gateway.launchUrl);
+  const open=async()=>(await (await fetch(entrance.origin+'/__mcp/direct',{method:'POST',headers:{origin:entrance.origin,'content-type':'application/json'},body:JSON.stringify({token:entrance.hash.slice(1)})})).json()).url;
+  return {record,kinds,states,open};
+}
+
+test('standalone ClaudeWeb is recognised and its page opens signed in with a one-time code, never the password',async t=>{
+  const {origin,seen,state}=await standaloneClaudeweb(t);
+  assert.deepEqual(await discoverCloudcli(origin),{origin,kind:'claudeweb'});
+  const {record,kinds,states,open}=await startStandalone(t,origin,{autoLogin:true,passwordFor:async()=>'SAVED-PASSWORD'});
+  assert.deepEqual(kinds,[['device','claudeweb']]);assert.equal(record.link,undefined);assert.equal(record.claudeweb,true);
+  assert.deepEqual(states.at(-1),['cloudcli:device','connected',CLAUDEWEB_READY]);
+  assert.equal(await open(),origin+'/#cmcp='+'c'.repeat(43));
+  assert.deepEqual(JSON.parse(seen.find(([,url])=>url==='/api/auth/cmcp/code')[2]),{password:'SAVED-PASSWORD'});
+  state.answer={status:401,body:{success:false,error:{code:'AUTH_INVALID_PASSWORD'}}};
+  assert.equal(await open(),origin+'/','a refused password opens the page with its own sign-in');
+  assert.equal(states.at(-1)[2],CLAUDEWEB_PASSWORD);
+  state.answer={status:429,body:{success:false,error:{code:'AUTH_LOCKED'}}};
+  assert.equal(await open(),origin+'/');assert.equal(states.at(-1)[2],CLAUDEWEB_LOCKED);
+  assert.ok(!seen.some(([,url,body])=>url!=='/api/auth/cmcp/code'&&body.includes('SAVED-PASSWORD')),'the password goes only to the code exchange');
+});
+
+test('standalone ClaudeWeb without automatic sign-in opens its own login and never reads the password',async t=>{
+  const {origin,seen}=await standaloneClaudeweb(t);
+  const {states,open}=await startStandalone(t,origin,{autoLogin:false,passwordFor:()=>assert.fail('manual sign-in reads no password')});
+  assert.equal(await open(),origin+'/');assert.equal(states.at(-1)[2],CLAUDEWEB_READY);
+  assert.ok(!seen.some(([,url])=>url==='/api/auth/cmcp/code'));
+});
+
+test('the plan for standalone ClaudeWeb uses its own account and Claude CLI and installs nothing',async t=>{
+  const plan=r=>planSetup(r,{login,connector:'cmcp-ssh-0123456789abcdef'});
+  const standalone={source:'systemd',unit:'claudeweb',user:'claudeweb',port:3001,running:true,portKnown:true,claudeweb:true,node:'/opt/claudeweb/current/node/bin/node'};
+  const found=report({instances:[standalone],chosen:standalone,account:{uid:999,user:'claudeweb',home:'/home/claudeweb'},mcp:{readable:true,present:false}});
+  const ready=plan(found);
+  assert.equal(ready.blocker,undefined);assert.equal(ready.kind,'claudeweb');assert.equal(ready.install,null);assert.equal(ready.save.cloudcliUser,'claudeweb');
+  assert.ok(ready.summary.some(line=>line.startsWith('ClaudeWeb 独立版：systemd 服务 claudeweb')));assert.ok(ready.summary.some(line=>line.includes('claudeweb password')));
+  assert.match(plan({...found,claude:{found:false}}).blocker,/claudeweb doctor/);
+  assert.equal(plan(report()).kind,'self-hosted');assert.ok(plan(report()).summary.some(line=>line.startsWith('CloudCLI：systemd 服务 cloudcli')));
+  const d=temp(t);
+  const result=await runSetup({directory:d,id:'device',login,owner:process.pid,remote:async()=>({...found,mcp:{readable:true,present:true}}),ensure:async()=>{},save:async()=>{},confirm:async()=>({ok:true})});
+  assert.equal(result.ok,true,result.message);assert.equal(readCloudcliKinds(d).device,'claudeweb');
+});
+
+test('ClaudeWeb kinds are recorded per device and unreadable records count as unknown',t=>{
   const d=temp(t);assert.deepEqual(readCloudcliKinds(d),{});
   assert.equal(recordCloudcliKind(d,'device','self-hosted'),true);assert.equal(recordCloudcliKind(d,'device','self-hosted'),false);recordCloudcliKind(d,'other','webdesktop');
   assert.deepEqual(readCloudcliKinds(d),{device:'self-hosted',other:'webdesktop'});assert.throws(()=>recordCloudcliKind(d,'device','other'));
+  recordCloudcliKind(d,'third','claudeweb');assert.equal(readCloudcliKinds(d).third,'claudeweb');
   fs.writeFileSync(path.join(d,'cloudcli-kinds.json'),'{broken');assert.deepEqual(readCloudcliKinds(d),{});
   assert.equal(cloudcliDevice('cloudcli:a'),'a');assert.equal(cloudcliDevice('tunnel:cloudcli:b'),'b');assert.equal(cloudcliDevice('tunnel:web:c'),null);
 });
 
-test('root hands the SSH channel to the CloudCLI account, and nothing else changes without one',()=>{
+test('root hands the SSH channel to the ClaudeWeb account, and nothing else changes without one',()=>{
   const bootstrap='print(1)';assert.equal(remoteCommand(bootstrap),remoteCommand(bootstrap,undefined));assert.ok(remoteCommand(bootstrap).includes(sharedSessionHandoff.replace(/'/g,"'\\''")));
   const handed=remoteCommand(bootstrap,'ubuntu');assert.ok(handed.includes('runuser -u ubuntu'));assert.ok(!handed.includes('wd-claude-session'));
   for(const bad of ['root','Ubuntu','a;b','-x','a b',''])assert.equal(validRunAs(bad),false);assert.throws(()=>runAsHandoff('a;id'));
-  assert.equal(profileRevision(login),profileRevision({...login,cloudcliUser:''}),'devices without a CloudCLI account keep their channel revision');assert.notEqual(profileRevision(login),profileRevision({...login,cloudcliUser:'ubuntu'}));
+  assert.equal(profileRevision(login),profileRevision({...login,cloudcliUser:''}),'devices without a ClaudeWeb account keep their channel revision');assert.notEqual(profileRevision(login),profileRevision({...login,cloudcliUser:'ubuntu'}));
   let args;const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{};
   new SshPipe({login:{...login,cloudcliUser:'ubuntu'},payload:{},spawnProcess:(_f,a)=>{args=a;return child;}});assert.ok(args.at(-1).includes('runuser -u ubuntu'));
 });
 
-test('saved CloudCLI accounts are validated with the SSH profile and channel records report their message',t=>{
+test('saved ClaudeWeb accounts are validated with the SSH profile and channel records report their message',t=>{
   const d=temp(t);fs.writeFileSync(path.join(d,'ssh-logins.json'),JSON.stringify({schema:1,logins:[{...login,name:'good',cloudcliUser:'ubuntu'},{...login,name:'bad',cloudcliUser:'a;id'}]}));
   assert.equal(readSshLogin(d,'good').cloudcliUser,'ubuntu');assert.throws(()=>readSshLogin(d,'bad'));
   assert.deepEqual(sshWorkerRecord(d,'good'),{state:'',message:''});
@@ -71,7 +131,7 @@ test('the plan refuses other systems, foreign accounts and missing rights before
   assert.match(plan(report({os:{id:'centos',pretty:'CentOS Stream 9',supported:false}})).blocker,/只支持 Ubuntu 和 Debian；这台 VPS 是 CentOS Stream 9/);
   assert.match(plan(report({python:'3.8'})).blocker,/3\.9/);
   assert.match(plan(report({webdesktop:true})).blocker,/WebDesktop/);
-  assert.match(plan(report({chosen:undefined,instances:[]})).blocker,/没有在这台 VPS 上找到 CloudCLI/);
+  assert.match(plan(report({chosen:undefined,instances:[]})).blocker,/没有在这台 VPS 上找到 ClaudeWeb 独立版或 CloudCLI/);
   assert.match(plan(report({me:{uid:1001,user:'deploy',home:'/home/deploy'},privilege:'sudo-password'})).blocker,/改为 ubuntu 或 root/);
   const user={me:{uid:1000,user:'ubuntu',home:'/home/ubuntu'},claude:{found:false},npm:{path:'/usr/bin/npm',prefix:'/usr',userWritable:false}};
   assert.match(plan(report({...user,privilege:'none'}),{...login,username:'ubuntu'}).blocker,/需要 root 或 sudo 权限/);

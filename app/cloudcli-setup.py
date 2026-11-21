@@ -1,4 +1,5 @@
-"""Read-only checks and the one install step for a CloudCLI installed without WebDesktop.
+"""Read-only checks and the one install step for standalone ClaudeWeb or a CloudCLI installed
+without WebDesktop.
 
 CMCP runs this over the device's saved SSH login (app/cloudcli-setup.mjs). It reads one JSON
 line from stdin and prints one JSON line. It never changes CloudCLI, its service, nginx, Caddy
@@ -200,7 +201,7 @@ def merge_instances(units, processes):
 
 
 def as_user(user, me, command, environment, run=subprocess.run, timeout=30):
-    """Run a command as the CloudCLI account: directly when that is us, through runuser as root."""
+    """Run a command as the ClaudeWeb account: directly when that is us, through runuser as root."""
     env = {'HOME': user['home'], 'PATH': environment, 'LANG': 'C.UTF-8'}
     if user['user'] == me['user']:
         return run(command, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
@@ -296,6 +297,21 @@ def mcp_state(user, name):
     return {'config': config, 'readable': True, 'present': present}
 
 
+def claudeweb_instance(run=subprocess.run, root='/'):
+    """Standalone ClaudeWeb (isAlexYoung/ClaudeWeb): the claudeweb service and user, its own Claude CLI."""
+    if not os.path.isfile(os.path.join(root, 'etc/systemd/system/claudeweb.service')) or not os.path.isdir(os.path.join(root, 'opt/claudeweb')):
+        return None
+    match = re.search(r'(?m)^\s*SERVER_PORT=(\d{2,5})\s*$', read_text(os.path.join(root, 'etc/claudeweb/claudeweb.env'), 65536) or '')
+    port = int(match.group(1)) if match and 0 < int(match.group(1)) < 65536 else None
+    try:
+        running = run(['systemctl', 'is-active', '--quiet', 'claudeweb'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        running = False
+    node = os.path.join(root, 'opt/claudeweb/current/node/bin/node')
+    return {'source': 'systemd', 'unit': 'claudeweb', 'scope': 'system', 'user': 'claudeweb', 'port': port or DEFAULT_PORT, 'portKnown': bool(port),
+            'running': running, 'claudeweb': True, 'node': node if os.path.isfile(node) else None, 'path': None}
+
+
 def webdesktop_present(root='/'):
     return any(os.path.exists(os.path.join(root, item)) for item in ('etc/systemd/system/wd-claude-session.service', 'opt/webdesktop', 'etc/systemd/system/webdesktop.service'))
 
@@ -306,6 +322,9 @@ def inspect(request, run=subprocess.run):
     if not report['os']['supported']:
         return report
     instances = merge_instances(systemd_instances(), process_instances())
+    standalone = claudeweb_instance(run)
+    if standalone:
+        instances = [standalone] + instances
     report['instances'] = instances[:8]
     wanted = request.get('port')
     chosen = next((i for i in instances if i['running'] and i['port'] == wanted), None) or next((i for i in instances if i['running']), None) or (instances[0] if instances else None)
@@ -326,7 +345,7 @@ def inspect(request, run=subprocess.run):
 
 
 def install(request, run=subprocess.run):
-    """Install the Claude CLI for the CloudCLI account with npm, as that account or as root."""
+    """Install the Claude CLI for the ClaudeWeb account with npm, as that account or as root."""
     me = account(os.geteuid())
     user = account(name=request['account'])
     if not user:

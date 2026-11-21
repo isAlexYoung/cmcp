@@ -44,7 +44,7 @@ STATES = {
     "idle-ssh": ("SSH", "SSH"),
 }
 NEXT_MODE = {
-    "web": ("cloudcli", "切换为 CloudCLI 登录", "Switch to CloudCLI sign-in"),
+    "web": ("cloudcli", "切换为 ClaudeWeb 登录", "Switch to ClaudeWeb sign-in"),
     "cloudcli": ("ssh", "切换为 SSH 登录", "Switch to SSH sign-in"),
     "ssh": ("web", "切换为网页桌面登录", "Switch to WebDesktop sign-in"),
 }

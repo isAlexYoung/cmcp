@@ -76,7 +76,7 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 
 本机安装并启用 [MCP for Blender 插件](https://github.com/ahujasid/mcp-for-blender)，打开 Blender，在侧栏中启动插件服务。CMCP 默认连接 `127.0.0.1:9876`；插件改了端口时，让 Claude 在 Blender 工具的 `port` 参数中填写对应端口。
 
-从 4.20 起 Blender 工具默认关闭：在 设置 →“工具”中打开 Blender（CMCP 检测到 Blender 时也会提示一次）。连接 CMCP 后重新打开 VPS 上的 Claude，即可让它使用 `blender_*` 工具读取当前场景、检查物体、执行 Blender Python，以及获取视口图片。Windows 和 Mac 使用同一套接口；网页桌面、CloudCLI 与 SSH 终端沿用各自现有的 MCP 通道，无需开放 Blender 的公网端口，也不需要另外启动 `uvx` 服务。
+从 4.20 起 Blender 工具默认关闭：在 设置 →“工具”中打开 Blender（CMCP 检测到 Blender 时也会提示一次）。连接 CMCP 后重新打开 VPS 上的 Claude，即可让它使用 `blender_*` 工具读取当前场景、检查物体、执行 Blender Python，以及获取视口图片。Windows 和 Mac 使用同一套接口；网页桌面、ClaudeWeb 与 SSH 终端沿用各自现有的 MCP 通道，无需开放 Blender 的公网端口，也不需要另外启动 `uvx` 服务。
 
 例如：“通过 CMCP 检查我本机 Blender 的连接，读取当前场景，然后创建一个红色立方体，给我看视口截图。先不要覆盖已有文件。”
 

@@ -134,7 +134,7 @@ def main():
                 visible = [label(row) for row in layout()[2] if row[1].get("visible", True) and label(row)]
                 assert visible == ["Open main window", "Tray device · Stopped", "Exit application"], visible
                 assert [label(row) for row in device[2] if label(row)] == [
-                    "Connect device", "Disconnect device", "Rename", "Switch to CloudCLI sign-in"]
+                    "Connect device", "Disconnect device", "Rename", "Switch to ClaudeWeb sign-in"]
                 assert device[1]["icon-data"]
 
                 on_gtk(app.on_window_close)
@@ -146,7 +146,7 @@ def main():
                 wait_for(lambda: item("Tray device · Connected"))
                 click("Disconnect device")
                 wait_for(lambda: calls[-1][0] == "targets/stop")
-                for label_text, mode in (("Switch to CloudCLI sign-in", "cloudcli"), ("Switch to SSH sign-in", "ssh")):
+                for label_text, mode in (("Switch to ClaudeWeb sign-in", "cloudcli"), ("Switch to SSH sign-in", "ssh")):
                     click(label_text)
                     wait_for(lambda: calls[-1][1].get("mode") == mode)
                 click("Connect device")

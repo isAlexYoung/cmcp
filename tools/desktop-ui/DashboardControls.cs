@@ -194,7 +194,7 @@ namespace CMCP {
         internal string Channel;
         internal Palette Colors=Palette.Create(false);
         internal readonly ModernButton Open=new ModernButton{Glyph="monitor",Text="打开云电脑"}, Stop=new ModernButton{Glyph="stop",Text="停止连接",Destructive=true}, Logs=new ModernButton{Text="查看日志"};
-        internal readonly ModernButton Setup=new ModernButton{Glyph="settings",Text="初始化／修复 CloudCLI 连接",Neutral=true,Visible=false};
+        internal readonly ModernButton Setup=new ModernButton{Glyph="settings",Text="初始化／修复 ClaudeWeb 连接",Neutral=true,Visible=false};
         // Visible reads false while the card is collapsed, so the panel keeps its own flag.
         bool setupShown;
         internal bool SetupShown{get{return setupShown;}set{setupShown=value;Setup.Visible=value;}}

@@ -24,12 +24,12 @@ test('a self-hosted CloudCLI asks for SSH, starts its channel by default and kee
   const saved=new ManagerState(f.directory,f.secrets).sshFor(id);assert.equal(saved.cloudcliUser,'ubuntu');assert.equal(saved.cloudcliPort,3005);assert.equal(saved.sshAutoStart,true);
   assert.throws(()=>state.applyCloudcliSetup(id,{cloudcliUser:'a;b',cloudcliPort:3005,cloudcliTunnel:false}));
   await state.save({id,label:'CLI',url:'',password:'',autoLogin:false,icon:'',cloudcli:{url:'https://cli.example.com',password:'',autoLogin:false},ssh:{...ssh,sshAutoStart:false}},()=>assert.fail());
-  assert.equal(state.autoChannel(id),false,'the user can turn the channel off');assert.equal(state.sshFor(id).cloudcliUser,'ubuntu','editing keeps the CloudCLI account for the same server');
+  assert.equal(state.autoChannel(id),false,'the user can turn the channel off');assert.equal(state.sshFor(id).cloudcliUser,'ubuntu','editing keeps the ClaudeWeb account for the same server');
   await state.save({id,label:'CLI',url:'',password:'',autoLogin:false,icon:'',cloudcli:{url:'https://cli.example.com',password:'',autoLogin:false},ssh:{...ssh,host:'203.0.113.25'}},()=>assert.fail());
   assert.equal(state.sshFor(id).cloudcliUser,undefined,'another server never inherits the account');
 });
 
-test('setup over SSH without a direct address turns on the CloudCLI tunnel for the device',async t=>{
+test('setup over SSH without a direct address turns on the ClaudeWeb tunnel for the device',async t=>{
   const f=fixture(t),state=new ManagerState(f.directory,f.secrets);
   const id=await state.save({label:'VPS',url:'',password:'',autoLogin:false,icon:'',ssh},()=>assert.fail());
   state.applyCloudcliSetup(id,{cloudcliUser:'',cloudcliPort:3001,cloudcliTunnel:true});
@@ -46,7 +46,7 @@ test('the manager starts channels at launch, asks once during setup and keeps no
   const m=await createManager({...f,detectShared:async()=>true,proxy:async()=>'',dispatcher:{forward:async()=>null,close:async()=>{}},terminals:()=>[],browsers:()=>[],
     startChannel:async login=>{started.push(login.id);},
     setupCloudcli:async options=>{const answer=await options.confirm({summary:['系统：Ubuntu 24.04 LTS'],steps:['为 ubuntu 安装 Claude CLI'],needsPassword:true});seen=answer;if(!answer.ok)return {ok:false,cancelled:true,message:'已取消，未做任何修改。'};
-      await options.save({cloudcliUser:'ubuntu',cloudcliPort:3001,cloudcliTunnel:false,sshAutoStart:true});options.progress('正在启动本机工具的 SSH 后台通道…');return {ok:true,message:'CloudCLI 连接已就绪',url:'https://cli.example.com'};}});
+      await options.save({cloudcliUser:'ubuntu',cloudcliPort:3001,cloudcliTunnel:false,sshAutoStart:true});options.progress('正在启动本机工具的 SSH 后台通道…');return {ok:true,message:'ClaudeWeb 连接已就绪',url:'https://cli.example.com'};}});
   t.after(()=>m.close());
   assert.ok(await until(()=>started.length>0));assert.deepEqual(started,[id],'only the self-hosted device starts its channel');
   const call=async(route,body={})=>{const res=await fetch(m.origin+'/api/'+route,{method:'POST',headers:{'content-type':'application/json','x-cmcp-token':m.token},body:JSON.stringify(body)});return {status:res.status,body:await res.json()};};
@@ -58,7 +58,7 @@ test('the manager starts channels at launch, asks once during setup and keeps no
   assert.ok(!JSON.stringify(done).includes('SUDO-FIXTURE'));assert.ok(!fs.readdirSync(f.directory).some(name=>fs.statSync(path.join(f.directory,name)).isFile()&&fs.readFileSync(path.join(f.directory,name),'utf8').includes('SUDO-FIXTURE')));
   assert.equal(new ManagerState(f.directory,f.secrets).sshFor(id).cloudcliUser,'ubuntu');
   assert.equal((await call('targets/cloudcli-setup/answer',{id,ok:true})).status,400,'nothing waits for an answer any more');
-  await call('targets/login',{id,mode:'cloudcli'});await call('targets/start',{id});assert.ok(await until(()=>started.length===2),'starting the CloudCLI connection also starts its channel');assert.equal(new ManagerState(f.directory,f.secrets).controlMap().get(cloudcliName(id)).enabled,true);
+  await call('targets/login',{id,mode:'cloudcli'});await call('targets/start',{id});assert.ok(await until(()=>started.length===2),'starting the ClaudeWeb connection also starts its channel');assert.equal(new ManagerState(f.directory,f.secrets).controlMap().get(cloudcliName(id)).enabled,true);
   assert.equal((await call('targets/cloudcli-setup',{id:other})).body.phase,'confirm');await call('targets/cloudcli-setup/answer',{id:other,ok:false});
   assert.ok(await until(async()=>(await call('targets/cloudcli-setup/status',{id:other})).body.result?.cancelled===true));
 });

@@ -33,7 +33,7 @@ namespace CMCP {
                 check(form.Options.theme=="system"&&form.Preferences.dark==AppSettings.SystemDark(false,false),"main window defaults to the current system app theme");
                 var a=menu.Targets["preview-a"];var b=menu.Targets["preview-b"];
                 check(a.Text=="desktop1.example.com · 已连接"&&b.Text=="desktop2.example.com · 已停止","tray lists every cloud hostname and current connection state");
-                check(a.DropDownItems.Count==5&&a.DropDownItems.Cast<ToolStripItem>().Take(3).Select(i=>i.Text).SequenceEqual(new[]{"连接设备","断开设备","重命名"})&&a.DropDownItems[3] is ToolStripSeparator&&a.DropDownItems[4].Text=="切换为 CloudCLI 登录","hoverable cloud row provides three target actions and a sign-in switch");
+                check(a.DropDownItems.Count==5&&a.DropDownItems.Cast<ToolStripItem>().Take(3).Select(i=>i.Text).SequenceEqual(new[]{"连接设备","断开设备","重命名"})&&a.DropDownItems[3] is ToolStripSeparator&&a.DropDownItems[4].Text=="切换为 ClaudeWeb 登录","hoverable cloud row provides three target actions and a sign-in switch");
                 check(!a.DropDownItems[0].Enabled&&a.DropDownItems[1].Enabled&&b.DropDownItems[0].Enabled&&!b.DropDownItems[1].Enabled,"tray connect and disconnect availability follows each cloud state");
                 form.HideToTray();b.DropDownItems[0].PerformClick();
                 check(!form.Visible&&form.TrayVisible&&form.Cards["preview-b"].Target.State=="connected"&&form.Cards["preview-a"].Target.State=="connected","tray connects only selected cloud without opening or hiding the resident icon");
@@ -52,7 +52,7 @@ namespace CMCP {
                 form.Cards["preview-b"].Target.State="offline";form.RefreshState();Application.DoEvents();
                 check(menu.Menu.Visible&&b.DropDown.Visible&&Object.ReferenceEquals(b,menu.Targets["preview-b"])&&b.Text.Contains("等待网络恢复"),"live status refresh preserves the open tray menu and cloud submenu");
                 menu.Menu.Close();var next=form.Options.Copy();next.language="en";form.ChangeSettings(next);
-                check(menu.Targets["preview-b"].Text.Contains("Waiting for network")&&b.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"Connect device","Disconnect device","Rename","","Switch to CloudCLI sign-in"}),"tray captions and actions follow the selected interface language");
+                check(menu.Targets["preview-b"].Text.Contains("Waiting for network")&&b.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text).SequenceEqual(new[]{"Connect device","Disconnect device","Rename","","Switch to ClaudeWeb sign-in"}),"tray captions and actions follow the selected interface language");
                 form.OpenSettings();b.DropDownItems[2].PerformClick();Application.DoEvents();
                 check(form.Visible&&form.TrayVisible&&form.Settings==null&&form.Editor!=null&&form.Editor.TargetName=="preview-b"&&form.Editor.NameInput.Box.Focused,"tray rename opens the existing edit page and focuses the display name");
                 form.Editor.NameInput.Box.Text="Renamed cloud";form.Editor.Save.PerformClick();Application.DoEvents();

@@ -264,7 +264,7 @@ namespace CMCP {
         void Launch(string action,TargetCard card,string initialUrl){
             if(BackendStarting||ExitPending)return;
             // A device with only SSH has no connection in the backend at all.
-            if(card!=null&&card.Connection.Url.Length==0&&(action=="connect"||action=="open")){if(action=="connect"||action=="open")Error(card.TunnelActive?"还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。":card.CloudActive?"还没有填写 CloudCLI 地址，请编辑设备后再连接。":"还没有填写网页桌面地址，请编辑设备后再连接。");return;}
+            if(card!=null&&card.Connection.Url.Length==0&&(action=="connect"||action=="open")){if(action=="connect"||action=="open")Error(card.TunnelActive?"还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。":card.CloudActive?"还没有填写 ClaudeWeb 地址，请编辑设备后再连接。":"还没有填写网页桌面地址，请编辑设备后再连接。");return;}
             if(updates.Installing){Error("正在下载并校验更新…");return;}
             if(preview){if(card!=null&&(action=="connect"||action=="stop")){if(card.CloudActive&&card.CloudTarget==null)card.CloudTarget=card.Connection;var connection=card.Connection;connection.State=action=="connect"?"connected":"stopped";connection.Detail=LocalState.Detail(connection.State);card.RefreshTarget(card.Target);}return;}
             if(action!="add"&&card==null)return;
@@ -282,12 +282,12 @@ namespace CMCP {
         }
         void ConnectCard(TargetCard card){Select(card);if(card.SshActive){OpenTerminal(card);return;}if(card.CloudActive&&card.Connection.State=="stopped"&&AutoChannel(card.Ssh)&&card.SshState==""&&StartChannel!=null)StartChannel(card.Ssh);bool active=card.Connection.State=="connected"||card.BusyConnect||card.Connection.State=="connecting"||card.Connection.State=="configuring"||card.Connection.State=="waiting-login"||card.Connection.State=="recovering"||card.Connection.State=="unstable";if(active)StopCard(card);else Launch("connect",card,"");}
         // On for a self-hosted CloudCLI unless the user turned it off; other devices only when asked.
-        internal bool AutoChannel(SshLogin login){string kind;return login!=null&&(login.sshAutoStart.HasValue?login.sshAutoStart.Value:Kinds.TryGetValue(login.name,out kind)&&kind==CloudCliKinds.SelfHosted);}
+        internal bool AutoChannel(SshLogin login){string kind;return login!=null&&(login.sshAutoStart.HasValue?login.sshAutoStart.Value:Kinds.TryGetValue(login.name,out kind)&&CloudCliKinds.UsesSshTools(kind));}
         internal int StartAutoChannels(){if(!preview)Kinds=CloudCliKinds.Load(stateDirectory);int started=0;foreach(var login in Ssh.logins.ToArray())if(AutoChannel(login)&&ReadSshState(stateDirectory,login.name)==""&&StartChannel(login))started++;return started;}
         // Over the saved SSH: check the VPS, ask once, add only what is missing, then offer to open CloudCLI.
         internal void SetupCloudCli(TargetCard card){
             Select(card);string name=card.Target.Name;
-            if(card.Ssh==null){Error("自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。");OpenEditor(name);if(Editor!=null)Editor.ShowSsh();return;}
+            if(card.Ssh==null){Error(card.CloudKind==CloudCliKinds.ClaudeWeb?"ClaudeWeb 独立版需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。":"自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。");OpenEditor(name);if(Editor!=null)Editor.ShowSsh();return;}
             if(setups.ContainsKey(name)||preview&&StartSetup==null)return;
             CloudCliSetupRun run;try{run=StartSetup(card.Ssh,card.Cloud==null?"":card.Cloud.url);}catch{Error("无法启动初始化，请确认便携包完整。");return;}
             setups[name]=run;card.SetupRunning=true;card.SetExpanded(true,false);progress[card.ConnectionName]="正在通过 SSH 检查 VPS（只读）…";RefreshState();
@@ -309,8 +309,8 @@ namespace CMCP {
                 string message=LocalState.Text(LocalState.Get(data,"message"));bool success=Object.Equals(LocalState.Get(data,"ok"),true),cancelled=Object.Equals(LocalState.Get(data,"cancelled"),true);
                 progress[card.ConnectionName]=message;Kinds=CloudCliKinds.Load(stateDirectory);RefreshState();
                 if(cancelled)return;
-                if(!success){MessageBox.Show(this,L.Message(message),L.Text("初始化／修复 CloudCLI 连接"),MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
-                if(MessageBox.Show(this,L.Message(message)+"\r\n\r\n"+L.Text("现在打开 CloudCLI 吗？"),L.Text("初始化／修复 CloudCLI 连接"),MessageBoxButtons.YesNo,MessageBoxIcon.Information)==DialogResult.Yes&&current!=null)OpenCloud(current);
+                if(!success){MessageBox.Show(this,L.Message(message),L.Text("初始化／修复 ClaudeWeb 连接"),MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
+                if(MessageBox.Show(this,L.Message(message)+"\r\n\r\n"+L.Text("现在打开 ClaudeWeb 吗？"),L.Text("初始化／修复 ClaudeWeb 连接"),MessageBoxButtons.YesNo,MessageBoxIcon.Information)==DialogResult.Yes&&current!=null)OpenCloud(current);
             };
         }
         // Only the fields the setup decided; the rest of the SSH details stay as the user saved them.
@@ -381,7 +381,7 @@ namespace CMCP {
             var editor=Editor;
             if(editor.IsNew){if(editor.HasWeb)SaveConnection(editor,null);else SaveSshOnly(editor,null);return;}
             TargetCard card;if(!Cards.TryGetValue(editor.TargetName,out card)){editor.ShowError("所选设备已不存在，请返回列表。");return;}
-            if(card.CloudTarget!=null&&card.CloudTarget.State!="stopped"&&(editor.CloudPasswordInput.Box.Text.Length>0||editor.HasCloud!=(card.Cloud!=null)||card.Cloud!=null&&(editor.CloudUrlInput.Box.Text.Trim().TrimEnd('/')!=card.Cloud.url.TrimEnd('/')||editor.CloudRemember.Checked!=card.Cloud.autoLogin))){editor.ShowError("请先停止 CloudCLI 连接，再修改地址、密码或自动登录。");return;}
+            if(card.CloudTarget!=null&&card.CloudTarget.State!="stopped"&&(editor.CloudPasswordInput.Box.Text.Length>0||editor.HasCloud!=(card.Cloud!=null)||card.Cloud!=null&&(editor.CloudUrlInput.Box.Text.Trim().TrimEnd('/')!=card.Cloud.url.TrimEnd('/')||editor.CloudRemember.Checked!=card.Cloud.autoLogin))){editor.ShowError("请先停止 ClaudeWeb 连接，再修改地址、密码或自动登录。");return;}
             if(IsBusy(card.Target.Name)){editor.ShowError("此设备正在处理操作，请完成后重试。");return;}
             var proposed=editor.BuildSsh(card.Target.Name);if((card.WebTunnelTarget!=null&&card.WebTunnelTarget.State!="stopped"||card.CloudTunnelTarget!=null&&card.CloudTunnelTarget.State!="stopped")&&new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(proposed)!=new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(card.Ssh)){editor.ShowError("请先停止此设备的 SSH 隧道，再修改连接信息。");return;}
             bool hadWeb=card.Target.Url.Length>0;
@@ -432,7 +432,7 @@ namespace CMCP {
         }
         void SaveCloud(CloudCliLogin login,string name){
             if(login==null&&Cloud.Get(name)==null)return;
-            if(login!=null&&Cloud.logins.Any(l=>l.name!=name&&l.url.TrimEnd('/')==login.url.TrimEnd('/')))throw new IOException("该 CloudCLI 地址已添加。");
+            if(login!=null&&Cloud.logins.Any(l=>l.name!=name&&l.url.TrimEnd('/')==login.url.TrimEnd('/')))throw new IOException("该 ClaudeWeb 地址已添加。");
             var before=Cloud.logins.ToList();try{if(login==null)Cloud.Remove(name);else{login.name=name;Cloud.Put(login);}if(!preview)Cloud.Save(stateDirectory);}catch{Cloud.logins=before;throw;}
         }
         void SaveSsh(){if(!preview)Ssh.Save(stateDirectory);}
@@ -539,7 +539,7 @@ namespace CMCP {
             }
         }
         void DeleteCard(TargetCard card){Select(card);if(preview){Ssh.Remove(card.Target.Name);targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,(L.Language=="en"?"Remove this device and stop its connection?\r\n":"删除这台设备的本地配置并停止它的连接？\r\n")+(card.Target.Url.Length>0?card.Target.Url:card.Ssh!=null?card.Ssh.Address:"")+(L.Language=="en"?"\r\nVPS and local files are preserved. Other connections remain unchanged.":"\r\n不会删除 VPS 或本机文件，其他连接保持不变。"),L.Text("删除设备"),MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK){
-            try{SaveCloud(null,card.Target.Name);}catch{Error("无法删除 CloudCLI 配置，请重试。");return;}
+            try{SaveCloud(null,card.Target.Name);}catch{Error("无法删除 ClaudeWeb 配置，请重试。");return;}
             if(card.Target.Url.Length==0){Ssh.Remove(card.Target.Name);try{SaveSsh();}catch{Error("无法保存 SSH 信息，未更改其他内容。");}targets.Remove(card.Target);RefreshState();return;}
             Launch("remove",card,"");foreach(var pending in children.Where(p=>p.Name==card.Target.Name&&p.Action=="remove"))pending.DeleteSsh=true;}}
         void CopyCard(TargetCard card){if(card.SshActive?card.Ssh==null:card.Connection.Url.Length==0)return;try{Clipboard.SetText(card.Address);notice="地址已复制（不包含登录凭据）";status.Text=L.Text(notice);}catch{Error("剪贴板暂时不可用，请稍后重试。");}}

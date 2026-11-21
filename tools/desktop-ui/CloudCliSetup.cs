@@ -12,7 +12,9 @@ using System.Windows.Forms;
 namespace CMCP {
     // What the backend or the setup action found each device's CloudCLI to be (app/cloudcli.mjs).
     internal static class CloudCliKinds {
-        internal const string SelfHosted="self-hosted",WebDesktop="webdesktop";
+        internal const string SelfHosted="self-hosted",WebDesktop="webdesktop",ClaudeWeb="claudeweb";
+        // Standalone ClaudeWeb and a self-installed CloudCLI get their local tools over the SSH channel.
+        internal static bool UsesSshTools(string kind){return kind==SelfHosted||kind==ClaudeWeb;}
         internal static Dictionary<string,string> Load(string directory){
             var kinds=new Dictionary<string,string>(StringComparer.Ordinal);
             try{
@@ -21,7 +23,7 @@ namespace CMCP {
                 var data=LocalState.Obj(LocalState.Read(file));
                 if(Convert.ToString(LocalState.Get(data,"schema"))!="1")return kinds;
                 var values=LocalState.Obj(LocalState.Get(data,"kinds"));if(values==null)return kinds;
-                foreach(var pair in values){string kind=pair.Value as string;if(pair.Key.Length<=480&&(kind==SelfHosted||kind==WebDesktop))kinds[pair.Key]=kind;}
+                foreach(var pair in values){string kind=pair.Value as string;if(pair.Key.Length<=480&&(kind==SelfHosted||kind==WebDesktop||kind==ClaudeWeb))kinds[pair.Key]=kind;}
             }catch{}
             return kinds;
         }
@@ -95,7 +97,7 @@ namespace CMCP {
         internal readonly Label Body=new Label{AutoSize=false};
         internal CloudCliSetupDialog(IEnumerable<string> summary,IEnumerable<string> steps,bool needsPassword){
             var colors=Palette.Create(AppSettings.SystemDark(false,false));
-            Text=L.Text("初始化／修复 CloudCLI 连接");FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;
+            Text=L.Text("初始化／修复 ClaudeWeb 连接");FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;
             Font=new Font("Microsoft YaHei UI",10F);BackColor=colors.Surface;ForeColor=colors.Text;AutoScaleMode=AutoScaleMode.Dpi;
             var text=new StringBuilder(L.Text("检查结果")+"\r\n");foreach(var line in summary)text.Append("  · "+line+"\r\n");
             var changes=steps.ToList();
@@ -116,9 +118,9 @@ namespace CMCP {
     internal static class CloudCliSetupTests {
         internal static void Run(string root,Action<bool,string> check){
             string directory=Path.Combine(root,"cloudcli-setup");Directory.CreateDirectory(directory);
-            check(CloudCliKinds.Load(directory).Count==0,"no CloudCLI kind is known before the backend probes");
-            File.WriteAllText(Path.Combine(directory,"cloudcli-kinds.json"),"{\"schema\":1,\"kinds\":{\"a\":\"self-hosted\",\"b\":\"webdesktop\",\"c\":\"other\"}}");
-            var kinds=CloudCliKinds.Load(directory);check(kinds.Count==2&&kinds["a"]==CloudCliKinds.SelfHosted&&kinds["b"]==CloudCliKinds.WebDesktop,"CloudCLI kinds are read as the backend records them and unknown values are ignored");
+            check(CloudCliKinds.Load(directory).Count==0,"no ClaudeWeb kind is known before the backend probes");
+            File.WriteAllText(Path.Combine(directory,"cloudcli-kinds.json"),"{\"schema\":1,\"kinds\":{\"a\":\"self-hosted\",\"b\":\"webdesktop\",\"c\":\"other\",\"d\":\"claudeweb\"}}");
+            var kinds=CloudCliKinds.Load(directory);check(kinds.Count==3&&kinds["a"]==CloudCliKinds.SelfHosted&&kinds["b"]==CloudCliKinds.WebDesktop&&kinds["d"]==CloudCliKinds.ClaudeWeb&&CloudCliKinds.UsesSshTools(kinds["d"])&&!CloudCliKinds.UsesSshTools(kinds["b"]),"ClaudeWeb kinds are read as the backend records them and unknown values are ignored");
             File.WriteAllText(Path.Combine(directory,"cloudcli-kinds.json"),"{broken");check(CloudCliKinds.Load(directory).Count==0,"an unreadable kind record counts as unknown");
             var login=new SshLogin{name="device",host="203.0.113.5",username="root",secret="TESTONLY-CIPHER"};
             var channel=SshChannel.Info(@"C:\CMCP app",@"C:\state dir",login,42,@"C:\Windows\System32\OpenSSH\ssh.exe",@"C:\CMCP app\CMCP.exe");
@@ -128,8 +130,8 @@ namespace CMCP {
             check(SshChannel.Quote("a\"b\\")=="\"a\\\"b\\\\\""&&SshChannel.Quote("plain")=="plain","process arguments are quoted the way Windows splits them");
             check(SshLogin.ValidAccount("")&&SshLogin.ValidAccount("ubuntu")&&!SshLogin.ValidAccount("root")&&!SshLogin.ValidAccount("a;b")&&!SshLogin.ValidAccount("Ubuntu"),"only plain Linux account names can be saved for the SSH hand-over");
             var store=new SshStore();store.Put(new SshLogin{name="device",host="203.0.113.5",username="root",cloudcliUser="ubuntu",sshAutoStart=true});store.Save(directory);
-            var restored=SshStore.Load(directory).Get("device");check(restored!=null&&restored.cloudcliUser=="ubuntu"&&restored.sshAutoStart==true,"the CloudCLI account and the automatic channel switch survive a save");
-            File.WriteAllText(SshStore.PathFor(directory),File.ReadAllText(SshStore.PathFor(directory)).Replace("\"ubuntu\"","\"a;b\""));check(SshStore.Load(directory).ReadError,"a damaged CloudCLI account is refused, not used");
+            var restored=SshStore.Load(directory).Get("device");check(restored!=null&&restored.cloudcliUser=="ubuntu"&&restored.sshAutoStart==true,"the ClaudeWeb account and the automatic channel switch survive a save");
+            File.WriteAllText(SshStore.PathFor(directory),File.ReadAllText(SshStore.PathFor(directory)).Replace("\"ubuntu\"","\"a;b\""));check(SshStore.Load(directory).ReadError,"a damaged ClaudeWeb account is refused, not used");
             using(var dialog=new CloudCliSetupDialog(new[]{"系统：Ubuntu 24.04 LTS"},new[]{"为 ubuntu 安装 Claude CLI"},true)){
                 dialog.Show();Application.DoEvents();dialog.Password.Text="SUDO-FIXTURE";
                 check(dialog.Password.UseSystemPasswordChar&&dialog.Body.Text.Contains("Ubuntu 24.04")&&dialog.Body.Text.Contains("安装 Claude CLI")&&dialog.Confirm.Bottom<=dialog.ClientSize.Height,"the setup question lists what was found and what would change, with a hidden password box");
@@ -152,18 +154,18 @@ namespace CMCP {
                 form.RefreshState();Pump();
                 check(form.StartAutoChannels()==1&&started.SequenceEqual(new[]{"self"}),"at start CMCP connects the SSH channel only for the self-hosted CloudCLI");
                 var self=form.Cards["self"];var desk=form.Cards["desk"];
-                check(self.SetupOffered&&self.Details.SetupShown&&!desk.SetupOffered&&!desk.Details.SetupShown,"only a CloudCLI that is not WebDesktop's offers the setup action");
+                check(self.SetupOffered&&self.Details.SetupShown&&!desk.SetupOffered&&!desk.Details.SetupShown,"only a ClaudeWeb that is not WebDesktop's offers the setup action");
                 check(self.Details.Channel=="已停止"&&desk.Details.Channel==null,"a self-hosted CloudCLI shows its local tools channel in the details");
                 self.SetExpanded(true,false);Pump();check(self.Details.Setup.Visible&&self.Details.Setup.Bottom<=self.Details.Open.Top&&self.Details.Setup.Right<=self.Details.Width&&form.LayoutFits(),"the setup button sits above the other detail buttons and fits");
                 form.OpenEditor("self");Pump();var editor=form.Editor;
                 check(editor!=null&&editor.AutoChannel.Checked,"the editor shows the channel switch on for a self-hosted CloudCLI");
                 editor.ShowSsh();editor.HostInput.Box.Clear();editor.UserInput.Box.Clear();check(!editor.ValidateFields(),"a self-hosted CloudCLI cannot be saved without SSH details");
-                editor.HostInput.Box.Text="203.0.113.5";editor.UserInput.Box.Text="root";check(editor.ValidateFields()&&editor.BuildSsh("self").sshAutoStart==null,"an untouched switch keeps following the CloudCLI kind");
+                editor.HostInput.Box.Text="203.0.113.5";editor.UserInput.Box.Text="root";check(editor.ValidateFields()&&editor.BuildSsh("self").sshAutoStart==null,"an untouched switch keeps following the ClaudeWeb kind");
                 editor.AutoChannel.Checked=false;check(editor.BuildSsh("self").sshAutoStart==false,"turning the switch off is saved for this device");
                 editor.Save.PerformClick();Pump();
                 check(form.Editor==null&&SshStore.Load(state).Get("self").sshAutoStart==false,"the device keeps the user's channel choice");
                 started.Clear();check(form.StartAutoChannels()==0&&started.Count==0,"a channel the user turned off does not start with CMCP");
-                form.OpenEditor("desk");Pump();check(form.Editor!=null&&!form.Editor.AutoChannel.Checked,"WebDesktop CloudCLI devices keep the channel off by default");form.CloseEditor();Pump();
+                form.OpenEditor("desk");Pump();check(form.Editor!=null&&!form.Editor.AutoChannel.Checked,"WebDesktop ClaudeWeb devices keep the channel off by default");form.CloseEditor();Pump();
             }
         }
     }

@@ -9,7 +9,7 @@ try{
     $null=New-Item -ItemType Directory -Path $temporary
     Write-Utf8File (Join-Path $temporary 'ssh-logins.json') (@{schema=1;logins=@(@{name='device';host='example.test';port=22;username='user';method='password';webTunnel=$true;webPort=3000;webAutoLogin=$true;webSecret=(Protect-Text 'WEB-TEST-ONLY');cloudcliTunnel=$true;cloudcliPort=3001;cloudcliAutoLogin=$false;cloudcliSecret=''})}|ConvertTo-Json -Depth 5)
     $targets=@(Get-ConnectionTargets)
-    Check ($targets.Count -eq 2) 'SSH web profiles work without a saved URL or CloudCLI file'
+    Check ($targets.Count -eq 2) 'SSH web profiles work without a saved URL or ClaudeWeb file'
     $web=@($targets|Where-Object name -eq 'tunnel:web:device')[0];$cloud=@($targets|Where-Object name -eq 'tunnel:cloudcli:device')[0]
     Check ($web.url -eq 'http://127.0.0.1:3000' -and $cloud.url -eq 'http://127.0.0.1:3001') 'both services retain their independent remote ports'
     Check ((Unprotect-Text $web.password) -ceq 'WEB-TEST-ONLY' -and !$cloud.password -and !$cloud.autoLogin) 'only the selected service supplies its web password'

@@ -5,7 +5,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {atomicWrite, privateDir, safeFile, readConfig, normalizeUrl, STATE} from './platform.mjs';
 import {sshProblem} from './ssh.mjs';
-import {cloudcliName,cloudcliTargets,cloudcliOrigin,readCloudcliKinds,SELF_HOSTED} from '../app/cloudcli.mjs';
+import {cloudcliName,cloudcliTargets,cloudcliOrigin,readCloudcliKinds,usesSshTools,CLAUDEWEB} from '../app/cloudcli.mjs';
 import {validRunAs} from '../app/ssh-mcp.mjs';
 import {proxySettings} from './ui/network-settings.js';
 
@@ -32,17 +32,17 @@ export class ManagerState {
   connectionName(id){const app=this.loginMode(id);return app!=='ssh'&&this.route(id,app)==='ssh'?tunnelName(id,app):app==='cloudcli'?cloudcliName(id):id;}
   setRoute(id,route){if(!['url','ssh'].includes(route)||!this.view().targets.some(t=>t.id===id))throw Error('连接方式无效');let app=this.loginMode(id);const terminal=app==='ssh';if(terminal&&route==='ssh')return;if(terminal)app=this.targets.some(t=>t.id===id)?'web':this.cloudcliFor(id)?'cloudcli':'web';const next={...this.ssh,...terminal?{modes:{...this.ssh.modes,[id]:app},logins:this.ssh.logins.map(l=>l.id===id?{...l,active:false}:l)}:{},routes:{...this.ssh.routes,[id]:{...this.ssh.routes?.[id],[app]:route}}};this.write('ssh-logins.json',next);this.ssh=next;}
   cloudcliFor(id){return this.cloudcli.logins.find(l=>l.id===id)||null;}
-  validateCloudcli(){if(this.cloudcli.schema!==1||!Array.isArray(this.cloudcli.logins)||this.cloudcli.logins.length>100)throw Error('CloudCLI 配置损坏，原文件已保留。');const seen=new Set();for(const l of this.cloudcli.logins){if(!l||typeof l.id!=='string'||seen.has(l.id)||typeof l.autoLogin!=='boolean'||(l.credentialId!==undefined&&!/^[a-f0-9-]{36}$/.test(l.credentialId)))throw Error('CloudCLI 配置损坏，原文件已保留。');cloudcliOrigin(l.url);seen.add(l.id);}}
+  validateCloudcli(){if(this.cloudcli.schema!==1||!Array.isArray(this.cloudcli.logins)||this.cloudcli.logins.length>100)throw Error('ClaudeWeb 配置损坏，原文件已保留。');const seen=new Set();for(const l of this.cloudcli.logins){if(!l||typeof l.id!=='string'||seen.has(l.id)||typeof l.autoLogin!=='boolean'||(l.credentialId!==undefined&&!/^[a-f0-9-]{36}$/.test(l.credentialId)))throw Error('ClaudeWeb 配置损坏，原文件已保留。');cloudcliOrigin(l.url);seen.add(l.id);}}
   sshFor(id){return this.ssh.logins.find(l=>l.id===id)||null;}
   // What the backend or the setup action found the device's CloudCLI to be.
   cloudcliKind(id){return readCloudcliKinds(this.directory)[id]||'';}
   // The background SSH channel starts with CMCP when the device asks for it; a self-hosted
   // CloudCLI asks unless the user turned it off.
-  autoChannel(id){const login=this.sshFor(id);if(!login)return false;return typeof login.sshAutoStart==='boolean'?login.sshAutoStart:this.cloudcliKind(id)===SELF_HOSTED;}
+  autoChannel(id){const login=this.sshFor(id);if(!login)return false;return typeof login.sshAutoStart==='boolean'?login.sshAutoStart:usesSshTools(this.cloudcliKind(id));}
   // What the setup action decided; only these fields of the SSH details change.
   applyCloudcliSetup(id,save){
     const login=this.sshFor(id);if(!login)throw Error('还没有填写 SSH 信息，请编辑设备后再连接。');
-    if(!save||(save.cloudcliUser!==''&&!validRunAs(save.cloudcliUser))||!Number.isInteger(save.cloudcliPort)||save.cloudcliPort<1||save.cloudcliPort>65535||typeof save.cloudcliTunnel!=='boolean'||(save.webPort!==undefined&&(!Number.isInteger(save.webPort)||save.webPort===save.cloudcliPort)))throw Error('CloudCLI 设置无效');
+    if(!save||(save.cloudcliUser!==''&&!validRunAs(save.cloudcliUser))||!Number.isInteger(save.cloudcliPort)||save.cloudcliPort<1||save.cloudcliPort>65535||typeof save.cloudcliTunnel!=='boolean'||(save.webPort!==undefined&&(!Number.isInteger(save.webPort)||save.webPort===save.cloudcliPort)))throw Error('ClaudeWeb 设置无效');
     const next={...login,cloudcliUser:save.cloudcliUser,cloudcliPort:save.cloudcliPort,cloudcliTunnel:save.cloudcliTunnel,sshAutoStart:true,...save.webPort!==undefined?{webPort:save.webPort}:{}};
     if(!save.cloudcliUser)delete next.cloudcliUser;
     const ssh={...this.ssh,logins:this.ssh.logins.map(l=>l===login?next:l)};this.write('ssh-logins.json',ssh);this.ssh=ssh;
@@ -64,7 +64,7 @@ export class ManagerState {
   }
   setEnabled(id,enabled,mode=this.loginMode(id)){
     const name=id===null?null:mode===this.loginMode(id)?this.connectionName(id):mode==='cloudcli'?cloudcliName(id):id,known=this.linkTargets();
-    if(name!==null&&!known.some(t=>t.name===name))throw Error(this.route(id,mode)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':mode==='cloudcli'?'还没有填写 CloudCLI 地址，请编辑设备后再连接。':this.sshFor(id)||this.cloudcliFor(id)?'还没有填写网页桌面地址，请编辑设备后再连接。':'连接不存在');
+    if(name!==null&&!known.some(t=>t.name===name))throw Error(this.route(id,mode)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':mode==='cloudcli'?'还没有填写 ClaudeWeb 地址，请编辑设备后再连接。':this.sshFor(id)||this.cloudcliFor(id)?'还没有填写网页桌面地址，请编辑设备后再连接。':'连接不存在');
     const before=this.controlMap();this.controls={schema:1,targets:known.map(t=>{const previous=before.get(t.name),selected=id===null||t.name===name;return {name:t.name,enabled:selected?enabled:previous?.enabled===true,revision:selected?randomUUID():previous?.revision||randomUUID(),requestTime:String(Date.now())};})};this.write('target-controls.json',this.controls);
   }
   sshDraft(value){
@@ -97,7 +97,7 @@ export class ManagerState {
     if(!old&&!oldLogin&&!oldCloud&&this.view().targets.length>=100)throw Error('最多保存 100 台设备。');
     const id=old?.id||oldLogin?.id||oldCloud?.id||randomUUID(),draft=sshGiven&&input.ssh?this.sshDraft(input.ssh):null;
     if(!wantsWeb&&old&&this.controlMap().get(id)?.enabled)throw Error('请先停止此连接，再删除网页桌面登录。');
-    if(this.cloudcliKind(id)===SELF_HOSTED&&(cloudGiven?input.cloudcli:oldCloud||oldLogin?.cloudcliTunnel)&&!(sshGiven?draft:oldLogin))throw Error('自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。');
+    if(usesSshTools(this.cloudcliKind(id))&&(cloudGiven?input.cloudcli:oldCloud||oldLogin?.cloudcliTunnel)&&!(sshGiven?draft:oldLogin))throw Error((this.cloudcliKind(id)===CLAUDEWEB?'ClaudeWeb 独立版':'自行安装的 CloudCLI ')+'需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。');
     if(wantsWeb)await this.saveWeb(input,old,id,label,icon,note,detectShared);
     else if(old)await this.dropWeb(old);
     if(sshGiven)await this.saveSsh(id,input,draft,oldLogin,wantsWeb,label,icon,note);
@@ -122,7 +122,7 @@ export class ManagerState {
         const same=old&&old.host===draft.host&&old.port===draft.port&&old.username===draft.username&&(old[app+'Port']??(app==='web'?3000:3001))===port;let ref=auto&&same?old[app+'CredentialId']:undefined;if(auto&&typed){ref=randomUUID();await this.secrets('set',ref,typed);}if(enabled&&auto&&!ref)throw Error('请填写自动登录的网页访问密码；更换服务器或端口时需要重新填写。');
         Object.assign(login,{[app+'Tunnel']:enabled,[app+'Port']:port,[app+'AutoLogin']:auto,...ref?{[app+'CredentialId']:ref}:{}});if(old?.[app+'CredentialId']&&old[app+'CredentialId']!==ref)await this.secrets('delete',old[app+'CredentialId']);
       }
-      if(login.webPort===login.cloudcliPort)throw Error('WebDesktop 和 CloudCLI 的服务端口必须不同。');
+      if(login.webPort===login.cloudcliPort)throw Error('WebDesktop 和 ClaudeWeb 的服务端口必须不同。');
       const enabledTunnel=['web','cloudcli'].some(app=>this.controlMap().get(tunnelName(id,app))?.enabled);if(enabledTunnel&&(!!input.ssh.secret||draft.host!==old.host||draft.port!==old.port||draft.username!==old.username||draft.method!==old.method||draft.keyPath!==(old.keyPath||'')||['web','cloudcli'].some(app=>!!input.ssh[app+'Password']||login[app+'Tunnel']!==old[app+'Tunnel']||login[app+'Port']!==(old[app+'Port']??(app==='web'?3000:3001))||login[app+'AutoLogin']!==old[app+'AutoLogin'])))throw Error('请先停止此设备的 SSH 隧道，再修改连接信息。');
       if(!hasWeb)Object.assign(login,{label,icon,note,hideAddress:input.hideAddress});logins.push(login);}
     const order=this.ssh.order.length&&!this.ssh.order.includes(id)?[...this.ssh.order,id]:this.ssh.order,next={...this.ssh,schema:1,logins,order};
@@ -131,8 +131,8 @@ export class ManagerState {
     if(previous&&previous!==credentialId)await this.secrets('delete',previous).catch(()=>{});if(!draft&&old)await Promise.all(['web','cloudcli'].map(app=>old[app+'CredentialId']?this.secrets('delete',old[app+'CredentialId']):null));
   }
   cloudcliDraft(value,old,id){
-    if(value!==null){if(!value||typeof value!=='object'||typeof value.password!=='string'||value.password.length>256||typeof value.autoLogin!=='boolean')throw Error('CloudCLI 密码或登录设置无效。');const url=cloudcliOrigin(value.url);if(this.cloudcli.logins.some(l=>l.id!==id&&l.url===url))throw Error('该 CloudCLI 地址已添加。');if(value.autoLogin&&!value.password&&(!old?.credentialId||old.url!==url))throw Error('请填写 CloudCLI 自动登录密码；更换地址时需要重新填写。');}
-    if(old&&this.controlMap().get(cloudcliName(id))?.enabled&&(value===null||old.url!==cloudcliOrigin(value.url)||!!value.password||value.autoLogin!==old.autoLogin))throw Error('请先停止 CloudCLI 连接，再修改地址、密码或自动登录。');
+    if(value!==null){if(!value||typeof value!=='object'||typeof value.password!=='string'||value.password.length>256||typeof value.autoLogin!=='boolean')throw Error('ClaudeWeb 密码或登录设置无效。');const url=cloudcliOrigin(value.url);if(this.cloudcli.logins.some(l=>l.id!==id&&l.url===url))throw Error('该 ClaudeWeb 地址已添加。');if(value.autoLogin&&!value.password&&(!old?.credentialId||old.url!==url))throw Error('请填写 ClaudeWeb 自动登录密码；更换地址时需要重新填写。');}
+    if(old&&this.controlMap().get(cloudcliName(id))?.enabled&&(value===null||old.url!==cloudcliOrigin(value.url)||!!value.password||value.autoLogin!==old.autoLogin))throw Error('请先停止 ClaudeWeb 连接，再修改地址、密码或自动登录。');
   }
   async saveCloudcli(id,value,old,label,icon,note,hideAddress){
     this.cloudcliDraft(value,old,id);let created,credentialId=value?.autoLogin&&old?.url===cloudcliOrigin(value.url)?old.credentialId:undefined;

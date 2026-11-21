@@ -34,13 +34,13 @@ namespace CMCP {
             }catch{return new CloudCliStore{ReadError=true};}
         }
         internal void Save(string directory){
-            if(ReadError)throw new IOException("CloudCLI 配置损坏，原文件已保留。");
+            if(ReadError)throw new IOException("ClaudeWeb 配置损坏，原文件已保留。");
             Directory.CreateDirectory(directory);string file=PathFor(directory),temp=file+"."+Guid.NewGuid().ToString("N")+".tmp",key;
             using(var hash=SHA256.Create())key=BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(directory).ToLowerInvariant()))).Replace("-","").Substring(0,20);
             using(var mutex=new Mutex(false,"Local\\CmcpCloudCli-"+key)){
                 bool held=false;try{
-                    try{held=mutex.WaitOne(2000);}catch(AbandonedMutexException){held=true;}if(!held)throw new IOException("CloudCLI 配置正在保存，请稍后重试。");
-                    if(File.Exists(file)&&Load(directory).ReadError)throw new IOException("CloudCLI 配置损坏，原文件已保留。");
+                    try{held=mutex.WaitOne(2000);}catch(AbandonedMutexException){held=true;}if(!held)throw new IOException("ClaudeWeb 配置正在保存，请稍后重试。");
+                    if(File.Exists(file)&&Load(directory).ReadError)throw new IOException("ClaudeWeb 配置损坏，原文件已保留。");
                     File.WriteAllText(temp,new JavaScriptSerializer{MaxJsonLength=1024*1024}.Serialize(this),new UTF8Encoding(false));
                     if(File.Exists(file))File.Replace(temp,file,null);else File.Move(temp,file);
                 }finally{if(File.Exists(temp))File.Delete(temp);if(held)mutex.ReleaseMutex();}
@@ -53,19 +53,19 @@ namespace CMCP {
             string directory=Path.Combine(root,"cloudcli-test"),password="CLOUDCLI-PRIVATE-FIXTURE";Directory.CreateDirectory(directory);
             var store=new CloudCliStore();store.Put(new CloudCliLogin{name="device",url="https://cloudcli.example.com",autoLogin=true,secret=CloudCliLogin.Protect(password)});store.Save(directory);
             string text=File.ReadAllText(CloudCliStore.PathFor(directory));var restored=CloudCliStore.Load(directory);
-            check(!restored.ReadError&&restored.Get("device").autoLogin&&!text.Contains(password),"CloudCLI stores only encrypted credentials and restores its automatic sign-in setting");
-            var bytes=ProtectedData.Unprotect(Convert.FromBase64String(restored.Get("device").secret),null,DataProtectionScope.CurrentUser);check(Encoding.UTF8.GetString(bytes)==password,"CloudCLI credentials use the current Windows account and match the password helper format");Array.Clear(bytes,0,bytes.Length);
-            var snapshot=LocalState.Load(directory);check(snapshot.Targets.Count==1&&snapshot.Targets[0].Name=="cloudcli:device"&&snapshot.Targets[0].Mode=="CloudCLI 登录","CloudCLI publishes its own backend connection without changing desktop targets");
+            check(!restored.ReadError&&restored.Get("device").autoLogin&&!text.Contains(password),"ClaudeWeb stores only encrypted credentials and restores its automatic sign-in setting");
+            var bytes=ProtectedData.Unprotect(Convert.FromBase64String(restored.Get("device").secret),null,DataProtectionScope.CurrentUser);check(Encoding.UTF8.GetString(bytes)==password,"ClaudeWeb credentials use the current Windows account and match the password helper format");Array.Clear(bytes,0,bytes.Length);
+            var snapshot=LocalState.Load(directory);check(snapshot.Targets.Count==1&&snapshot.Targets[0].Name=="cloudcli:device"&&snapshot.Targets[0].Mode=="ClaudeWeb 登录","ClaudeWeb publishes its own backend connection without changing desktop targets");
             using(var form=new Manager(true)){
                 form.Show();Wait();form.OpenAdd();Wait();var editor=form.Editor;
                 editor.NameInput.Box.Text="CLI work";editor.CloudUrlInput.Box.Text="https://cloudcli.example.com";editor.CloudRemember.Checked=true;editor.CloudPasswordInput.Box.Text=password;
-                check(editor.ValidateFields(),"the device editor accepts a CloudCLI-only device with automatic sign-in");
+                check(editor.ValidateFields(),"the device editor accepts a ClaudeWeb-only device with automatic sign-in");
                 editor.Save.PerformClick();Wait();var card=form.Cards.Values.FirstOrDefault(c=>c.Caption=="CLI work");
-                check(form.Editor==null&&card!=null&&card.CloudActive&&card.Cloud!=null&&form.Cards.Count==3,"adding CloudCLI alone creates one card and selects its own sign-in mode");
-                if(card!=null){check(card.Address=="https://cloudcli.example.com"&&card.Details.Open.Text=="打开 CloudCLI","CloudCLI cards copy and display their own address and open action");form.SwitchLogin(card);Wait();check(card.SshActive,"CloudCLI can select SSH even before SSH details are saved");form.SwitchLogin(card);Wait();check(!card.SshActive&&!card.CloudActive,"the third switch returns to the desktop profile without removing CloudCLI");}
+                check(form.Editor==null&&card!=null&&card.CloudActive&&card.Cloud!=null&&form.Cards.Count==3,"adding ClaudeWeb alone creates one card and selects its own sign-in mode");
+                if(card!=null){check(card.Address=="https://cloudcli.example.com"&&card.Details.Open.Text=="打开 ClaudeWeb","ClaudeWeb cards copy and display their own address and open action");form.SwitchLogin(card);Wait();check(card.SshActive,"ClaudeWeb can select SSH even before SSH details are saved");form.SwitchLogin(card);Wait();check(!card.SshActive&&!card.CloudActive,"the third switch returns to the desktop profile without removing ClaudeWeb");}
                 form.Close();
             }
-            File.WriteAllText(CloudCliStore.PathFor(directory),"{broken");var broken=CloudCliStore.Load(directory);bool refused=false;try{broken.Save(directory);}catch(IOException){refused=true;}check(broken.ReadError&&refused&&File.ReadAllText(CloudCliStore.PathFor(directory))=="{broken","damaged CloudCLI settings are preserved rather than replaced");
+            File.WriteAllText(CloudCliStore.PathFor(directory),"{broken");var broken=CloudCliStore.Load(directory);bool refused=false;try{broken.Save(directory);}catch(IOException){refused=true;}check(broken.ReadError&&refused&&File.ReadAllText(CloudCliStore.PathFor(directory))=="{broken","damaged ClaudeWeb settings are preserved rather than replaced");
         }
     }
 }

@@ -135,7 +135,7 @@ test('the actual MCP pipe suppresses the intermediate failure and preserves boot
   pipe.close();
 });
 
-test('CloudCLI setup replays its JSON only after host verification and reports the successful retry',async t => {
+test('ClaudeWeb setup replays its JSON only after host verification and reports the successful retry',async t => {
   const f=fixture(t);
   const pending=runRemote(login,{action:'inspect'}, {spawnProcess:f.spawnProcess,knownHostsFile:f.file});
   f.fail(f.children[0]); await until(()=>f.children.length===2);

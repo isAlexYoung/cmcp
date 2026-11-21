@@ -48,6 +48,23 @@ class Fixture(unittest.TestCase):
         self.assertEqual((found['cloudcli']['user'], found['cloudcli']['port']), ('ubuntu', 3005))
         self.assertEqual((found['claudeui']['user'], found['claudeui']['port']), ('root', 3009))
 
+    def test_standalone_claudeweb_is_found_with_its_account_port_and_service_state(self):
+        self.assertIsNone(setup.claudeweb_instance(root=str(self.root)))
+        self.write('etc/systemd/system/claudeweb.service', '[Service]\nUser=claudeweb\nExecStart=/opt/claudeweb/current/node/bin/node index.js\n')
+        self.assertIsNone(setup.claudeweb_instance(root=str(self.root)), 'a unit without the program folder is not ClaudeWeb')
+        self.write('opt/claudeweb/current/app/claudeweb.json', '{}')
+        self.write('etc/claudeweb/claudeweb.env', 'HOST=127.0.0.1\nSERVER_PORT=3005\n')
+        calls = []
+        def run(command, **_):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0)
+        found = setup.claudeweb_instance(run, root=str(self.root))
+        self.assertEqual((found['user'], found['port'], found['portKnown'], found['running'], found['claudeweb'], found['unit']), ('claudeweb', 3005, True, True, True, 'claudeweb'))
+        self.assertEqual(calls, [['systemctl', 'is-active', '--quiet', 'claudeweb']])
+        self.write('etc/claudeweb/claudeweb.env', 'HOST=127.0.0.1\n')
+        stopped = setup.claudeweb_instance(lambda command, **_: subprocess.CompletedProcess(command, 3), root=str(self.root))
+        self.assertEqual((stopped['port'], stopped['portKnown'], stopped['running']), (3001, False, False))
+
     def proc(self, pid, args, uid, environ=''):
         base = self.root / 'proc' / str(pid)
         base.mkdir(parents=True)

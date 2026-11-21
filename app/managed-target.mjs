@@ -4,12 +4,25 @@ import {createSharedSessionGateway} from './shared-session-gateway.mjs';
 import {Cloud} from './cloud-connector.mjs';
 import {supportsDirectBrowser,createDirectBrowser} from './direct-browser.mjs';
 import {connectionDetail} from './connection-transport.mjs';
-import {discoverCloudcli,createLaunchPage,cloudcliDevice,SELF_HOSTED,WEBDESKTOP} from './cloudcli.mjs';
+import {discoverCloudcli,createLaunchPage,cloudcliDevice,SELF_HOSTED,WEBDESKTOP,CLAUDEWEB} from './cloudcli.mjs';
 import {requestBuffered} from './desktop-auth.mjs';
 
 // Fixed texts, so the Windows card may show them as they are (Manager.cs PreparationDetail).
 export const SELF_HOSTED_READY='自行安装的 CloudCLI：网页可以打开；本机工具经此设备的 SSH 后台通道连接。';
 export const SELF_HOSTED_DOWN='自行安装的 CloudCLI 暂时无法访问，正在重试。';
+export const CLAUDEWEB_READY='ClaudeWeb 独立版：网页可以打开；本机工具经此设备的 SSH 后台通道连接。';
+export const CLAUDEWEB_DOWN='ClaudeWeb 独立版暂时无法访问，正在重试。';
+export const CLAUDEWEB_PASSWORD='ClaudeWeb 独立版：保存的密码无法自动登录，请在网页输入密码，或在 CMCP 中修改密码。';
+export const CLAUDEWEB_LOCKED='ClaudeWeb 独立版：密码错误次数过多，登录暂时受限，请稍后重试。';
+
+// Standalone ClaudeWeb: the saved password becomes a one-time code (POST /api/auth/cmcp/code, under
+// ClaudeWeb's own per-IP lockout). Returns the code, or the fixed text that says why there is none.
+export async function claudewebCode({url,agent,password,signal}){
+  const r=await requestBuffered(new URL('/api/auth/cmcp/code',url),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password}),agent,signal,timeout:15000,limit:16384});
+  let v;try{v=JSON.parse(r.body);}catch{}
+  if(r.status===200&&typeof v?.code==='string'&&/^[A-Za-z0-9_-]{20,200}$/.test(v.code))return {code:v.code};
+  return {issue:v?.error?.code==='AUTH_LOCKED'?CLAUDEWEB_LOCKED:CLAUDEWEB_PASSWORD};
+}
 
 // The production target factory is also exercised against independent local
 // HTTP/WebSocket desktops. Each target owns its agent, gateway and setup lease.
@@ -50,25 +63,43 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
       record.agent = agentFor(t.url, proxy);
       const cloudcli=t.authMode==='cloudcli';
       if(cloudcli){
+        // No WebDesktop sign-in and no web MCP: the page opens through a local entrance and the
+        // device's SSH background channel carries the local tools. A self-hosted CloudCLI keeps its
+        // own login; standalone ClaudeWeb is signed in with a one-time code when auto login is on.
+        const openPage=async kind=>{
+          const claudeweb=kind===CLAUDEWEB,ready=claudeweb?CLAUDEWEB_READY:SELF_HOSTED_READY,down=claudeweb?CLAUDEWEB_DOWN:SELF_HOSTED_DOWN;
+          const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,kind);}catch{}
+          let up=true,issue=null;
+          const signIn=claudeweb&&t.autoLogin===true?async()=>{
+            if(!current()||signal.aborted)return null;
+            let password;try{password=await passwordFor(t.name,signal);}catch{}
+            if(typeof password!=='string'||!password){issue=CLAUDEWEB_PASSWORD;}
+            else{
+              try{const result=await claudewebCode({url:t.url,agent:record.agent,password,signal});issue=result.issue||null;if(result.code){publish(t.name,'connected',ready);return result.code;}}
+              catch{issue=null;}
+              finally{password=undefined;}
+            }
+            if(issue){log(`[${t.name}] claudeweb-sign-in ${issue===CLAUDEWEB_LOCKED?'locked':'refused'}`);if(current()&&!signal.aborted)publish(t.name,'connected',issue);}
+            return null;
+          }:undefined;
+          record.selfHosted=true;record.claudeweb=claudeweb;record.gateway=await createLaunchPage({url:t.url,signIn});
+          if(!current()){await record.gateway.close();throw Error('Target stopped');}
+          publish(t.name,'connected',ready);
+          const probe=setInterval(async()=>{
+            if(!current()||signal.aborted)return;
+            try{const r=await requestBuffered(new URL('/',t.url),{agent:record.agent,signal,timeout:10000,limit:262144});up=r.status<500;}catch{up=false;}
+            if(current()&&!signal.aborted)publish(t.name,up?'connected':'offline',up?(issue||ready):down);
+          },selfHostedProbeMs);probe.unref?.();
+          signal.addEventListener('abort',()=>clearInterval(probe),{once:true});
+          return record;
+        };
         let discovered;
         try{discovered=await discoverCloudcli(t.url,record.agent,signal);}
         catch(error){
           if(!error.selfHosted)throw error;
-          // No CMCP sign-in and no web MCP here: the page opens as it is, with CloudCLI's own login,
-          // and the device's SSH background channel carries the local tools. A later bridge
-          // transport would replace that channel, not this entrance.
-          const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,SELF_HOSTED);}catch{}
-          record.selfHosted=true;record.gateway=await createLaunchPage({url:t.url});
-          if(!current()){await record.gateway.close();throw Error('Target stopped');}
-          let up=true;publish(t.name,'connected',SELF_HOSTED_READY);
-          const probe=setInterval(async()=>{
-            if(!current()||signal.aborted)return;
-            try{const r=await requestBuffered(new URL('/',t.url),{agent:record.agent,signal,timeout:10000,limit:262144});up=r.status<500;}catch{up=false;}
-            if(current()&&!signal.aborted)publish(t.name,up?'connected':'offline',up?SELF_HOSTED_READY:SELF_HOSTED_DOWN);
-          },selfHostedProbeMs);probe.unref?.();
-          signal.addEventListener('abort',()=>clearInterval(probe),{once:true});
-          return record;
+          return await openPage(SELF_HOSTED);
         }
+        if(discovered.kind===CLAUDEWEB)return await openPage(CLAUDEWEB);
         {const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,WEBDESKTOP);}catch{}}
         record.cloudcliAgent=record.agent;record.url=record.tunnel?.web||discovered.desktopOrigin;
         record.agent=agentFor(record.url,record.tunnel?'':await proxyFor(record.url,signal));

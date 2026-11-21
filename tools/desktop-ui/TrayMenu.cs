@@ -196,7 +196,7 @@ namespace CMCP {
                 var connect=(ToolStripMenuItem)item.DropDownItems[0];Label(connect,L.Text("连接设备"));connect.Enabled=value.CanConnect;
                 var stop=(ToolStripMenuItem)item.DropDownItems[1];Label(stop,L.Text("断开设备"));stop.Enabled=value.CanDisconnect;
                 var rename=(ToolStripMenuItem)item.DropDownItems[2];Label(rename,L.Text("重命名"));rename.Enabled=value.CanRename;
-                var change=(ToolStripMenuItem)item.DropDownItems[4];Label(change,L.Text(value.Cloud?"切换为 SSH 登录":value.Ssh?"切换为网页桌面登录":"切换为 CloudCLI 登录"));((Row)change.Tag).Icon=value.Cloud?"ssh":"web";change.Enabled=value.CanSwitch;
+                var change=(ToolStripMenuItem)item.DropDownItems[4];Label(change,L.Text(value.Cloud?"切换为 SSH 登录":value.Ssh?"切换为网页桌面登录":"切换为 ClaudeWeb 登录"));((Row)change.Tag).Icon=value.Cloud?"ssh":"web";change.Enabled=value.CanSwitch;
             }
             ApplySystemTheme();
             if(Menu.Visible){Fit(Menu);foreach(var item in Targets.Values)if(item.DropDown.Visible)Fit((ToolStripDropDownMenu)item.DropDown);}

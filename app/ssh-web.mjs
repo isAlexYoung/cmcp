@@ -40,7 +40,7 @@ export async function acquireWebTunnel({directory,id,login,env=process.env,ssh='
   sshArguments(login);const key=path.resolve(directory)+'\0'+id,revision=sshWebRevision(login);let pool=pools.get(key);
   if(pool&&pool.revision!==revision)throw Error('请先停止此设备的 SSH 隧道，再修改 SSH 信息。');
   if(!pool){pool={revision,refs:0,closed:false,bridges:[],child:null};pool.killAtExit=()=>pool.child?.kill();process.once('exit',pool.killAtExit);pools.set(key,pool);pool.ready=(async()=>{
-    const remote=[login.webPort??3000,login.cloudcliPort??3001];if(remote.some(p=>!Number.isInteger(p)||p<1||p>65535)||remote[0]===remote[1])throw Error('WebDesktop 和 CloudCLI 的服务端口必须有效且不同。');
+    const remote=[login.webPort??3000,login.cloudcliPort??3001];if(remote.some(p=>!Number.isInteger(p)||p<1||p>65535)||remote[0]===remote[1])throw Error('WebDesktop 和 ClaudeWeb 的服务端口必须有效且不同。');
     const local=[await freePort(),await freePort()];for(let i=0;i<2;i++)pool.bridges.push(await loopbackBridge(local[i],remote[i]));
     const args=sshArguments(login,{background:true});args.unshift('-F','none');const at=args.indexOf('ClearAllForwardings=yes');args[at]='ClearAllForwardings=no';args.splice(args.indexOf('--'),0,'-N','-o','ExitOnForwardFailure=yes',...local.flatMap((p,i)=>['-L',`127.0.0.1:${p}:127.0.0.1:${remote[i]}`]));
     const start=()=>{let stderr='';const child=pool.child=spawnSshWithRecovery(ssh,args,{env,windowsHide:true,stdio:['ignore','ignore','pipe']},{login,spawnProcess,knownHostsFile});child.stderr.on('data',c=>stderr=(stderr+c).slice(-8192));const ended=new Promise(resolve=>{child.once('error',()=>resolve('SSH_START'));child.once('exit',()=>resolve(sshExitCode(stderr)));});return {child,ended};};

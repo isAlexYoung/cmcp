@@ -116,7 +116,7 @@ namespace CMCP {
         // Starts the device's SSH channel with CMCP. A self-hosted CloudCLI needs it for local tools.
         internal readonly ToggleSwitch AutoChannel=new ToggleSwitch{Size=new Size(48,30)};
         readonly string cloudKind;
-        bool AutoChannelDefault {get{return cloudKind==CloudCliKinds.SelfHosted;}}
+        bool AutoChannelDefault {get{return CloudCliKinds.UsesSshTools(cloudKind);}}
         internal readonly ToggleSwitch Remember = new ToggleSwitch{Size=new Size(48,30)}, HideAddress = new ToggleSwitch{Size=new Size(48,30)};
         internal readonly DropdownField MethodField = new DropdownField(new[]{new KeyValuePair<string,string>("password","密码"),new KeyValuePair<string,string>("key","公钥")}){Height=38,Value="password"};
         internal bool AutoLogin {get{return Remember.Checked;}}
@@ -130,7 +130,7 @@ namespace CMCP {
         internal readonly EditorViewport viewport = new EditorViewport{Dock=DockStyle.Fill,AutoScroll=true};
         readonly SettingsSheet sheet = new SettingsSheet();
         readonly LocalToolTip tips = new LocalToolTip();
-        readonly Category general=new Category{Title="常规",Glyph="profile"},web=new Category{Title="网址登录",Glyph="monitor"},cloud=new Category{Title="CloudCLI 登录",Glyph="link"},ssh=new Category{Title="SSH 登录",Glyph="terminal"};
+        readonly Category general=new Category{Title="常规",Glyph="profile"},web=new Category{Title="网址登录",Glyph="monitor"},cloud=new Category{Title="ClaudeWeb 登录",Glyph="link"},ssh=new Category{Title="SSH 登录",Glyph="terminal"};
         readonly List<Category> categories=new List<Category>();
         Row secretRow,keyRow;
         Category current;
@@ -172,7 +172,7 @@ namespace CMCP {
             PasswordInput.Box.UseSystemPasswordChar=true;PasswordInput.Box.MaxLength=256;PasswordInput.Cue=target.HasSavedPassword?"已加密保存；同一地址留空保留":"手动网页桌面登录可留空";
             Remember.Checked=target.AutoLogin;HideAddress.Checked=preference.hideAddress;HideAddress.AccessibleName=L.Text("隐藏卡片中的网址和IP");
             CloudUrlInput.Box.MaxLength=300;CloudUrlInput.Cue="https://";CloudUrlInput.Box.Text=cloudLogin==null?"":cloudLogin.url;
-            CloudPasswordInput.Box.UseSystemPasswordChar=true;CloudPasswordInput.Box.MaxLength=256;CloudPasswordInput.Cue=cloudLogin!=null&&cloudLogin.secret.Length>0?"已加密保存；同一地址留空保留":"手动 CloudCLI 登录可留空";CloudRemember.Checked=cloudLogin!=null&&cloudLogin.autoLogin;
+            CloudPasswordInput.Box.UseSystemPasswordChar=true;CloudPasswordInput.Box.MaxLength=256;CloudPasswordInput.Cue=cloudLogin!=null&&cloudLogin.secret.Length>0?"已加密保存；同一地址留空保留":"手动 ClaudeWeb 登录可留空";CloudRemember.Checked=cloudLogin!=null&&cloudLogin.autoLogin;
             HostInput.Box.MaxLength=253;PortInput.Box.MaxLength=5;UserInput.Box.MaxLength=64;KeyInput.Box.MaxLength=512;
             SshSecretInput.Box.UseSystemPasswordChar=true;SshSecretInput.Box.MaxLength=256;
             HostInput.Cue="域名或 IP";PortInput.Box.Text="22";UserInput.Cue="root";
@@ -243,9 +243,9 @@ namespace CMCP {
             AddRow(address,"密码",PasswordInput);
             var auto=AddSection(web,"自动登录","打开后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。关闭会删除共享模式保存的密码。");
             AddRow(auto,"记住密码",Remember,48);
-            var cloudAddress=AddSection(web,"CloudCLI");AddRow(cloudAddress,"CloudCLI 地址",CloudUrlInput);AddRow(cloudAddress,"密码",CloudPasswordInput);
+            var cloudAddress=AddSection(web,"ClaudeWeb");AddRow(cloudAddress,"ClaudeWeb 地址",CloudUrlInput);AddRow(cloudAddress,"密码",CloudPasswordInput);
             var cloudAuto=AddSection(web,"自动登录","打开后，保存时不登录；启动连接后自动尝试一次。新登录可能让旧页面下线。");AddRow(cloudAuto,"记住密码",CloudRemember,48);
-            var link=AddSection(ssh,"连接","SSH 凭据由 WebDesktop、CloudCLI 和 Terminal 共用。");
+            var link=AddSection(ssh,"连接","SSH 凭据由 WebDesktop、ClaudeWeb 和 Terminal 共用。");
             AddRow(link,"主机",HostInput);
             AddRow(link,"端口",PortInput,96);
             var login=AddSection(ssh,"认证");
@@ -254,7 +254,7 @@ namespace CMCP {
             secretRow=AddRow(login,"密码",SshSecretInput,0,forget);
             keyRow=AddRow(login,"私钥",KeyInput,0,browse);
             var wt=AddSection(ssh,"WebDesktop","服务端口是 VPS 本机的网页端口；访问密码与 SSH 密码不同。");AddRow(wt,"启用 SSH 隧道",WebTunnel,48);AddRow(wt,"服务端口",WebPortInput,96);AddRow(wt,"访问密码",WebTunnelPassword);AddRow(wt,"自动登录",WebTunnelRemember,48);
-            var ct=AddSection(ssh,"CloudCLI","CloudCLI 使用独立的网页端口。WebDesktop 上的 CloudCLI 经 WebDesktop 连接 MCP；自行安装的 CloudCLI 经此设备的 SSH 后台通道使用本机工具。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);AddRow(ct,"启动时连接本机工具",AutoChannel,48);
+            var ct=AddSection(ssh,"ClaudeWeb","ClaudeWeb 使用独立的网页端口。WebDesktop 内置的 ClaudeWeb 经 WebDesktop 连接 MCP；ClaudeWeb 独立版和自行安装的 CloudCLI 经此设备的 SSH 后台通道使用本机工具。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);AddRow(ct,"启动时连接本机工具",AutoChannel,48);
             AddSection(ssh,"Terminal","使用上方的 SSH 凭据打开终端；终端程序可在设置的连接页面选择。");
         }
         bool SecretStillUsable { get {
@@ -391,19 +391,19 @@ namespace CMCP {
             Uri parsed;
             if(DisplayName.Any(Char.IsControl))return Fail(general,"名称不能包含控制字符。");
             if(Note.Any(c=>Char.IsControl(c)&&c!='\r'&&c!='\n'))return Fail(general,"备注不能包含控制字符。");
-            if(!HasWeb&&!HasSsh&&!HasCloud)return Fail(current==general?web:current,"请至少填写一种登录方式：网页桌面、CloudCLI 或 SSH。");
+            if(!HasWeb&&!HasSsh&&!HasCloud)return Fail(current==general?web:current,"请至少填写一种登录方式：网页桌面、ClaudeWeb 或 SSH。");
             if(HasCloud){
-                if(!CloudCliLogin.ValidUrl(CloudUrlInput.Box.Text.Trim()))return Fail(web,"请输入完整的 CloudCLI HTTPS 地址，不含路径或登录信息。");
-                if(CloudRemember.Checked&&CloudPasswordInput.Box.Text.Length==0&&(savedCloud==null||savedCloud.secret.Length==0||savedCloud.url.TrimEnd('/')!=CloudUrlInput.Box.Text.Trim().TrimEnd('/')))return Fail(web,"请填写 CloudCLI 自动登录密码；更换地址时需要重新填写。");
+                if(!CloudCliLogin.ValidUrl(CloudUrlInput.Box.Text.Trim()))return Fail(web,"请输入完整的 ClaudeWeb HTTPS 地址，不含路径或登录信息。");
+                if(CloudRemember.Checked&&CloudPasswordInput.Box.Text.Length==0&&(savedCloud==null||savedCloud.secret.Length==0||savedCloud.url.TrimEnd('/')!=CloudUrlInput.Box.Text.Trim().TrimEnd('/')))return Fail(web,"请填写 ClaudeWeb 自动登录密码；更换地址时需要重新填写。");
             }
             if(HasWeb){
                 if(!Uri.TryCreate(Url,UriKind.Absolute,out parsed)||parsed.Scheme!="https"||parsed.UserInfo.Length>0||parsed.AbsolutePath!="/"||parsed.Query.Length>0||parsed.Fragment.Length>0)return Fail(web,"请输入完整的 HTTPS 网页地址，不含路径或登录信息。");
                 if(AutoLogin&&Password.Length==0&&(!storedAutoPassword||!String.Equals(Url.TrimEnd('/'),initialUrl.TrimEnd('/'),StringComparison.OrdinalIgnoreCase)))return Fail(web,"请填写自动登录密码；更换地址时需要重新填写。");
             }
-            if(cloudKind==CloudCliKinds.SelfHosted&&(HasCloud||CloudTunnel.Checked)&&!HasSsh)return Fail(ssh,"自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。");
+            if(CloudCliKinds.UsesSshTools(cloudKind)&&(HasCloud||CloudTunnel.Checked)&&!HasSsh)return Fail(ssh,cloudKind==CloudCliKinds.ClaudeWeb?"ClaudeWeb 独立版需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。":"自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。");
             if(HasSsh||WebTunnel.Checked||CloudTunnel.Checked){
                 int wp,cp;if(!HasSsh)return Fail(ssh,"请先填写共用的 SSH 主机和用户名。");
-                if(!Int32.TryParse(WebPortInput.Box.Text,out wp)||wp<1||wp>65535||!Int32.TryParse(CloudPortInput.Box.Text,out cp)||cp<1||cp>65535||wp==cp)return Fail(ssh,"WebDesktop 和 CloudCLI 的服务端口必须有效且不同。");
+                if(!Int32.TryParse(WebPortInput.Box.Text,out wp)||wp<1||wp>65535||!Int32.TryParse(CloudPortInput.Box.Text,out cp)||cp<1||cp>65535||wp==cp)return Fail(ssh,"WebDesktop 和 ClaudeWeb 的服务端口必须有效且不同。");
                 bool same=savedSsh!=null&&savedSsh.host==HostInput.Box.Text.Trim()&&savedSsh.port.ToString()==PortInput.Box.Text.Trim()&&savedSsh.username==UserInput.Box.Text.Trim();
                 if(WebTunnelRemember.Checked&&WebTunnelPassword.Box.Text.Length==0&&(!same||savedSsh.webPort!=wp||String.IsNullOrEmpty(savedSsh.webSecret))||CloudTunnelRemember.Checked&&CloudTunnelPassword.Box.Text.Length==0&&(!same||savedSsh.cloudcliPort!=cp||String.IsNullOrEmpty(savedSsh.cloudcliSecret)))return Fail(ssh,"请填写自动登录的网页访问密码；更换服务器或端口时需要重新填写。");
             }

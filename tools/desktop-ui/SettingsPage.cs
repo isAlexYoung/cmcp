@@ -162,7 +162,7 @@ namespace CMCP {
             web.Rows[web.Rows.Count-1].Dim=()=>chosen()==null;
             }
             {
-            var web=AddSection("CloudCLI");
+            var web=AddSection("ClaudeWeb");
             var browsers=Browsers.Detect();
             var choices=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("","系统默认浏览器")};
             choices.AddRange(browsers.Select(b=>new KeyValuePair<string,string>(b.Id,b.Label)));
@@ -173,7 +173,7 @@ namespace CMCP {
             Func<BrowserChoice> chosen=()=>browsers.FirstOrDefault(b=>b.Id==settings.cloudcliBrowser);
             browser.Chosen+=key=>Commit(s=>s.cloudcliBrowser=key);
             refresh.Add(delegate{browser.Value=chosen()==null?"":chosen().Id;browser.AccessibleName=L.Text("浏览器");browser.Invalidate();});
-            AddRow(web,"浏览器","打开 CloudCLI 时使用的浏览器。这里只列出这台电脑已安装的浏览器。",browser);
+            AddRow(web,"浏览器","打开 ClaudeWeb 时使用的浏览器。这里只列出这台电脑已安装的浏览器。",browser);
             // A page in the system default browser is a tab of the user's own window, which CMCP cannot close.
             var closeWeb=Switch("断开连接后关闭网页",()=>settings.closeCloudcli&&chosen()!=null,(s,on)=>s.closeCloudcli=on);
             refresh.Add(delegate{closeWeb.Enabled=chosen()!=null;});

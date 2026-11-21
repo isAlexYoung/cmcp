@@ -71,7 +71,7 @@ export function createTargetConnections({readTargets, readControls, readNetworkR
           slot.failed = true; slot.retryAt = ['SSH_AUTH','SSH_HOST_KEY','SSH_START'].includes(error.code)?Infinity:Date.now() + retryMs;
           const sshError={SSH_AUTH:'SSH 认证失败，请检查密码或密钥。',SSH_HOST_KEY:HOST_KEY_RECOVERY_ERROR,SSH_START:'无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。'}[error.code];
           const proxyError={CMCP_PROXY_SETTINGS:'无法读取代理设置，请在设置 → 连接中检查；不会回退直连。',PROXY_FAILED:'代理连接失败，请检查代理地址和端口；不会回退直连。'}[error.code];
-          guardedStatus.set(name, sshError?'error':'offline', sshError||proxyError||(error.code==='CLOUDCLI_PROTOCOL_REQUIRED'?'CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。':'无法连接此云电脑；其他连接不受影响，稍后重试'));
+          guardedStatus.set(name, sshError?'error':'offline', sshError||proxyError||(error.code==='CLOUDCLI_PROTOCOL_REQUIRED'?'ClaudeWeb 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop 或 ClaudeWeb。':'无法连接此云电脑；其他连接不受影响，稍后重试'));
         }
       });
     }

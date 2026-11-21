@@ -6,7 +6,7 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.23.2'
+$script:KitVersion = '4.24.0'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = if ($env:CMCP_STATE_DIR) { [IO.Path]::GetFullPath($env:CMCP_STATE_DIR) } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'user' }
 . (Join-Path $PSScriptRoot 'network-settings.ps1')
@@ -256,9 +256,9 @@ function Get-ConnectionTargets {
     @(Get-CloudTargets)
     $file=Join-Path $script:StateDir 'cloudcli-logins.json'
     if (!(Test-Path -LiteralPath $file)) { $data=@{schema=1;logins=@()} } else { $data=Read-JsonFile $file }
-    if ($data.schema -ne 1 -or @($data.logins).Count -gt 100) { throw 'CloudCLI 配置损坏，原文件已保留。' }
+    if ($data.schema -ne 1 -or @($data.logins).Count -gt 100) { throw 'ClaudeWeb 配置损坏，原文件已保留。' }
     foreach ($login in @($data.logins)) {
-        if (!$login.name -or [string]$login.name -match '[\x00-\x1f]' -or [string]$login.name -like 'cloudcli:*') { throw 'CloudCLI 配置损坏，原文件已保留。' }
+        if (!$login.name -or [string]$login.name -match '[\x00-\x1f]' -or [string]$login.name -like 'cloudcli:*') { throw 'ClaudeWeb 配置损坏，原文件已保留。' }
         [pscustomobject]@{name=('cloudcli:'+[string]$login.name);url=(Get-NormalizedUrl ([string]$login.url));password=[string]$login.secret;authMode='cloudcli';autoLogin=($login.autoLogin -eq $true);stamp=([string]$login.url+[string]$login.secret+[string]$login.autoLogin)}
     }
     $ssh=Read-JsonFile (Join-Path $script:StateDir 'ssh-logins.json')

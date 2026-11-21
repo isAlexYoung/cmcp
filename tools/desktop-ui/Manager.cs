@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.23.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.23.2.0")]
+[assembly: System.Reflection.AssemblyVersion("4.24.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.24.0.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -89,11 +89,13 @@ namespace CMCP {
             }
         }
         internal const string SelfHostedReady="自行安装的 CloudCLI：网页可以打开；本机工具经此设备的 SSH 后台通道连接。",SelfHostedDown="自行安装的 CloudCLI 暂时无法访问，正在重试。";
+        internal const string ClaudeWebReady="ClaudeWeb 独立版：网页可以打开；本机工具经此设备的 SSH 后台通道连接。",ClaudeWebDown="ClaudeWeb 独立版暂时无法访问，正在重试。",
+            ClaudeWebPassword="ClaudeWeb 独立版：保存的密码无法自动登录，请在网页输入密码，或在 CMCP 中修改密码。",ClaudeWebLocked="ClaudeWeb 独立版：密码错误次数过多，登录暂时受限，请稍后重试。";
         internal static string PreparationDetail(string state, string message) {
             if(state=="error"&&new[]{"SSH 认证失败，请检查密码或密钥。","SSH 主机指纹校验失败，请核对服务器指纹。","SSH 主机指纹自动恢复失败，请检查服务器及本机 known_hosts 文件权限。","无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。"}.Contains(message))return message;
-            if(state=="offline"&&message=="CloudCLI 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop。")return message;
-            // A self-hosted CloudCLI (app/managed-target.mjs): fixed texts only.
-            if(state=="connected"&&message==SelfHostedReady||state=="offline"&&message==SelfHostedDown)return message;
+            if(state=="offline"&&message=="ClaudeWeb 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop 或 ClaudeWeb。")return message;
+            // A self-hosted CloudCLI or standalone ClaudeWeb (app/managed-target.mjs): fixed texts only.
+            if(state=="connected"&&(message==SelfHostedReady||message==ClaudeWebReady||message==ClaudeWebPassword||message==ClaudeWebLocked)||state=="offline"&&(message==SelfHostedDown||message==ClaudeWebDown))return message;
             if (state != "connecting" && state != "recovering") return null;
             // Only fixed local stage text is displayed, never arbitrary backend
             // errors, URLs, paths, cookies or credential-bearing values.
@@ -158,7 +160,7 @@ namespace CMCP {
                 result.Targets.Add(new Target { Name = name, Url = parsed.GetLeftPart(UriPartial.Authority), AutoLogin=auto,HasSavedPassword=Text(Get(d,"password")).Length>0,DesktopClient=ClientFlag(entry,"desktop"),CliClient=ClientFlag(entry,"cli"),Mode = Text(Get(d, "authMode")) == "shared-browser" ? (auto?"网页桌面自动登录":"网页桌面登录") : "自动识别 / 旧版", State = state,
                     Detail = PreparationDetail(state,message) ?? ((auto&&state=="waiting-login"?"等待网页桌面使用保存的密码登录；自动尝试失败后可手动输入密码。":Detail(state)) + (state == "connected" && message.Contains("兼容") ? "\r\n当前使用网页终端兼容通道。" : "")) });
             }
-            foreach(var t in result.Targets.Where(t=>t.Name.StartsWith("cloudcli:",StringComparison.Ordinal)))t.Mode="CloudCLI 登录";
+            foreach(var t in result.Targets.Where(t=>t.Name.StartsWith("cloudcli:",StringComparison.Ordinal)))t.Mode="ClaudeWeb 登录";
             return result;
         }
     }

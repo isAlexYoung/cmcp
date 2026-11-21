@@ -25,11 +25,11 @@ namespace CMCP {
                 card.AppChoice.TestClick();Application.DoEvents();bool appMenuFits=card.AppChoice.Menu.Items.Cast<ToolStripItem>().All(i=>Math.Abs(i.Bounds.Right-(card.AppChoice.Menu.ClientSize.Width-1))<=1)&&!card.AppChoice.Menu.Items.Cast<ToolStripItem>().Any(i=>i.Text=="Terminal");card.AppChoice.Menu.Close();
                 card.RouteChoice.TestClick();Application.DoEvents();bool routeMenuFits=card.RouteChoice.Menu.Items.Cast<ToolStripItem>().All(i=>Math.Abs(i.Bounds.Right-(card.RouteChoice.Menu.ClientSize.Width-1))<=1);card.RouteChoice.Menu.Close();
                 check(card.AppChoice.Visible&&card.RouteChoice.Visible&&card.AppChoice.AccessibleRole==AccessibleRole.ComboBox&&appMenuFits&&routeMenuFits&&!card.AppChoice.Choose("ssh")&&card.AppChoice.Width>=card.AppChoice.PreferredFieldWidth,"card menus fill their width, show the complete app label and omit Terminal for direct URLs");
-                card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.CloudActive,"the application dropdown selects CloudCLI without connecting");
-                card.RouteChoice.Choose("ssh");Application.DoEvents();check(card.TunnelActive&&card.ConnectionName=="tunnel:cloudcli:"+card.Target.Name,"CloudCLI can select its own SSH route without a network request");
+                card.AppChoice.Choose("cloudcli");Application.DoEvents();check(card.CloudActive,"the application dropdown selects ClaudeWeb without connecting");
+                card.RouteChoice.Choose("ssh");Application.DoEvents();check(card.TunnelActive&&card.ConnectionName=="tunnel:cloudcli:"+card.Target.Name,"ClaudeWeb can select its own SSH route without a network request");
                 card.AppChoice.Choose("ssh");Application.DoEvents();bool terminalSsh=card.SshActive&&card.RouteChoice.Enabled&&card.RouteChoice.Value=="ssh"&&card.RouteChoice.DisplayOverride=="SSH";card.RouteChoice.Choose("url");Application.DoEvents();check(terminalSsh&&!card.SshActive&&!card.TunnelActive&&card.RouteChoice.Value=="url"&&!card.AppChoice.Choose("ssh"),"Terminal uses SSH but can return to a valid web application through the route menu");
                 card.AppChoice.Choose("cloudcli");Application.DoEvents();check(!card.TunnelActive&&card.RouteChoice.Value=="url","switching web applications preserves the currently selected direct URL route");
-                form.OpenEditor(card.Target.Name);form.Editor.ShowWeb();Application.DoEvents();check(form.Editor.CurrentCategory=="网址登录"&&form.Editor.UrlInput.Visible&&form.Editor.CloudUrlInput.Visible,"the URL category holds both WebDesktop and CloudCLI");
+                form.OpenEditor(card.Target.Name);form.Editor.ShowWeb();Application.DoEvents();check(form.Editor.CurrentCategory=="网址登录"&&form.Editor.UrlInput.Visible&&form.Editor.CloudUrlInput.Visible,"the URL category holds both WebDesktop and ClaudeWeb");
                 form.Close();
             }
         }
@@ -43,7 +43,7 @@ namespace CMCP {
                 card.RouteChoice.Choose("ssh");form.RefreshState();
                 bool first=UiPreferences.Load(state).Get("device").webRoute=="ssh";
                 card.AppChoice.Choose("cloudcli");form.RefreshState();var saved=UiPreferences.Load(state).Get("device");
-                check(first&&card.CloudActive&&card.TunnelActive&&card.RouteChoice.Value=="ssh"&&saved.loginMode=="cloudcli"&&saved.cloudcliRoute=="ssh"&&form.Preferences.cards[0].name=="other","selecting SSH before switching WebDesktop to CloudCLI preserves the tunnel, card order and saved preferences");
+                check(first&&card.CloudActive&&card.TunnelActive&&card.RouteChoice.Value=="ssh"&&saved.loginMode=="cloudcli"&&saved.cloudcliRoute=="ssh"&&form.Preferences.cards[0].name=="other","selecting SSH before switching WebDesktop to ClaudeWeb preserves the tunnel, card order and saved preferences");
                 card.AppChoice.Choose("web");bool reverse=card.TunnelActive;card.RouteChoice.Choose("url");card.AppChoice.Choose("cloudcli");bool direct=!card.TunnelActive;card.AppChoice.Choose("web");
                 saved=UiPreferences.Load(state).Get("device");
                 check(reverse&&direct&&!card.TunnelActive&&saved.webRoute=="url"&&saved.cloudcliRoute=="url"&&!File.Exists(Path.Combine(state,"target-controls.json")),"both web applications retain the chosen SSH or URL transport in either direction without starting connections");
@@ -330,7 +330,7 @@ namespace CMCP {
                 var switches=form.Settings.Viewport.Controls[0].Controls.OfType<ToggleSwitch>().ToArray();
                 check(switches.Length==3&&!switches[0].Enabled&&!switches[0].Checked&&!switches[1].Enabled&&switches[2].Enabled,"closing the page needs a specific browser, closing the terminal does not");
                 var browsers=Browsers.Detect();
-                if(browsers.Count>0){fields[0].Choose(browsers[0].Id);Pump();bool web=form.Options.browser==browsers[0].Id&&switches[0].Enabled&&fields[0].Images.ContainsKey(browsers[0].Id);fields[1].Choose(browsers[0].Id);Pump();bool cloud=fields[1].Value==browsers[0].Id&&switches[1].Enabled;switches[1].AccessibilityObject.DoDefaultAction();Pump();cloud&=switches[1].Checked&&form.Options.closeCloudcli&&!form.Options.closeWeb;fields[1].Choose("");Pump();cloud&=fields[1].Value==""&&!switches[1].Enabled&&!switches[1].Checked;fields[1].Choose(browsers[0].Id);Pump();cloud&=switches[1].Enabled&&switches[1].Checked&&form.Options.closeCloudcli;check(web&&cloud,"web and CloudCLI browser choices and switches update immediately, independently and retain their settings");}
+                if(browsers.Count>0){fields[0].Choose(browsers[0].Id);Pump();bool web=form.Options.browser==browsers[0].Id&&switches[0].Enabled&&fields[0].Images.ContainsKey(browsers[0].Id);fields[1].Choose(browsers[0].Id);Pump();bool cloud=fields[1].Value==browsers[0].Id&&switches[1].Enabled;switches[1].AccessibilityObject.DoDefaultAction();Pump();cloud&=switches[1].Checked&&form.Options.closeCloudcli&&!form.Options.closeWeb;fields[1].Choose("");Pump();cloud&=fields[1].Value==""&&!switches[1].Enabled&&!switches[1].Checked;fields[1].Choose(browsers[0].Id);Pump();cloud&=switches[1].Enabled&&switches[1].Checked&&form.Options.closeCloudcli;check(web&&cloud,"web and ClaudeWeb browser choices and switches update immediately, independently and retain their settings");}
                 else check(fields[0].Value=="","without another browser only the system default is offered");
                 form.CloseSettings();Pump();form.FinishTransition();
             }

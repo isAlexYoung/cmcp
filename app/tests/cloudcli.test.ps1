@@ -11,21 +11,21 @@ try{
     $cipher=Protect-Text 'CLOUDCLI-TEST-SECRET'
     Write-Utf8File (Join-Path $fixtureRoot 'cloudcli-logins.json') (@{schema=1;logins=@(@{name='device';url='https://desktop-claude.example.com';secret=$cipher;autoLogin=$true})}|ConvertTo-Json -Depth 6)
     $targets=@(Get-ConnectionTargets)
-    Check ($targets.Count -eq 2) 'desktop and CloudCLI expand into two independent connection profiles'
+    Check ($targets.Count -eq 2) 'desktop and ClaudeWeb expand into two independent connection profiles'
     $cloud=@($targets|Where-Object name -eq 'cloudcli:device')[0]
-    Check ($cloud.authMode -eq 'cloudcli' -and $cloud.autoLogin) 'CloudCLI keeps its own protocol and automatic sign-in choice'
-    Check ((Unprotect-Text $cloud.password) -ceq 'CLOUDCLI-TEST-SECRET') 'the password helper can decrypt a CloudCLI current-user credential'
+    Check ($cloud.authMode -eq 'cloudcli' -and $cloud.autoLogin) 'ClaudeWeb keeps its own protocol and automatic sign-in choice'
+    Check ((Unprotect-Text $cloud.password) -ceq 'CLOUDCLI-TEST-SECRET') 'the password helper can decrypt a ClaudeWeb current-user credential'
     $null=Set-TargetConnection 'cloudcli:device' $true
     $controls=@((Get-TargetControls).targets)
-    Check (@($controls|Where-Object { $_.name -ceq 'cloudcli:device' -and $_.enabled }).Count -eq 1 -and @($controls|Where-Object { $_.name -ceq 'device' -and $_.enabled }).Count -eq 0) 'starting CloudCLI leaves the desktop switch alone'
+    Check (@($controls|Where-Object { $_.name -ceq 'cloudcli:device' -and $_.enabled }).Count -eq 1 -and @($controls|Where-Object { $_.name -ceq 'device' -and $_.enabled }).Count -eq 0) 'starting ClaudeWeb leaves the desktop switch alone'
     $null=Set-TargetConnection '' $false -All
-    Check (@((Get-TargetControls).targets|Where-Object enabled).Count -eq 0) 'full exit disables CloudCLI as well as the desktop'
-    Check (@(Get-CloudTargets).Count -eq 1) 'CloudCLI never enters or overwrites the saved desktop list'
+    Check (@((Get-TargetControls).targets|Where-Object enabled).Count -eq 0) 'full exit disables ClaudeWeb as well as the desktop'
+    Check (@(Get-CloudTargets).Count -eq 1) 'ClaudeWeb never enters or overwrites the saved desktop list'
     Write-Utf8File (Join-Path $fixtureRoot 'application-preferences.json') (@{schema=1;browser='edge';closeWeb=$false;cloudcliBrowser='chrome';closeCloudcli=$true}|ConvertTo-Json)
     function Find-BrowserProgram([string]$id){return ('C:\fixture\'+$id+'.exe')}
     $web=Get-BrowserChoice 'device';$cli=Get-BrowserChoice 'cloudcli:device'
-    Check ($web.Id -eq 'edge' -and !$web.Close -and $cli.Id -eq 'chrome' -and $cli.Close) 'CloudCLI browser and closing settings stay separate from desktop settings'
-    Check (!(Get-Content -LiteralPath (Join-Path $fixtureRoot 'cloudcli-logins.json') -Raw).Contains('CLOUDCLI-TEST-SECRET')) 'CloudCLI configuration never contains the plaintext password'
+    Check ($web.Id -eq 'edge' -and !$web.Close -and $cli.Id -eq 'chrome' -and $cli.Close) 'ClaudeWeb browser and closing settings stay separate from desktop settings'
+    Check (!(Get-Content -LiteralPath (Join-Path $fixtureRoot 'cloudcli-logins.json') -Raw).Contains('CLOUDCLI-TEST-SECRET')) 'ClaudeWeb configuration never contains the plaintext password'
     @{passed=$checks.Count;failed=0;checks=@($checks)}|ConvertTo-Json -Depth 4
 }finally{
     $env:CMCP_STATE_DIR=$previousState

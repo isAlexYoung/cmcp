@@ -32,14 +32,14 @@ namespace CMCP {
         internal bool TunnelActive {get{return !SshActive&&(CloudActive?Preference.cloudcliRoute:Preference.webRoute)=="ssh";}}
         internal string ConnectionName {get{return TunnelActive?"tunnel:"+(CloudActive?"cloudcli:":"web:")+Target.Name:CloudActive?"cloudcli:"+Target.Name:Target.Name;}}
         internal bool CloudActive {get{return Preference.loginMode=="cloudcli"||Preference.loginMode==""&&Target.Url.Length==0&&Cloud!=null&&Ssh==null;}}
-        internal Target Connection {get{if(TunnelActive)return (CloudActive?CloudTunnelTarget:WebTunnelTarget)??new Target{Name=ConnectionName,Url="",Mode="SSH 隧道",State="stopped",Detail="已停止"};return !CloudActive?Target:CloudTarget??new Target{Name="cloudcli:"+Target.Name,Url=Cloud==null?"":Cloud.url,State="stopped",Mode="CloudCLI 登录",Detail="已停止",AutoLogin=Cloud!=null&&Cloud.autoLogin,HasSavedPassword=Cloud!=null&&Cloud.secret.Length>0};}}
+        internal Target Connection {get{if(TunnelActive)return (CloudActive?CloudTunnelTarget:WebTunnelTarget)??new Target{Name=ConnectionName,Url="",Mode="SSH 隧道",State="stopped",Detail="已停止"};return !CloudActive?Target:CloudTarget??new Target{Name="cloudcli:"+Target.Name,Url=Cloud==null?"":Cloud.url,State="stopped",Mode="ClaudeWeb 登录",Detail="已停止",AutoLogin=Cloud!=null&&Cloud.autoLogin,HasSavedPassword=Cloud!=null&&Cloud.secret.Length>0};}}
         // The background SSH channel: empty while nothing runs, otherwise its reported phase.
         internal string SshState="";
         internal bool SshStopping;
         // What the backend or the setup action found this device's CloudCLI to be (CloudCliKinds).
         internal string CloudKind="";
-        internal bool SelfHostedCloud {get{return CloudActive&&CloudKind==CloudCliKinds.SelfHosted;}}
-        internal bool SetupOffered {get{return CloudActive&&!SshActive&&CloudKind!=CloudCliKinds.WebDesktop&&(Ssh!=null||CloudKind==CloudCliKinds.SelfHosted);}}
+        internal bool SelfHostedCloud {get{return CloudActive&&CloudCliKinds.UsesSshTools(CloudKind);}}
+        internal bool SetupOffered {get{return CloudActive&&!SshActive&&CloudKind!=CloudCliKinds.WebDesktop&&(Ssh!=null||CloudCliKinds.UsesSshTools(CloudKind));}}
         internal bool SetupRunning;
         // Only the card's own button changes here; a running web connection is not touched.
         internal bool SshActive { get { return Preference.loginMode=="ssh"||(Preference.loginMode!="web"&&Preference.loginMode!="cloudcli"&&Ssh!=null&&(Ssh.active||Target.Url.Length==0)); } }
@@ -47,7 +47,7 @@ namespace CMCP {
         internal string Address {get{return SshActive||TunnelActive?(Ssh==null?"":Ssh.host):Connection.Url;}}
         internal readonly CardIcon IconNote=new CardIcon();
         internal string Caption { get { return Preference.label.Length>0?Preference.label:Preference.hideAddress?L.Text("未命名设备"):Target.Url.Length>0?new Uri(Target.Url).Host:Cloud!=null?new Uri(Cloud.url).Host:Ssh!=null?Ssh.host:Target.Name; } }
-        internal readonly DropdownField AppChoice=new DropdownField(new[]{new System.Collections.Generic.KeyValuePair<string,string>("web","WebDesktop"),new System.Collections.Generic.KeyValuePair<string,string>("cloudcli","CloudCLI"),new System.Collections.Generic.KeyValuePair<string,string>("ssh","Terminal")}){AccessibleName="打开对象"};
+        internal readonly DropdownField AppChoice=new DropdownField(new[]{new System.Collections.Generic.KeyValuePair<string,string>("web","WebDesktop"),new System.Collections.Generic.KeyValuePair<string,string>("cloudcli","ClaudeWeb"),new System.Collections.Generic.KeyValuePair<string,string>("ssh","Terminal")}){AccessibleName="打开对象"};
         internal readonly DropdownField RouteChoice=new DropdownField(new[]{new System.Collections.Generic.KeyValuePair<string,string>("url","网址直连"),new System.Collections.Generic.KeyValuePair<string,string>("ssh","SSH 隧道")}){AccessibleName="连接方式"};
         internal event Action<TargetCard,string> AppChosen,RouteChosen;
         internal readonly ModernButton LoginSwitch=new ModernButton{Glyph="swap",Neutral=true,AccessibleName="切换登录方式"};
@@ -92,7 +92,7 @@ namespace CMCP {
             Details.Logs.Click+=delegate{if(LogsRequested!=null)LogsRequested(this);};
             Details.Setup.Click+=delegate{if(SetupRequested!=null)SetupRequested(this);};
             tips.SetToolTip(Details.Setup,"通过 SSH 检查 VPS，只补上缺少的 Claude CLI 和 MCP 条目");
-            tips.SetToolTip(LoginSwitch,"切换登录方式：网页桌面 / CloudCLI / SSH");
+            tips.SetToolTip(LoginSwitch,"切换登录方式：网页桌面 / ClaudeWeb / SSH");
             tips.SetToolTip(Edit,"编辑名称、备注、图标和登录方式");
                         tips.SetToolTip(Delete,"删除这一台设备，其他连接保持不变");
             tips.SetToolTip(Toggle,"展开 / 收起详情");
@@ -169,12 +169,12 @@ namespace CMCP {
             Edit.Enabled=Delete.Enabled=!BusyConnect&&!BusyStop;
             Details.Stop.Enabled=!BusyStop;Details.Open.Enabled=!BusyStop;
             string shown=SshActive?(SshStopping?"正在停止":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):BusyStop?"正在停止":(Connection.State=="recovering"||Connection.State=="unstable")?"正在恢复":connecting&&!connected?"连接中":LocalState.Caption(Connection.State);
-            StatusText.Text=(SshActive?"Terminal":CloudActive?"CloudCLI":"WebDesktop")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
+            StatusText.Text=(SshActive?"Terminal":CloudActive?"ClaudeWeb":"WebDesktop")+" · "+L.Text(shown);StatusText.AccessibleName=StatusText.Text;
             tips.SetToolTip(Connect,connected?"点击停止此设备的连接":connecting?"连接中；可点击停止，或展开详情打开网页登录":"点击启动这一台设备");
             Connect.AccessibleName=L.Text(Connect.Text)+" · "+Connection.Url;
             Details.Stop.Text=BusyStop?"正在停止":"停止连接";
-            LoginSwitch.Text=SshActive?"SSH":CloudActive?"CloudCLI":"网页桌面";LoginSwitch.Enabled=!BusyStop;
-            Details.Open.Text=SshActive?"打开终端":CloudActive?"打开 CloudCLI":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":CloudActive?"web":"monitor";
+            LoginSwitch.Text=SshActive?"SSH":CloudActive?"ClaudeWeb":"网页桌面";LoginSwitch.Enabled=!BusyStop;
+            Details.Open.Text=SshActive?"打开终端":CloudActive?"打开 ClaudeWeb":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":CloudActive?"web":"monitor";
             Details.Stop.Visible=true;Details.Logs.Visible=Connection.Url.Length>0;
             bool setup=SetupOffered;if(Details.SetupShown!=setup){Details.SetupShown=setup;if(Expanded){Height=FinalHeight;PerformLayout();}}Details.Setup.Enabled=!SetupRunning&&!BusyStop;
             Details.Channel=SelfHostedCloud?(Ssh==null?"需要 SSH 信息":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):null;

@@ -174,7 +174,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             sub.items[1].title = tr("断开设备", "Disconnect device"); sub.items[1].isEnabled = !blocked && enabled
             sub.items[2].title = tr("重命名", "Rename"); sub.items[2].isEnabled = !blocked
             let cloud = target["loginMode"] as? String == "cloudcli"
-            sub.items[4].title = cloud ? tr("切换为 SSH 登录", "Switch to SSH sign-in") : ssh ? tr("切换为网页桌面登录", "Switch to web desktop sign-in") : tr("切换为 CloudCLI 登录", "Switch to CloudCLI sign-in")
+            sub.items[4].title = cloud ? tr("切换为 SSH 登录", "Switch to SSH sign-in") : ssh ? tr("切换为网页桌面登录", "Switch to web desktop sign-in") : tr("切换为 ClaudeWeb 登录", "Switch to ClaudeWeb sign-in")
             sub.items[4].image = App.symbol(cloud ? "terminal" : "globe"); sub.items[4].isEnabled = !blocked
         }
     }
@@ -513,7 +513,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         hideWindow(); trayClick(nil)
         guard window.isVisible, NSApp.activationPolicy() == .regular, item.menu == nil, !trayTracking else { finishTests(error: "A left click on the menu bar icon must open the main window"); return }
         testResults.append("a left click on the menu bar icon opens the main window without the menu")
-        guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接设备", "Connect device"), tr("断开设备", "Disconnect device"), tr("重命名", "Rename"), "", tr("切换为 CloudCLI 登录", "Switch to CloudCLI sign-in")] && $0.submenu?.items[3].isSeparatorItem == true }) else { finishTests(error: "Tray submenu actions missing"); return }
+        guard trayRows.values.allSatisfy({ $0.submenu?.items.map({ $0.title }) == [tr("连接设备", "Connect device"), tr("断开设备", "Disconnect device"), tr("重命名", "Rename"), "", tr("切换为 ClaudeWeb 登录", "Switch to ClaudeWeb sign-in")] && $0.submenu?.items[3].isSeparatorItem == true }) else { finishTests(error: "Tray submenu actions missing"); return }
         testResults.append("native cloud submenus expose connect disconnect rename and the sign-in switch")
         let savedTargets = trayTargets, firstID = trayTargets[0]["id"] as! String, firstRow = trayRows[trayTargets[0]["id"] as! String]
         trayTargets[0]["label"] = "Tray note"; trayTargets[0]["state"] = "connected"; trayTargets[0]["enabled"] = true; updateTrayMenu()
@@ -552,14 +552,14 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
                 let target = self.trayTargets.first { $0["id"] as? String == firstID }
                 let current = target?["loginMode"] as? String ?? "web"
-                let expected = mode == "cloudcli" ? self.tr("切换为 SSH 登录", "Switch to SSH sign-in") : mode == "ssh" ? self.tr("切换为网页桌面登录", "Switch to web desktop sign-in") : self.tr("切换为 CloudCLI 登录", "Switch to CloudCLI sign-in")
+                let expected = mode == "cloudcli" ? self.tr("切换为 SSH 登录", "Switch to SSH sign-in") : mode == "ssh" ? self.tr("切换为网页桌面登录", "Switch to web desktop sign-in") : self.tr("切换为 ClaudeWeb 登录", "Switch to ClaudeWeb sign-in")
                 if current == mode && self.trayPending.isEmpty && !self.trayRefreshing && change.title == expected { timer.invalidate(); done(); return }
                 waited += 1; if waited > 100 { timer.invalidate(); self.finishTests(error: "Tray switch did not change the application") }
             }
         }
         switched("cloudcli") { switched("ssh") { switched("web") {
             guard self.window.isVisible, self.item.menu == nil else { self.finishTests(error: "Tray switch changed the window or menu anchor"); return }
-            self.testResults.append("tray switch follows WebDesktop CloudCLI Terminal and relabels itself"); next(0)
+            self.testResults.append("tray switch follows WebDesktop ClaudeWeb Terminal and relabels itself"); next(0)
         } } }
     }
     func saveSnapshot(_ name: String, then done: @escaping () -> Void) {

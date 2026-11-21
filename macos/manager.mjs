@@ -87,12 +87,12 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
   const connectionName=id=>store.connectionName(id);
   const verifyMode=input=>{if(input.expectedMode!==undefined&&store.loginMode(input.id)!==input.expectedMode)throw Error('打开对象已改变，请重试');};
   const browserPreferences=id=>store.loginMode(id)==='cloudcli'?{...store.preferences,browser:store.preferences.cloudcliBrowser||'',closeWeb:store.preferences.closeCloudcli===true}:store.preferences;
-  async function entry(id){const name=connectionName(id);if(!store.linkTargets().some(t=>t.name===name))throw Error(store.route(id)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':store.loginMode(id)==='cloudcli'?'还没有填写 CloudCLI 地址，请编辑设备后再连接。':'还没有填写网页桌面地址，请编辑设备后再连接。');for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===name);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(name)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
+  async function entry(id){const name=connectionName(id);if(!store.linkTargets().some(t=>t.name===name))throw Error(store.route(id)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':store.loginMode(id)==='cloudcli'?'还没有填写 ClaudeWeb 地址，请编辑设备后再连接。':'还没有填写网页桌面地址，请编辑设备后再连接。');for(let i=0;i<100;i++){if(closing)throw Error('程序正在退出');const record=connections.values().find(t=>t.name===name);if(record)return record.gateway?.launchUrl||record.url;if(!store.controlMap().get(name)?.enabled)throw Error('请先启动连接');await delay(100);}throw Error('连接尚未准备好，请查看卡片进度');}
   // A running connection already holds a session; otherwise only a saved password can open one.
   const removeCloudConfig=removeCloud||(async target=>{
     const record=connections.values().find(t=>t.name===target.id);
     if(record?.auth)return new Cloud(record.url,record.auth,record.agent).uninstall();
-    if(target.authMode==='cloudcli')throw Error('CloudCLI must be connected to remove its cloud configuration');
+    if(target.authMode==='cloudcli')throw Error('ClaudeWeb must be connected to remove its cloud configuration');
     const cloud=await Cloud.connect(target.url,await store.password(target.id),await networkProxy(target.url));
     try{await cloud.uninstall();}finally{cloud.close();}
   });

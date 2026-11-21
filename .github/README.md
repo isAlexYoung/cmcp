@@ -76,7 +76,7 @@ xattr -dr com.apple.quarantine /Applications/CMCP.app
 
 Install and enable the [MCP for Blender add-on](https://github.com/ahujasid/mcp-for-blender) on this computer, open Blender and start the add-on server in its sidebar. CMCP connects to `127.0.0.1:9876` by default. If the add-on uses a different port, pass it in the Blender tools' `port` argument.
 
-Since 4.20 the Blender tools are off by default: turn on Settings → Tools → Blender (CMCP also offers this once when it finds Blender). Reconnect CMCP and restart Claude on the VPS to discover the `blender_*` tools. They inspect the live scene and objects, execute Blender Python and return viewport images. Windows and Mac share the adapter. WebDesktop, CloudCLI and SSH terminals use their existing MCP connections. No public Blender port or separate `uvx` server is needed.
+Since 4.20 the Blender tools are off by default: turn on Settings → Tools → Blender (CMCP also offers this once when it finds Blender). Reconnect CMCP and restart Claude on the VPS to discover the `blender_*` tools. They inspect the live scene and objects, execute Blender Python and return viewport images. Windows and Mac share the adapter. WebDesktop, ClaudeWeb and SSH terminals use their existing MCP connections. No public Blender port or separate `uvx` server is needed.
 
 Example: “Use CMCP to check my local Blender connection, inspect the current scene, create a red cube and show a viewport screenshot. Do not overwrite existing files.”
 

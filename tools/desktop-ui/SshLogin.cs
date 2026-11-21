@@ -22,7 +22,7 @@ namespace CMCP {
         public int webPort=3000,cloudcliPort=3001;
         public string webSecret="",cloudcliSecret="";
         public bool active;
-        // Saved by "初始化／修复 CloudCLI 连接": the account a self-hosted CloudCLI runs as, when root
+        // Saved by "初始化／修复 ClaudeWeb 连接": the account a self-hosted CloudCLI runs as, when root
         // hands the SSH channel to it, and whether CMCP starts that channel by itself (null: by kind).
         public string cloudcliUser="";
         public bool? sshAutoStart;
