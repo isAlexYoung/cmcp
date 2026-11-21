@@ -139,6 +139,7 @@ function Wait-Connected($targets) {
     $deadline = $begin.AddSeconds(120)
     $last = @{}
     $opened = @{}
+    $entryWait = @{}
     while ((Get-Date) -lt $deadline) {
         Wait-Ui 1000
         if ($TargetName) {
@@ -168,6 +169,13 @@ function Wait-Connected($targets) {
             if (!$s -or ($TargetName -and $s.revision -ne $script:Control.revision)) { $done = $false; continue }
             if ($s.state -eq 'waiting-login' -and !$opened[$t.name]) {
                 if (Open-SharedCloudBrowser $t.name) { $opened[$t.name] = $true; Write-Line '已打开网页桌面，请在网页中输入云电脑密码。' }
+            }
+            # Standalone ClaudeWeb and a self-hosted CloudCLI never wait for a browser sign-in, so
+            # open their page once connected, as Mac and Ubuntu do; give its entry 15 s to appear.
+            if ($s.state -eq 'connected' -and $t.authMode -eq 'cloudcli' -and !$opened[$t.name]) {
+                if (Open-SharedCloudBrowser $t.name) { $opened[$t.name] = $true; Write-Line '已打开 ClaudeWeb。' }
+                elseif (!$entryWait[$t.name]) { $entryWait[$t.name] = (Get-Date).AddSeconds(15); $done = $false; continue }
+                elseif ((Get-Date) -lt $entryWait[$t.name]) { $done = $false; continue }
             }
             # 每一步的说明都显示出来（读取密码 → 登录 → 建立连接）
             $key = [string]$s.state + '|' + [string]$s.message

@@ -71,6 +71,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $r = Get-Content test-results/powershell.json -Raw | ConvertFrom-Json
           if ($r.passed -ne 25 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete PowerShell regression' }
+      - name: Connect opens a ClaudeWeb page once connected
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File app/tests/open-on-connect.test.ps1 | Set-Content test-results/open-on-connect.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $r = Get-Content test-results/open-on-connect.json -Raw | ConvertFrom-Json
+          if ($r.passed -ne 5 -or $r.failed -ne 0 -or $r.skipped -ne 0) { throw 'Incomplete open-on-connect regression' }
       - name: CloudCLI profiles and current-user credentials
         shell: pwsh
         run: |

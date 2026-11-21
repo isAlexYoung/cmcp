@@ -59,7 +59,6 @@ namespace CMCP {
         internal Func<SshLogin,string,CloudCliSetupRun> StartSetup;
         internal Dictionary<string,string> Kinds=new Dictionary<string,string>(StringComparer.Ordinal);
         readonly Dictionary<string,CloudCliSetupRun> setups=new Dictionary<string,CloudCliSetupRun>(StringComparer.Ordinal);
-        readonly HashSet<string> openWhenConnected=new HashSet<string>(StringComparer.Ordinal);
         Palette colors;
         List<Target> targets = new List<Target>();
         string selected = "", notice = "";
@@ -324,7 +323,7 @@ namespace CMCP {
             TargetCard card;if(tunnel&&Cloud.Get(name)==null&&Cards.TryGetValue(name,out card)){var p=Preferences.Get(name);p.loginMode="cloudcli";p.cloudcliRoute="ssh";Preferences.Set(name,p.label,p.icon,targets,p.note);Preferences.Get(name).loginMode="cloudcli";Preferences.Get(name).cloudcliRoute="ssh";try{SavePreferences();}catch{}card.Ssh=next;card.UpdatePreference(Preferences.Get(name));}
         }
         // Opens CloudCLI, starting its connection first when it is stopped.
-        void OpenCloud(TargetCard card){if(card.Connection.State=="stopped"){openWhenConnected.Add(card.Target.Name);Launch("connect",card,"");}else Launch("open",card,"");}
+        void OpenCloud(TargetCard card){Launch(card.Connection.State=="stopped"?"connect":"open",card,"");}
         void StopCard(TargetCard card){if(card.SshActive)StopSsh(card);else Launch("stop",card,"");}
         // Stops the background channel of this device. Its terminal windows stay unless the
         // settings ask to close them; then the ssh inside each one ends and the window closes.
@@ -571,7 +570,6 @@ namespace CMCP {
                 }
                 if(target.AutoLogin&&(target.State=="password"||target.State=="locked"||target.State=="expired"))target.Detail=LocalState.Detail(target.State);
                 card.RefreshTarget(target);card.Edit.Enabled=card.Delete.Enabled=!IsBusy(target.Name);
-                if(openWhenConnected.Contains(target.Name)&&card.Connection.State=="connected"&&!card.BusyConnect){openWhenConnected.Remove(target.Name);var opening=card;BeginInvoke(new Action(()=>Launch("open",opening,"")));}
             }
             toolbar.Add.Enabled=!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove");Arrange();ApplyTheme();SyncTray();
         }
