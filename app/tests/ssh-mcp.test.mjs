@@ -63,7 +63,7 @@ test('raw SSH pipe sends bootstrap through stdin and maps authentication failure
 
 test('only root on a VPS with the shared Claude session hands the connector to the terminal user',()=>{
   assert.match(sharedSessionHandoff,/^if \[ "\$\(id -u\)" = 0 \] && \[ -e \/etc\/systemd\/system\/wd-claude-session\.service \]; then exec \/usr\/sbin\/runuser -u wdterm -g wdguest -- env -i HOME=\/home\/wdguest /);
-  assert.ok(sharedSessionHandoff.includes(' CMCP_SHARED_SESSION=1 "$@"; fi; exec "$@"'));
+  assert.ok(sharedSessionHandoff.includes(' CMCP_SHARED_SESSION=1 "$@"; fi; '));
   // The remote side is a POSIX shell; Windows runners have none to run it with.
   if(process.platform==='win32')return;
   // Any other account, or a VPS without the session service, runs the bootstrap command itself.
@@ -71,6 +71,27 @@ test('only root on a VPS with the shared Claude session hands the connector to t
   // The quoted command survives a POSIX shell intact, bootstrap source included.
   const source="print('it''s', \"$HOME\" \\n)";
   assert.equal(execFileSync('sh',['-c',remoteCommand(source).replace(' sh python3 -I -B -u -c ',' sh printf %s ')]).toString(),source);
+});
+
+test('root SSH selects standalone ClaudeWeb HOME while ordinary accounts and shared desktops keep their own route',t=>{
+  if(process.platform==='win32')return;
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-handoff-'));
+  t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const bin=path.join(directory,'bin'),home=path.join(directory,'claudeweb'),shared=path.join(directory,'wdguest'),program=path.join(directory,'program');
+  fs.mkdirSync(bin);fs.mkdirSync(home);fs.mkdirSync(shared);fs.mkdirSync(program);
+  const script=(name,source)=>{const file=path.join(bin,name);fs.writeFileSync(file,'#!/bin/sh\n'+source);fs.chmodSync(file,0o700);return file;};
+  script('id','printf %s "${CMCP_TEST_UID:-0}"');
+  script('getent',`printf %s 'claudeweb:x:1000:1000::${home}:/bin/sh'`);
+  script('systemctl','printf %s "${CMCP_TEST_USER:-claudeweb}"');
+  const runuser=script('runuser',`printf '%s\\n' "$*" > '${directory}/selected'; while [ "$1" != -- ]; do shift; done; shift; exec "$@"`);
+  const unit=path.join(directory,'claudeweb.service'),sharedUnit=path.join(directory,'wd-claude-session.service');fs.writeFileSync(unit,'');
+  const command=sharedSessionHandoff.replaceAll('/etc/systemd/system/wd-claude-session.service',sharedUnit).replaceAll('/etc/systemd/system/claudeweb.service',unit).replaceAll('/opt/claudeweb',program).replaceAll('/usr/sbin/runuser',runuser).replaceAll('/home/wdguest',shared);
+  const env={...process.env,PATH:bin+':'+process.env.PATH,HOME:directory};
+  const run=extra=>execFileSync('sh',['-c',command,'sh','sh','-c','printf "%s" "$HOME"'],{env:{...env,...extra}}).toString();
+  assert.equal(run(),home);assert.match(fs.readFileSync(path.join(directory,'selected'),'utf8'),/^-u claudeweb -- /);
+  assert.equal(run({CMCP_TEST_UID:'1000'}),directory,'a non-root SSH account is never silently switched');
+  assert.equal(run({CMCP_TEST_USER:'someone-else'}),directory,'a differently owned service needs explicit configuration');
+  fs.writeFileSync(sharedUnit,'');assert.equal(run(),shared);assert.match(fs.readFileSync(path.join(directory,'selected'),'utf8'),/^-u wdterm -g wdguest -- /);
 });
 
 test('auth, host key and remote setup failures are classified separately from network interruptions',()=>{

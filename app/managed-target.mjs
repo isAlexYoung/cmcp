@@ -6,6 +6,7 @@ import {supportsDirectBrowser,createDirectBrowser} from './direct-browser.mjs';
 import {connectionDetail} from './connection-transport.mjs';
 import {discoverCloudcli,createLaunchPage,cloudcliDevice,SELF_HOSTED,WEBDESKTOP,CLAUDEWEB} from './cloudcli.mjs';
 import {requestBuffered} from './desktop-auth.mjs';
+import {startClaudewebMcp} from './claudeweb-mcp.mjs';
 
 // Fixed texts, so the Windows card may show them as they are (Manager.cs PreparationDetail).
 export const SELF_HOSTED_READY='自行安装的 CloudCLI：网页可以打开；本机工具经此设备的 SSH 后台通道连接。';
@@ -66,12 +67,17 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
         // No WebDesktop sign-in and no web MCP: the page opens through a local entrance and the
         // device's SSH background channel carries the local tools. A self-hosted CloudCLI keeps its
         // own login; standalone ClaudeWeb is signed in with a one-time code when auto login is on.
-        const openPage=async kind=>{
+        const openPage=async(kind,webMcp=false)=>{
           const claudeweb=kind===CLAUDEWEB,ready=claudeweb?CLAUDEWEB_READY:SELF_HOSTED_READY,down=claudeweb?CLAUDEWEB_DOWN:SELF_HOSTED_DOWN;
           const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,kind);}catch{}
-          let up=true,issue=null;
+          let up=true,issue=null,bridgeState=null;
+          if(claudeweb&&webMcp){
+            record.link=startClaudewebMcp({url:t.url,agent:record.agent,passwordFor:()=>passwordFor(t.name,signal),machine,catalog,forward,signal,device:device||'',
+              status:(state,message)=>{bridgeState={state,message};if(current()&&!signal.aborted)publish(t.name,state,message);}});
+          }
           const signIn=claudeweb&&t.autoLogin===true?async()=>{
             if(!current()||signal.aborted)return null;
+            if(webMcp){try{return await record.link.browserCode();}catch{return null;}}
             let password;try{password=await passwordFor(t.name,signal);}catch{}
             if(typeof password!=='string'||!password){issue=CLAUDEWEB_PASSWORD;}
             else{
@@ -84,11 +90,11 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
           }:undefined;
           record.selfHosted=true;record.claudeweb=claudeweb;record.gateway=await createLaunchPage({url:t.url,signIn});
           if(!current()){await record.gateway.close();throw Error('Target stopped');}
-          publish(t.name,'connected',ready);
+          if(!webMcp)publish(t.name,'connected',ready);
           const probe=setInterval(async()=>{
             if(!current()||signal.aborted)return;
             try{const r=await requestBuffered(new URL('/',t.url),{agent:record.agent,signal,timeout:10000,limit:262144});up=r.status<500;}catch{up=false;}
-            if(current()&&!signal.aborted)publish(t.name,up?'connected':'offline',up?(issue||ready):down);
+            if(current()&&!signal.aborted)publish(t.name,up?(bridgeState?.state||'connected'):'offline',up?(bridgeState?.message||issue||ready):down);
           },selfHostedProbeMs);probe.unref?.();
           signal.addEventListener('abort',()=>clearInterval(probe),{once:true});
           return record;
@@ -99,7 +105,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
           if(!error.selfHosted)throw error;
           return await openPage(SELF_HOSTED);
         }
-        if(discovered.kind===CLAUDEWEB)return await openPage(CLAUDEWEB);
+        if(discovered.kind===CLAUDEWEB)return await openPage(CLAUDEWEB,discovered.webMcp===true);
         {const device=cloudcliDevice(t.name);if(device)try{onCloudcliKind(device,WEBDESKTOP);}catch{}}
         record.cloudcliAgent=record.agent;record.url=record.tunnel?.web||discovered.desktopOrigin;
         record.agent=agentFor(record.url,record.tunnel?'':await proxyFor(record.url,signal));

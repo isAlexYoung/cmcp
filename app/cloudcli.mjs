@@ -15,7 +15,7 @@ export async function discoverCloudcli(url,agent,signal){
   const origin=cloudcliOrigin(url),r=await requestBuffered(new URL('/api/auth/cmcp',origin),{agent,signal,timeout:10000,limit:16384});
   let data;try{data=JSON.parse(r.body);}catch{}
   // Standalone ClaudeWeb (isAlexYoung/ClaudeWeb): its own password sign-in, tools over SSH.
-  if(r.status===200&&data?.protocol==='claudeweb-cmcp'&&data.version===1)return {origin,kind:CLAUDEWEB};
+  if(r.status===200&&data?.protocol==='claudeweb-cmcp'&&data.version===1)return {origin,kind:CLAUDEWEB,...(data.capabilities?.webMcp===1?{webMcp:true}:{})};
   // A CloudCLI installed without WebDesktop answers with its own page or an auth error, never a cmcp- protocol.
   // Its tools then go through the device's SSH channel instead (selfHosted).
   const selfHosted=[200,401,403,404].includes(r.status)&&!(typeof data?.protocol==='string'&&data.protocol.startsWith('cmcp-'));

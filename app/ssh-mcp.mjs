@@ -32,7 +32,11 @@ export function sshArguments(login, {background=false}={}) {
 // user (wdterm), so root hands the connector to that user: its config and relay must be ones
 // that Claude can read from inside the terminal sandbox.
 export const sharedSessionHandoff='if [ "$(id -u)" = 0 ] && [ -e /etc/systemd/system/wd-claude-session.service ]; then '
-  +'exec /usr/sbin/runuser -u wdterm -g wdguest -- env -i HOME=/home/wdguest PATH=/usr/bin:/bin LANG=C.UTF-8 CMCP_SHARED_SESSION=1 "$@"; fi; exec "$@"';
+  +'exec /usr/sbin/runuser -u wdterm -g wdguest -- env -i HOME=/home/wdguest PATH=/usr/bin:/bin LANG=C.UTF-8 CMCP_SHARED_SESSION=1 "$@"; fi; '
+  +'if [ "$(id -u)" = 0 ] && [ -f /etc/systemd/system/claudeweb.service ] && [ -d /opt/claudeweb ] '
+  +'&& [ "$(systemctl show --property=User --value claudeweb.service 2>/dev/null)" = claudeweb ]; then '
+  +'cmcp_home=$(getent passwd claudeweb | cut -d: -f6); [ -n "$cmcp_home" ] || { echo "ClaudeWeb account missing" >&2; exit 70; }; '
+  +'exec /usr/sbin/runuser -u claudeweb -- env -i HOME="$cmcp_home" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 "$@"; fi; exec "$@"';
 // A self-hosted CloudCLI that runs as another account than root's SSH login: the setup action
 // saved that account (cloudcliUser), and root hands the connector to it the same way, so the
 // MCP entry lands in the Claude config that CloudCLI reads. Without root nothing is handed over.
