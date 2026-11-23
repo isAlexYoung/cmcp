@@ -9,13 +9,11 @@ import { guardedCommand } from './windows-command-guard.mjs';
 
 const cwdProperty = { type: 'string', description: 'Absolute directory on the Windows PC, e.g. D:\\work\\project. Defaults to the bridge directory.' };
 const envProperty = { type: 'object', additionalProperties: { type: 'string' }, description: 'Environment overrides for this command only.' };
-const memoryProperty = { type: 'integer', minimum: 64, maximum: 8192, default: 2048, description: 'Memory commit cap in MiB for the command and all descendants. Default 2048; raise explicitly for a large build. Child processes end with the managed command.' };
 const commandProperties = {
   command: { type: 'string', minLength: 1, maxLength: 200000, description: 'Command or script to execute on the Windows PC.' },
   shell: { type: 'string', enum: ['powershell', 'cmd'], default: 'powershell' },
   cwd: cwdProperty,
   env: envProperty,
-  memory_limit_mb: memoryProperty,
 };
 const timeoutProperty = { type: 'integer', minimum: 100, maximum: 90000, default: 60000, description: 'Foreground command deadline in milliseconds. Use windows_start_process for longer work.' };
 const outputProperty = { type: 'integer', minimum: 1000, maximum: 200000, default: 30000 };
@@ -33,7 +31,7 @@ export const windowsToolDefinitions = [
   definition('windows_run_program', 'Run a Windows executable directly with an argument array, without shell string quoting. Suitable for python.exe, node.exe, git.exe or a full executable path. For .bat/.cmd scripts and pipelines use windows_execute. Use windows_start_process for long work.', {
     executable: { type: 'string', minLength: 1, maxLength: 4096 },
     args: { type: 'array', items: { type: 'string', maxLength: 200000 }, maxItems: 500, default: [] },
-    cwd: cwdProperty, env: envProperty, memory_limit_mb: memoryProperty, timeout_ms: timeoutProperty, output_limit: outputProperty,
+    cwd: cwdProperty, env: envProperty, timeout_ms: timeoutProperty, output_limit: outputProperty,
   }, ['executable']),
   definition('windows_start_process', 'Start a background PowerShell or CMD command on Windows. Returns a managed session ID; poll windows_process_status for output and use windows_stop_process to stop its process tree. Suitable for development servers, builds and commands longer than 90 seconds. Processes are owned by this temporary MCP session.', {
     ...commandProperties,
@@ -143,10 +141,6 @@ export function createWindowsTools({ defaultCwd, roots, stateDir }) {
     const cwd = args.cwd ?? defaultCwd;
     if (!path.win32.isAbsolute(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error('cwd must be an existing absolute Windows directory');
     const env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ...args.env };
-    // Known Node test failures must fail inside this command, not consume all system commit memory.
-    if (!/(?:^|\s)--max[-_]old[-_]space[-_]size(?:=|\s)/.test(env.NODE_OPTIONS || '')) {
-      env.NODE_OPTIONS = `${env.NODE_OPTIONS || ''} --max-old-space-size=1024`.trim();
-    }
     const id = randomUUID();
     let executable, argv, scriptFile = null;
     if (direct) {
@@ -170,7 +164,7 @@ export function createWindowsTools({ defaultCwd, roots, stateDir }) {
     let guarded;
     try {
       guarded = process.platform === 'win32'
-        ? guardedCommand(stateDir, executable, argv, cwd, verbatim, args.memory_limit_mb ?? 2048) : null;
+        ? guardedCommand(stateDir, executable, argv, cwd, verbatim) : null;
     } catch (error) {
       if (scriptFile) { try { fs.unlinkSync(scriptFile); } catch {} }
       throw error;
@@ -249,6 +243,13 @@ export function createWindowsTools({ defaultCwd, roots, stateDir }) {
   }
 
   async function call(name, args) {
+    // Older Claude sessions can retain the former schema. Accept and ignore that
+    // obsolete field so a cached memory budget cannot block an otherwise valid call.
+    if (['windows_execute', 'windows_run_program', 'windows_start_process'].includes(name)
+      && args && typeof args === 'object' && !Array.isArray(args) && Object.hasOwn(args, 'memory_limit_mb')) {
+      args = { ...args };
+      delete args.memory_limit_mb;
+    }
     const validate = validators.get(name);
     if (!validate) throw new Error('Unknown Windows tool');
     if (!validate(args)) throw new Error('Invalid arguments: ' + ajv.errorsText(validate.errors));

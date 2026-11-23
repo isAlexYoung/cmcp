@@ -22,9 +22,9 @@ export function commandGuard(stateDir) {
   return executable;
 }
 
-export function guardedCommand(stateDir, executable, args, cwd, verbatim, memoryMb = 2048) {
+export function guardedCommand(stateDir, executable, args, cwd, verbatim) {
   // FILETIME ticks let the helper reject PID reuse without WMI. Read the owner's start time once via its PID.
-  const request = { executable, args, cwd, verbatim, memoryMb, owner: process.pid,
+  const request = { executable, args, cwd, verbatim, owner: process.pid,
     ownerStart: ownerStartTicks() };
   return { executable: commandGuard(stateDir), args: [Buffer.from(JSON.stringify(request)).toString('base64')] };
 }

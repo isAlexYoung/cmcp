@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 
-import { createWindowsTools } from '../windows-tools.mjs';
+import { createWindowsTools, windowsToolDefinitions } from '../windows-tools.mjs';
 
 const windows = process.platform === 'win32';
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -39,7 +39,15 @@ test('guarded commands preserve quoting, pipes, exit codes and CMD; stop only th
   for (let i=0; i<30 && alive(descendant); i++) await sleep(100);
   assert.equal(stopped.running, false); assert.equal(alive(descendant), false); assert.ok(alive(sentinel.pid));
   const exit = await run('windows_run_program', { executable: process.execPath, args: ['-e', 'process.exit(7)'] });
-  assert.equal(exit.exit_code, 7); assert.match(exit.stderr, /memory cap/);
+  assert.equal(exit.exit_code, 7); assert.match(exit.stderr, /command exited with code 7/);
+});
+
+test('Windows command tools no longer advertise a memory budget', () => {
+  for (const name of ['windows_execute', 'windows_run_program', 'windows_start_process']) {
+    const tool = windowsToolDefinitions.find(tool => tool.name === name);
+    assert.ok(tool);
+    assert.equal(Object.hasOwn(tool.inputSchema.properties, 'memory_limit_mb'), false);
+  }
 });
 
 test('ending the MCP owner reclaims only its command job', { skip: !windows, timeout: 20000 }, async t => {
@@ -59,14 +67,50 @@ setInterval(()=>{},1000);`;
   assert.equal(alive(child), false, 'owner exit reclaims its descendant');
 });
 
-test('a 128 MiB job denies a 256 MiB native commit without exhausting system memory', { skip: !windows, timeout: 20000 }, async t => {
+test('managed commands have no job memory cap and ignore cached legacy budgets', { skip: !windows, timeout: 30000 }, async t => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cmcp-memory-'));
   const tools = createWindowsTools({ defaultCwd: folder, roots: [folder], stateDir: folder });
   t.after(async () => { await tools.close(); fs.rmSync(folder, { recursive: true, force: true }); });
   const source = path.join(folder, 'allocator.cs'), executable = path.join(folder, 'allocator.exe');
-  fs.writeFileSync(source, `using System;using System.Runtime.InteropServices;class Allocate{[DllImport("kernel32.dll",SetLastError=true)]static extern IntPtr VirtualAlloc(IntPtr address,UIntPtr size,uint type,uint protect);static int Main(){var p=VirtualAlloc(IntPtr.Zero,(UIntPtr)(256UL*1024*1024),0x3000,4);Console.Write(p==IntPtr.Zero?"COMMIT_DENIED":"UNEXPECTED_ALLOCATION");return p==IntPtr.Zero?0:1;}}`);
+  fs.writeFileSync(source, `using System;using System.Runtime.InteropServices;class Allocate{
+[StructLayout(LayoutKind.Sequential)]struct Basic{public long UserTime,JobTime;public uint Flags;public UIntPtr MinWorking,MaxWorking;public uint ActiveLimit;public UIntPtr Affinity;public uint Priority,Scheduling;}
+[StructLayout(LayoutKind.Sequential)]struct Io{public ulong A,B,C,D,E,F;}
+[StructLayout(LayoutKind.Sequential)]struct Extended{public Basic Basic;public Io Io;public UIntPtr ProcessMemory,JobMemory,PeakProcessMemory,PeakJobMemory;}
+[DllImport("kernel32.dll",SetLastError=true)]static extern bool QueryInformationJobObject(IntPtr job,int kind,out Extended limits,int size,IntPtr length);
+[DllImport("kernel32.dll",SetLastError=true)]static extern IntPtr VirtualAlloc(IntPtr address,UIntPtr size,uint type,uint protect);
+[DllImport("kernel32.dll")]static extern bool VirtualFree(IntPtr address,UIntPtr size,uint type);
+static int Main(){Extended limits;if(!QueryInformationJobObject(IntPtr.Zero,9,out limits,Marshal.SizeOf(typeof(Extended)),IntPtr.Zero))return 2;
+var p=VirtualAlloc(IntPtr.Zero,(UIntPtr)(256UL*1024*1024),0x3000,4);
+Console.Write("FLAGS="+limits.Basic.Flags+";JOB_MEMORY="+limits.JobMemory.ToUInt64()+";COMMIT="+(p==IntPtr.Zero?"DENIED":"OK"));
+if(p!=IntPtr.Zero)VirtualFree(p,UIntPtr.Zero,0x8000);return p==IntPtr.Zero?3:0;}}`);
   execFileSync(path.join(process.env.SystemRoot, 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'), ['/nologo', '/platform:x64', `/out:${executable}`, source], { windowsHide: true });
-  const result = await tools.call('windows_run_program', { executable, memory_limit_mb: 128 });
-  assert.equal(result.structuredContent.exit_code, 0, result.structuredContent.stderr);
-  assert.equal(result.structuredContent.stdout, 'COMMIT_DENIED');
+  for (const memory_limit_mb of [undefined, 128, 16384]) {
+    const result = await tools.call('windows_run_program', { executable, ...(memory_limit_mb === undefined ? {} : { memory_limit_mb }) });
+    assert.equal(result.structuredContent.exit_code, 0, result.structuredContent.stderr);
+    const match = /^FLAGS=(\d+);JOB_MEMORY=(\d+);COMMIT=OK$/.exec(result.structuredContent.stdout);
+    assert.ok(match, result.structuredContent.stdout);
+    assert.equal(Number(match[1]) & 0x300, 0, 'neither process nor job memory is capped');
+    assert.equal(match[2], '0');
+  }
+  for (const name of ['windows_execute', 'windows_start_process']) {
+    const result = await tools.call(name, { command: 'Write-Output legacy-budget-ignored', memory_limit_mb: 16384 });
+    const output = name === 'windows_start_process'
+      ? (await tools.call('windows_process_status', { session_id: result.structuredContent.session_id, wait_ms: 10000 })).structuredContent
+      : result.structuredContent;
+    assert.equal(output.exit_code, 0, output.stderr);
+    assert.match(output.stdout, /legacy-budget-ignored/);
+  }
+});
+
+test('managed Node commands inherit the chosen NODE_OPTIONS without an injected heap limit', { skip: !windows, timeout: 20000 }, async t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cmcp-node-memory-'));
+  const tools = createWindowsTools({ defaultCwd: folder, roots: [folder], stateDir: folder });
+  t.after(async () => { await tools.close(); fs.rmSync(folder, { recursive: true, force: true }); });
+  for (const NODE_OPTIONS of ['', '--max-old-space-size=3072']) {
+    const result = await tools.call('windows_run_program', {
+      executable: process.execPath, args: ['-e', 'process.stdout.write(JSON.stringify(process.env.NODE_OPTIONS))'], env: { NODE_OPTIONS },
+    });
+    assert.equal(result.structuredContent.exit_code, 0, result.structuredContent.stderr);
+    assert.equal(JSON.parse(result.structuredContent.stdout), NODE_OPTIONS);
+  }
 });
