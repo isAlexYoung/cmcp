@@ -79,7 +79,7 @@ namespace CMCP {
         readonly HashSet<ToolStrip> roundedByWindows=new HashSet<ToolStrip>();
         Point? anchor;
         bool positioning;
-        bool openingQueued,disposed;
+        bool openingQueued,disposed,exitingState;
         Point queuedPoint;
         Font font,small;
         internal Palette Colors;
@@ -182,8 +182,9 @@ namespace CMCP {
             }
         }
         static void Label(ToolStripItem item,string text){item.Text=text;((Row)item.Tag).Name=text;}
+        internal void SetExiting(bool value){exitingState=value;Label(exit,L.Text(value?"正在退出…":"退出程序"));exit.Enabled=open.Enabled=!value;}
         internal void Sync(IList<TrayTarget> values){
-            Label(open,L.Text("打开主界面"));Label(exit,L.Text("退出程序"));Label(empty,L.Text("暂无设备"));
+            Label(open,L.Text("打开主界面"));Label(exit,L.Text(exitingState?"正在退出…":"退出程序"));open.Enabled=exit.Enabled=!exitingState;Label(empty,L.Text("暂无设备"));
             foreach(string id in Targets.Keys.Where(id=>!values.Any(v=>v.Name==id)).ToArray()){var item=Targets[id];Menu.Items.Remove(item);Targets.Remove(id);item.Dispose();}
             if(values.Count==0){if(!Menu.Items.Contains(empty))Menu.Items.Insert(2,empty);}
             else Menu.Items.Remove(empty);

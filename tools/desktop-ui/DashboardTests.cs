@@ -276,6 +276,20 @@ namespace CMCP {
                 check(form.LayoutFits()&&form.Cards.Values.All(c=>c.Left==0),"repeated live resizing retains one fitted card rectangle per target");
                 using(var image=new Bitmap(form.list.Width,form.list.Height)){form.list.DrawToBitmap(image,form.list.ClientRectangle);check(image.GetPixel(form.list.ClientSize.Width-2,5).ToArgb()==form.list.BackColor.ToArgb(),"repaint clears the exposed list strip after repeated resizing");}
             }
+            File.Delete(Path.Combine(kit,"stop-A"));
+            File.WriteAllText(targets,"[{\"name\":\"A\",\"url\":\"https://a.invalid\",\"authMode\":\"shared-browser\"}]");
+            using(var startupForm=new Manager(false,state,kit))using(var gate=new System.Threading.ManualResetEventSlim(false)){
+                startupForm.Show();Pump();
+                var first=startupForm.Cards["A"];
+                startupForm.InitializeBackend(()=>{gate.Wait(5000);return true;},null);
+                bool interactiveWhileStarting=startupForm.BackendStarting&&startupForm.toolbar.Enabled&&startupForm.list.Enabled;
+                first.TestHover(true);first.Connect.PerformClick();
+                bool queuedWhileStarting=first.BusyConnect&&first.Expanded;
+                gate.Set();
+                bool dispatched=Until(()=>!startupForm.BackendStarting&&first.Target.Detail=="正在等待网页登录",startupForm);
+                check(interactiveWhileStarting&&queuedWhileStarting&&dispatched,"main window stays interactive during backend startup and seamlessly dispatches queued card connect");
+                first.Details.Stop.PerformClick();Until(()=>!first.BusyStop&&!first.BusyConnect,startupForm);Pump();
+            }
             foreach(var file in new[]{"start.ps1","stop.ps1","manager-save.ps1","stop-A","stop-B","pipe.ps1","pipe-completed"})File.Delete(Path.Combine(kit,file));
             Directory.Delete(kit,false);File.Delete(targets);File.Delete(Path.Combine(state,"control-order.txt"));File.Delete(UiPreferences.PathFor(state));Directory.Delete(state,false);
         }

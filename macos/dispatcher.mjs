@@ -11,14 +11,15 @@ import fs from 'node:fs';
 // Built-in Mac tools and the user's mcp-tools behind one catalog (app/tool-registry.mjs).
 export async function createDispatcher({roots,filesystem:injected,stateDir=STATE,registryOptions={}}) {
   const mac=createMacTools({roots}),binary=createBinaryTools({roots}),blender=createBlenderTools();
-  let filesystem=injected;
+  let filesystem=injected,transport=null;
   if(!filesystem){
     const local=path.join(KIT,'node_modules/@modelcontextprotocol/server-filesystem/dist/index.js');
-    const transport=new StdioClientTransport({command:process.execPath,args:[fs.existsSync(local)?local:path.join(KIT,'../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'),...roots],stderr:'ignore'});
+    transport=new StdioClientTransport({command:process.execPath,args:[fs.existsSync(local)?local:path.join(KIT,'../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'),...roots],stderr:'ignore'});
     filesystem=new Client({name:'cmcp-mac',version:VERSION});await filesystem.connect(transport);
   }
+  const closeFilesystem=async()=>{try{transport?._process?.kill();}catch{}await filesystem.close().catch(()=>{});};
   const files={definitions:compatibleToolDefinitions(await filesystem.listTools()).tools,call:(name,args)=>filesystem.callTool({name,arguments:args},undefined,{timeout:120000})};
   const registry=createToolRegistry({stateDir,roots,providers:[files,mac,binary,blender],serverName:'mac-pc-files',version:VERSION,...registryOptions,
     instructions:{base:`These tools operate on the physical Mac. Use absolute Mac paths, such as /Users/name/project. Allowed file roots: ${JSON.stringify(roots)}. Commands and launched programs run as the current Mac user with full account permissions. The cloud terminal is a separate Linux computer.`,blender:blenderInstructions}});
-  return{forward:registry.forward,registry,get definitions(){return registry.list().tools;},async close(){binary.close();await Promise.allSettled([registry.close(),blender.close(),mac.close(),filesystem.close()]);}};
+  return{forward:registry.forward,registry,get definitions(){return registry.list().tools;},async close(){binary.close();await Promise.allSettled([registry.close(),blender.close(),mac.close(),closeFilesystem()]);}};
 }

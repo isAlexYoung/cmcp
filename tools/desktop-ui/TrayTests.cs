@@ -59,6 +59,9 @@ namespace CMCP {
                 check(form.Editor==null&&b.Text.StartsWith("Renamed cloud · ")&&form.Cards["preview-a"].Target.State=="connected"&&form.Cards["preview-b"].Target.State=="offline","tray rename updates the remark without changing either connection");
                 b.DropDownItems[2].PerformClick();form.Editor.NameInput.Box.Text="Unsaved remark";a.DropDownItems[2].PerformClick();
                 check(form.Editor.TargetName=="preview-b"&&form.Editor.NameInput.Box.Text=="Unsaved remark","renaming another tray cloud never discards an unsaved editor");form.CloseEditor();
+                bool hiddenDuringExit=false;form.HideToTray();form.ExitBackend=delegate{hiddenDuringExit=!form.TrayVisible;return false;};
+                form.ExitApplication();Application.DoEvents();
+                check(hiddenDuringExit&&form.Visible&&!form.IsDisposed,"tray exit hides the icon immediately on click and restores the window if backend shutdown fails");
                 int stops=0;form.ExitBackend=delegate{stops++;return true;};form.Options.closeToTray=false;
                 check(form.TrayVisible,"direct-exit close preference does not remove the resident tray icon");
                 form.Close();Application.DoEvents();check(stops==1&&form.IsDisposed&&!form.TrayVisible,"direct X exit stops all connections and removes the resident tray icon");

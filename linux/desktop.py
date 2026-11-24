@@ -340,6 +340,8 @@ class Desktop(Gtk.Application):
             self.window.hide()
         if not self.exiting:
             self.exiting = True
+            if self.tray:
+                GLib.idle_add(self.tray.close)
             threading.Thread(target=self.stop_and_quit, daemon=True).start()
         return True
 

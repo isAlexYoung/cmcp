@@ -274,7 +274,7 @@ export class TerminalLink extends EventEmitter {
     this.send(JSON.stringify({t: 'stop'}));
     return new Promise(resolve => {
       const finish = () => {this.close(1000, 'stop'); resolve();};
-      const timer = setTimeout(finish, 1000);
+      const timer = setTimeout(finish, 250);
       this.queue.finally(() => {clearTimeout(timer); finish();});
     });
   }

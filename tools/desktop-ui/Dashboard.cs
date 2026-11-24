@@ -42,9 +42,11 @@ namespace CMCP {
         // The update button moved to About, so a new version is announced by a dot instead.
         readonly System.Windows.Forms.Timer updateCheck = new System.Windows.Forms.Timer{Interval=15000};
         sealed class PendingAction { internal Process Process; internal InlineWorker Worker; internal readonly Stopwatch Elapsed=Stopwatch.StartNew(); internal long OutputDeadline=-1; internal string Name, Action, Label="", Icon="", Message="", Note="", SshFrom="", LoginMode="", Runtime=""; internal bool Superseded, Failed, Saved, DropSsh, DeleteSsh, HideAddress, StopConfirmed; internal SshLogin SshDraft; internal CloudCliLogin CloudDraft; }
+        sealed class DeferredAction { internal string Name, Runtime, Action, InitialUrl; internal bool DeleteSsh; }
         internal TimeSpan StopActionTimeout=TimeSpan.FromSeconds(40);
         readonly Dictionary<string,string> progress=new Dictionary<string,string>();
         readonly List<PendingAction> children = new List<PendingAction>();
+        readonly List<DeferredAction> deferred = new List<DeferredAction>();
         internal readonly Dictionary<string,TargetCard> Cards = new Dictionary<string,TargetCard>(StringComparer.Ordinal);
         internal UiPreferences Preferences;
         internal SshStore Ssh;
@@ -111,10 +113,17 @@ namespace CMCP {
             backendInitialization=Task.Run(initialize);
             bool healthy=false;try{healthy=await backendInitialization;}catch{}
             if(IsDisposed||ExitPending)return;
-            BackendStarting=false;
-            notice=healthy?"":"本机连接服务未能就绪，请检查日志后重试连接。";
-            RefreshState();
-            if(initialized!=null)initialized(healthy);
+            Action complete=delegate{
+                if(IsDisposed||ExitPending)return;
+                BackendStarting=false;
+                var queued=deferred.ToArray();deferred.Clear();
+                if(!healthy)foreach(var item in queued)progress.Remove(item.Runtime.Length>0?item.Runtime:item.Name);
+                notice=healthy?"":"本机连接服务未能就绪，请检查日志后重试连接。";
+                RefreshState();
+                if(healthy)foreach(var item in queued){TargetCard card=null;if(item.Name.Length==0||Cards.TryGetValue(item.Name,out card)){Launch(item.Action,card,item.InitialUrl);if(item.DeleteSsh)foreach(var p in children.Where(p=>p.Name==item.Name&&p.Action=="remove"))p.DeleteSsh=true;}}
+                if(initialized!=null)initialized(healthy);
+            };
+            if(InvokeRequired){try{BeginInvoke(complete);}catch{}}else complete();
         }
         void ApplyTheme(){
             BackColor=colors.Page;list.BackColor=colors.Page;toolbar.Apply(colors);
@@ -201,7 +210,7 @@ namespace CMCP {
         void EnsureTray(){if(tray!=null)return;TrayCommands=new TrayMenu(RefreshState,RestoreManager,ExitApplication,TrayAction,position:trayPosition);tray=new NotifyIcon{Text="CMCP",Icon=Icon,ContextMenuStrip=TrayCommands.ActivationMenu,Visible=!isolated};tray.MouseClick+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)RestoreManager();};TrayVisible=true;SyncTray();}
         internal void HideToTray(){FinishTransition();EnsureTray();SyncTray();Hide();}
         internal string[] TrayItems {get{return TrayCommands==null?new string[0]:TrayCommands.Menu.Items.OfType<ToolStripMenuItem>().Select(item=>item.Text).ToArray();}}
-        TrayTarget TrayValue(TargetCard card){bool blocked=BackendStarting||updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login","recovering","unstable"}.Contains(card.Connection.State);string state=card.SshActive&&card.Connection.State=="stopped"&&!card.BusyConnect?"SSH":card.BusyStop?"正在停止":card.BusyConnect&&card.Connection.State=="stopped"?"连接中":LocalState.Caption(card.Connection.State);return new TrayTarget{Name=card.Target.Name,Label=card.Caption,State=state,Tone=state=="SSH"?2:card.Connection.State=="connected"?1:0,Ssh=card.SshActive,Cloud=card.CloudActive,CanConnect=!blocked&&!card.BusyStop&&(card.SshActive||!active),CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Connection.State!="stopped"),CanRename=!BackendStarting&&!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name),CanSwitch=!BackendStarting&&!updates.Installing&&!ExitPending&&!card.BusyStop};}
+        TrayTarget TrayValue(TargetCard card){bool blocked=updates.Installing||ExitPending||children.Any(p=>p.Name==card.Target.Name&&(p.Action=="edit"||p.Action=="remove"))||deferred.Any(d=>d.Name==card.Target.Name&&(d.Action=="edit"||d.Action=="remove"));bool active=card.BusyConnect||new[]{"connected","connecting","configuring","waiting-login","recovering","unstable"}.Contains(card.Connection.State);string state=card.SshActive&&card.Connection.State=="stopped"&&!card.BusyConnect?"SSH":card.BusyStop?"正在停止":card.BusyConnect&&card.Connection.State=="stopped"?"连接中":LocalState.Caption(card.Connection.State);return new TrayTarget{Name=card.Target.Name,Label=card.Caption,State=state,Tone=state=="SSH"?2:card.Connection.State=="connected"?1:0,Ssh=card.SshActive,Cloud=card.CloudActive,CanConnect=!blocked&&!card.BusyStop&&(card.SshActive||!active),CanDisconnect=!blocked&&!card.BusyStop&&(active||card.Connection.State!="stopped"),CanRename=!updates.Installing&&!ExitPending&&!IsBusy(card.Target.Name),CanSwitch=!updates.Installing&&!ExitPending&&!card.BusyStop};}
         void SyncTray(){if(TrayCommands!=null)TrayCommands.Sync(Preferences.Sort(targets).Where(t=>Cards.ContainsKey(t.Name)).Select(t=>TrayValue(Cards[t.Name])).ToList());}
         internal void TrayAction(string name,string action){TargetCard card;if(!Cards.TryGetValue(name,out card))return;var value=TrayValue(card);if(action=="connect"&&value.CanConnect){if(card.SshActive)OpenTerminal(card);else Launch("connect",card,"");}else if(action=="stop"&&value.CanDisconnect)Launch("stop",card,"");else if(action=="switch"&&value.CanSwitch)SwitchLogin(card);else if(action=="rename"&&value.CanRename){RestoreManager();if(Settings!=null)CloseSettings();if(Editor!=null&&Editor.TargetName!=name){Editor.ShowError("请先保存或返回当前编辑页，再重命名其他设备。");return;}OpenEditor(name);if(Editor!=null){Editor.NameInput.Box.Focus();Editor.NameInput.Box.SelectAll();}}SyncTray();}
         async void Uninstall(){
@@ -225,6 +234,10 @@ namespace CMCP {
         internal async void ExitApplication(){
             if(exiting||ExitPending)return;
             ExitPending=true;Enabled=false;timer.Stop();
+            deferred.Clear();
+            if(TrayCommands!=null){TrayCommands.Menu.Close();TrayCommands.SetExiting(true);}
+            TrayVisible=false;if(tray!=null)tray.Visible=false;
+            if(Visible){notice="正在断开连接并退出…";status.Text=L.Text(notice);status.ForeColor=colors.Muted;Update();}
             // Cancel only this manager's observers before saving a newer stop-all
             // request, so an old connect action cannot re-enable a target later.
             foreach(var pending in children){pending.Superseded=true;try{if(!pending.Process.HasExited)pending.Process.Kill();}catch{}}
@@ -233,7 +246,7 @@ namespace CMCP {
             if(backendInitialization!=null)try{
                 if(await Task.WhenAny(backendInitialization,Task.Delay(30000))!=backendInitialization){
                     BackendRestart.Log(kit,"manager-exit.ps1","startup did not settle within 30 seconds; exit cancelled without racing a new backend");
-                    ExitPending=false;if(!IsDisposed){Enabled=true;timer.Start();RestoreManager();Error("后台启动仍未完成，退出已超时；请稍后重试，详情见 user\\manager-lifecycle.log。");}return;
+                    ExitPending=false;if(!IsDisposed){if(TrayCommands!=null)TrayCommands.SetExiting(false);TrayVisible=true;if(!isolated&&tray!=null)tray.Visible=true;Enabled=true;timer.Start();RestoreManager();Error("后台启动仍未完成，退出已超时；请稍后重试，详情见 user\\manager-lifecycle.log。");}return;
                 }
                 await backendInitialization;
             }catch{}
@@ -242,6 +255,8 @@ namespace CMCP {
             if(IsDisposed)return;
             ExitPending=false;
             if(stopped){exiting=true;Close();return;}
+            if(TrayCommands!=null)TrayCommands.SetExiting(false);
+            TrayVisible=true;if(!isolated&&tray!=null)tray.Visible=true;
             Enabled=true;timer.Start();RestoreManager();Error("部分后台进程未能结束，请稍后重试退出；详情已记录到 user\\error.log。");
         }
         internal void RestoreManager(){EnsureTray();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
@@ -259,18 +274,24 @@ namespace CMCP {
         void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}
         void OpenLocal(string path){try{if(!File.Exists(path)&&!Directory.Exists(path)){MessageBox.Show(this,L.Text("该位置尚不存在。首次连接后会生成日志。"),Text);return;}Process.Start(new ProcessStartInfo(path){UseShellExecute=true});}catch{Error("无法打开该位置，请检查文件是否存在。");}}
         void Select(TargetCard card){selected=card.Target.Name;foreach(var other in Cards.Values){other.Selected=other==card;other.Apply(colors);}}
-        bool IsBusy(string name){return children.Any(p=>p.Name==name&&!p.Superseded);}
+        bool IsBusy(string name){return children.Any(p=>p.Name==name&&!p.Superseded)||deferred.Any(d=>d.Name==name);}
         void Launch(string action,TargetCard card,string initialUrl){
-            if(BackendStarting||ExitPending)return;
+            if(ExitPending)return;
             // A device with only SSH has no connection in the backend at all.
             if(card!=null&&card.Connection.Url.Length==0&&(action=="connect"||action=="open")){if(action=="connect"||action=="open")Error(card.TunnelActive?"还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。":card.CloudActive?"还没有填写 ClaudeWeb 地址，请编辑设备后再连接。":"还没有填写网页桌面地址，请编辑设备后再连接。");return;}
             if(updates.Installing){Error("正在下载并校验更新…");return;}
             if(preview){if(card!=null&&(action=="connect"||action=="stop")){if(card.CloudActive&&card.CloudTarget==null)card.CloudTarget=card.Connection;var connection=card.Connection;connection.State=action=="connect"?"connected":"stopped";connection.Detail=LocalState.Detail(connection.State);card.RefreshTarget(card.Target);}return;}
             if(action!="add"&&card==null)return;
             string name=card==null?"":card.Target.Name,runtime=card==null?"":card.ConnectionName;
-            if(children.Any(p=>p.Name==name&&(p.Runtime==""||p.Runtime==runtime)&&p.Action==action&&!p.Superseded))return;
+            if(children.Any(p=>p.Name==name&&(p.Runtime==""||p.Runtime==runtime)&&p.Action==action&&!p.Superseded)||deferred.Any(d=>d.Name==name&&(d.Runtime==""||d.Runtime==runtime)&&d.Action==action))return;
             if((action=="edit"||action=="remove")&&IsBusy(name)){Error("此卡片正在处理操作，请完成后重试。");return;}
-            if((action=="connect"||action=="stop")&&children.Any(p=>p.Name==name&&(p.Action=="edit"||p.Action=="remove"))){Error("此卡片正在修改，请完成后重试。");return;}
+            if((action=="connect"||action=="stop")&&(children.Any(p=>p.Name==name&&(p.Action=="edit"||p.Action=="remove"))||deferred.Any(d=>d.Name==name&&(d.Action=="edit"||d.Action=="remove")))){Error("此卡片正在修改，请完成后重试。");return;}
+            if(BackendStarting&&backendInitialization!=null){
+                if(action=="stop")deferred.RemoveAll(d=>d.Name==name&&(d.Runtime==""||d.Runtime==runtime)&&d.Action=="connect");
+                deferred.Add(new DeferredAction{Name=name,Runtime=runtime,Action=action,InitialUrl=initialUrl});
+                if(card!=null){card.SetExpanded(true,false);progress[runtime]=action=="stop"?"正在取消此台连接…":action=="open"?"正在打开此台云电脑…":"正在准备连接…";}
+                RefreshState();return;
+            }
             try{
                 var worker=new InlineWorker(kit,action,card!=null&&(card.CloudActive||card.TunnelActive)&&action!="remove"?card.Connection.Name:name,initialUrl,"",false,stateDirectory);
                 if(action=="stop")foreach(var old in children.Where(p=>p.Name==name&&(p.Runtime==""||p.Runtime==runtime)&&p.Action=="connect"))old.Superseded=true;
@@ -347,7 +368,7 @@ namespace CMCP {
         }
         int ConnectedDevices(){TargetCard card;return targets.Count(t=>t.State=="connected"||(Cards.TryGetValue(t.Name,out card)&&(card.SshState=="ready"||card.CloudTarget!=null&&card.CloudTarget.State=="connected")));}
         internal void OpenAdd(){
-            if(BackendStarting||ExitPending)return;
+            if(ExitPending)return;
             if(Editor!=null||Settings!=null)return;editorScroll=ScrollOffset;
             ShowEditor(new Target{Name="",Url=""},new CardPreference());
         }
@@ -360,7 +381,7 @@ namespace CMCP {
         }
         void EditCard(TargetCard card){OpenEditor(card.Target.Name);}
         internal void OpenEditor(string name){
-            if(BackendStarting||ExitPending)return;
+            if(ExitPending)return;
             TargetCard card;if(Editor!=null||Settings!=null||!Cards.TryGetValue(name,out card))return;
             Select(card);editorScroll=ScrollOffset;
             ShowEditor(card.Target,card.Preference);
@@ -540,7 +561,7 @@ namespace CMCP {
         void DeleteCard(TargetCard card){Select(card);if(preview){Ssh.Remove(card.Target.Name);targets.Remove(card.Target);Cards.Remove(card.Target.Name);list.Controls.Remove(card);card.Dispose();Arrange();return;}if(MessageBox.Show(this,(L.Language=="en"?"Remove this device and stop its connection?\r\n":"删除这台设备的本地配置并停止它的连接？\r\n")+(card.Target.Url.Length>0?card.Target.Url:card.Ssh!=null?card.Ssh.Address:"")+(L.Language=="en"?"\r\nVPS and local files are preserved. Other connections remain unchanged.":"\r\n不会删除 VPS 或本机文件，其他连接保持不变。"),L.Text("删除设备"),MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK){
             try{SaveCloud(null,card.Target.Name);}catch{Error("无法删除 ClaudeWeb 配置，请重试。");return;}
             if(card.Target.Url.Length==0){Ssh.Remove(card.Target.Name);try{SaveSsh();}catch{Error("无法保存 SSH 信息，未更改其他内容。");}targets.Remove(card.Target);RefreshState();return;}
-            Launch("remove",card,"");foreach(var pending in children.Where(p=>p.Name==card.Target.Name&&p.Action=="remove"))pending.DeleteSsh=true;}}
+            Launch("remove",card,"");foreach(var pending in children.Where(p=>p.Name==card.Target.Name&&p.Action=="remove"))pending.DeleteSsh=true;foreach(var pending in deferred.Where(d=>d.Name==card.Target.Name&&d.Action=="remove"))pending.DeleteSsh=true;}}
         void CopyCard(TargetCard card){if(card.SshActive?card.Ssh==null:card.Connection.Url.Length==0)return;try{Clipboard.SetText(card.Address);notice="地址已复制（不包含登录凭据）";status.Text=L.Text(notice);}catch{Error("剪贴板暂时不可用，请稍后重试。");}}
         TargetCard CreateCard(Target target){var card=new TargetCard(target,Preferences.Get(target.Name)){Margin=new Padding(0,0,0,Palette.Gap),Font=Font};card.SelectedCard+=Select;card.SwitchRequested+=SwitchLogin;card.AppChosen+=ChooseApp;card.RouteChosen+=ChooseRoute;card.ConnectRequested+=ConnectCard;card.StopRequested+=StopCard;card.EditRequested+=EditCard;card.DeleteRequested+=DeleteCard;card.CopyRequested+=CopyCard;card.OpenRequested+=delegate(TargetCard c){Select(c);if(c.SshActive)OpenTerminal(c);else Launch("open",c,"");};card.LogsRequested+=delegate{if(!preview)OpenLocal(stateDirectory);};card.SetupRequested+=SetupCloudCli;card.MoveRequested+=MoveByKeyboard;card.AnimateExpansion=AnimateExpansion;card.SizeChanged+=delegate{Arrange();};
             card.DragEnter+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragOver+=delegate(object sender,DragEventArgs e){e.Effect=CanDrop(e)?DragDropEffects.Move:DragDropEffects.None;};card.DragDrop+=delegate(object sender,DragEventArgs e){if(CanDrop(e))DropMove((string)e.Data.GetData(typeof(string)),card.Target.Name,card.PointToClient(new Point(e.X,e.Y)).Y>card.Height/2);};return card;}
@@ -555,7 +576,7 @@ namespace CMCP {
             count.Text="设备  ·  "+targets.Count;
             status.Text=notice.Length>0?notice:preview?"交互预览 · 示例数据，不会连接 VPS":snapshot.ReadError?"本地状态暂时无法完整读取，将自动刷新":Preferences.ReadError?"界面偏好文件无法读取，已保留原文件":Ssh.ReadError?"SSH 配置文件无法读取，已保留原文件":snapshot.Stale?"后台状态未更新，请检查连接":snapshot.Running?ConnectedDevices()+" 台已连接 · 每台设备独立控制":"后台尚未运行 · 打开界面不会自动连接";
             if(L.Language=="en"){count.Text="Devices  ·  "+targets.Count;status.Text=snapshot.Running&&notice.Length==0&&!preview&&!snapshot.ReadError&&!snapshot.Stale?ConnectedDevices()+" connected · Each PC is controlled independently":L.Message(status.Text);empty.Text="No devices yet\r\nAdd a device to get started.";}else empty.Text="还没有设备\r\n点击右上角「添加设备」，保存后即可连接。";
-            toolbar.Enabled=list.Enabled=!BackendStarting;
+            toolbar.Enabled=list.Enabled=!ExitPending;
             foreach(var key in Cards.Keys.Where(key=>!targets.Any(t=>t.Name==key)).ToArray()){var old=Cards[key];Cards.Remove(key);list.Controls.Remove(old);old.Dispose();}
             if(!targets.Any(t=>t.Name==selected))selected=targets.Count>0?targets[0].Name:"";
             foreach(var target in targets){TargetCard card;if(!Cards.TryGetValue(target.Name,out card)){card=CreateCard(target);Cards.Add(target.Name,card);list.Controls.Add(card);}
@@ -564,14 +585,14 @@ namespace CMCP {
                 string cloudKind;card.CloudKind=Kinds.TryGetValue(target.Name,out cloudKind)?cloudKind:"";card.SetupRunning=setups.ContainsKey(target.Name);
                 string channel=card.Ssh==null?"":preview&&ReadSshState==SshWorkers.State?"":ReadSshState(stateDirectory,target.Name);if(channel!=null)card.SshState=channel;
                 if(card.SshState.Length==0)sshStopping.Remove(target.Name);card.SshStopping=sshStopping.Contains(target.Name);
-                card.BusyConnect=children.Any(p=>p.Name==target.Name&&(p.Runtime==""||p.Runtime==card.ConnectionName)&&p.Action=="connect"&&!p.Superseded);card.BusyStop=children.Any(p=>p.Name==target.Name&&(p.Runtime==""||p.Runtime==card.ConnectionName||p.Action=="remove")&&(p.Action=="stop"||p.Action=="remove"));
+                card.BusyConnect=children.Any(p=>p.Name==target.Name&&(p.Runtime==""||p.Runtime==card.ConnectionName)&&p.Action=="connect"&&!p.Superseded)||deferred.Any(d=>d.Name==target.Name&&(d.Runtime==""||d.Runtime==card.ConnectionName)&&d.Action=="connect");card.BusyStop=children.Any(p=>p.Name==target.Name&&(p.Runtime==""||p.Runtime==card.ConnectionName||p.Action=="remove")&&(p.Action=="stop"||p.Action=="remove"))||deferred.Any(d=>d.Name==target.Name&&(d.Runtime==""||d.Runtime==card.ConnectionName||d.Action=="remove")&&(d.Action=="stop"||d.Action=="remove"));
                 string message;if(progress.TryGetValue(card.ConnectionName,out message)){
                     var connection=card.CloudActive||card.TunnelActive?card.Connection:target;connection.Detail=LocalState.WorkerDetail(connection,message,card.BusyConnect);
                 }
                 if(target.AutoLogin&&(target.State=="password"||target.State=="locked"||target.State=="expired"))target.Detail=LocalState.Detail(target.State);
                 card.RefreshTarget(target);card.Edit.Enabled=card.Delete.Enabled=!IsBusy(target.Name);
             }
-            toolbar.Add.Enabled=!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove");Arrange();ApplyTheme();SyncTray();
+            toolbar.Add.Enabled=!ExitPending&&!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove")&&!deferred.Any(d=>d.Action=="add"||d.Action=="edit"||d.Action=="remove");Arrange();ApplyTheme();SyncTray();
         }
         void Arrange(){Arrange(false);}
         void Arrange(bool animate){if(arranging||IsDisposed)return;arranging=true;try{

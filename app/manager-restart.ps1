@@ -9,12 +9,18 @@ function Test-ManagerBackend {
     try {
         $age = [Math]::Abs(([DateTime]::UtcNow - [DateTime]::Parse([string]$status.at).ToUniversalTime()).TotalSeconds)
         if ($age -gt 30) { return $false }
-        $process = @(Get-ServiceProcesses | Where-Object { $_.ProcessId -eq [int]$status.pid }) | Select-Object -First 1
-        $expected = [IO.Path]::GetFullPath((Join-Path $KitDir 'server.mjs'))
-        if (!$process -or $process.Name -ine 'node.exe' -or !([string]$process.CommandLine).Contains('"' + $expected + '"')) { return $false }
-        # A process predating installed backend code must load that code once.
-        # --updated also forces a restart, including same-version repairs.
-        $started = $process.CreationDate.ToUniversalTime()
+        Initialize-CmcpProcessInspection
+        $live = Get-Process -Id ([int]$status.pid) -ErrorAction Stop
+        try {
+            $null = $live.Handle
+            if ($live.ProcessName -ine 'node' -or $live.HasExited) { return $false }
+            $cmd = [CmcpBrowserProcesses]::ReadCommandLine($live.Id)
+            $expected = [IO.Path]::GetFullPath((Join-Path $KitDir 'server.mjs'))
+            if (!$cmd -or !([string]$cmd).Contains('"' + $expected + '"')) { return $false }
+            # A process predating installed backend code must load that code once.
+            # --updated also forces a restart, including same-version repairs.
+            $started = $live.StartTime.ToUniversalTime()
+        } finally { $live.Dispose() }
         foreach ($file in @(Get-ChildItem -LiteralPath $KitDir -Filter '*.mjs' -File) + @((Get-Item -LiteralPath (Join-Path $KitDir 'package.json') -ErrorAction SilentlyContinue))) {
             if ($file -and $file.LastWriteTimeUtc -gt $started) { return $false }
         }
@@ -48,8 +54,12 @@ function Restart-ManagerBackend {
         }
         $null = Get-LocalConfig
         if (!$ForceRestart -and (Test-ManagerBackend)) { return }
-        Stop-LinkService
-        if (@(Get-ServiceProcesses).Count) { throw 'Previous backend has not stopped' }
+        $oldStatus = Get-LinkStatus
+        $hasLiveStatus = $oldStatus -and $oldStatus.pid -and (Get-Process -Id ([int]$oldStatus.pid) -ErrorAction SilentlyContinue)
+        if ($hasLiveStatus -or (Test-Path -LiteralPath (Join-Path $StateDir 'session.json')) -or @(Get-ServiceProcesses).Count) {
+            Stop-LinkService
+            if (@(Get-ServiceProcesses).Count) { throw 'Previous backend has not stopped' }
+        }
         if (Test-Path -LiteralPath $StatusFile) { Remove-Item -LiteralPath $StatusFile -Force }
         if (Test-Path -LiteralPath $StopFlag) { Remove-Item -LiteralPath $StopFlag -Force }
         Start-LinkService
@@ -65,7 +75,7 @@ function Restart-ManagerBackend {
                 }catch{}}
                 return
             }
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds 40
         } while ([DateTime]::UtcNow -lt $deadline)
         throw 'New backend readiness was not confirmed'
     }

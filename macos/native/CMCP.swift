@@ -301,7 +301,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         if exitApproved { return .terminateNow }
         if exitPending { return .terminateLater }
         if !ready && process?.isRunning != true { exitApproved = true; return .terminateNow }
-        exitPending = true
+        exitPending = true; item?.isVisible = false; window?.orderOut(nil)
         if ready { finishExit() }
         return .terminateLater
     }
@@ -314,7 +314,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
                 self.process?.terminate()
                 NSApp.reply(toApplicationShouldTerminate: true)
             case .failure:
-                self.exitPending = false; NSApp.reply(toApplicationShouldTerminate: false)
+                self.exitPending = false; self.item?.isVisible = true; self.show(); NSApp.reply(toApplicationShouldTerminate: false)
                 self.alert(self.tr("未能确认全部连接已停止，请重试退出。", "Could not confirm all connections have stopped. Try exiting again."))
             }
         }

@@ -1,12 +1,11 @@
 ﻿# 公共函数：设置目录、云电脑地址/密码的整理与校验、登录测试、加密保存。
 # 被其它脚本用点号引入：. (Join-Path $PSScriptRoot 'common.ps1')
 $ErrorActionPreference = 'Stop'
-try { Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop } catch {}
 try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.24.2'
+$script:KitVersion = '4.24.3'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = if ($env:CMCP_STATE_DIR) { [IO.Path]::GetFullPath($env:CMCP_STATE_DIR) } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'user' }
 . (Join-Path $PSScriptRoot 'network-settings.ps1')
@@ -57,6 +56,25 @@ function Initialize-PortableState([string]$Destination,[string]$Legacy) {
     }
 }
 
+function Test-PrivateStateAcl([string]$Path, [string]$Sid) {
+    try {
+        if (!(Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+        $acl = [IO.Directory]::GetAccessControl($Path)
+        if (!$acl.AreAccessRulesProtected) { return $false }
+        $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        if ($rules.Count -ne 2) { return $false }
+        $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $allowed = @{}
+        foreach ($rule in $rules) {
+            if ($rule.IsInherited -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { return $false }
+            if (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl) { return $false }
+            if ($rule.InheritanceFlags -ne $inherit -or $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) { return $false }
+            $allowed[$rule.IdentityReference.Value] = $true
+        }
+        return [bool]($allowed[$Sid] -and $allowed['S-1-5-18'])
+    } catch { return $false }
+}
+
 function Initialize-StateDir {
     if ($script:StateDir -ieq (Join-Path (Split-Path $script:KitDir -Parent) 'user')) {
         Initialize-PortableState $script:StateDir (Join-Path $env:LOCALAPPDATA 'ClaudeLocalMcp')
@@ -64,6 +82,7 @@ function Initialize-StateDir {
     New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
     # 用 SID 而不是账户名：中文账户名、微软账户、域账户在 icacls 里都可能解析失败
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if (Test-PrivateStateAcl $script:StateDir $sid) { return }
     $r = Invoke-Quiet 'icacls.exe' @($script:StateDir, '/inheritance:r', '/grant:r', "*${sid}:(OI)(CI)F", '*S-1-5-18:(OI)(CI)F')
     if ($r.Code -ne 0) {
         Write-ErrorLog '设置配置文件夹权限' ([Management.Automation.ErrorRecord]::new([Exception]::new("icacls exit $($r.Code): $($r.Output)"), 'icacls', 'NotSpecified', $null))
@@ -474,6 +493,7 @@ function Remove-CloudTarget([string]$name) {
 function Import-LegacyTargets {
     $legacy = Join-Path $script:StateDir 'vps-targets.json'
     if (!(Test-Path -LiteralPath $legacy) -or (Test-Path -LiteralPath $script:TargetsFile)) { return }
+    try { Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop } catch {}
     $converted = @()
     foreach ($t in @(Read-JsonFile $legacy)) {
         try {
@@ -567,6 +587,7 @@ $script:NodeArgsFile = Join-Path $script:StateDir 'node-extra-args.txt'
 # 内置 Node 启动 server.mjs 时要加的额外参数。--use-system-ca 让 Node 信任 Windows 证书库
 # （有些安全软件会拦截 HTTPS），但较旧的 Node 不认这个参数。测一次是否支持并记下来。
 function Resolve-NodeArgs([string]$node) {
+    if (Test-Path -LiteralPath $script:NodeArgsFile) { return (Get-SavedNodeArgs) }
     $extra = @()
     $test = Invoke-Capture $node @('--use-system-ca', '-e', '0') 10
     if ($test.Code -eq 0) { $extra = @('--use-system-ca') }
@@ -660,18 +681,18 @@ function Stop-LinkService {
     [IO.File]::WriteAllText($script:StopFlag, 'stop', [Text.UTF8Encoding]::new($false))
     $oldStatus = Get-LinkStatus
     if ($oldStatus -and $oldStatus.pid) {
-        for ($i = 0; $i -lt 32; $i++) {
+        for ($i = 0; $i -lt 160; $i++) {
             if (!(Get-Process -Id ([int]$oldStatus.pid) -ErrorAction SilentlyContinue)) { break }
-            Start-Sleep -Milliseconds 250
+            Start-Sleep -Milliseconds 50
         }
     }
     # 短期连接版正在进行的"本次连接"：先请它自己结束（通知区域的图标才会正常消失），最多等 8 秒
     $session = Join-Path $script:StateDir 'session.json'
     if (Test-Path -LiteralPath $session) {
         Remove-Item -LiteralPath $session -Force -ErrorAction SilentlyContinue
-        for ($i = 0; $i -lt 32; $i++) {
+        for ($i = 0; $i -lt 160; $i++) {
             if (!@(Get-ServiceProcesses | Where-Object { [string]$_.CommandLine -match '(?i)run-session\.ps1' }).Count) { break }
-            Start-Sleep -Milliseconds 250
+            Start-Sleep -Milliseconds 50
         }
     }
     # 先停守护进程，再停服务本身，避免守护进程把服务重新拉起
@@ -680,9 +701,11 @@ function Stop-LinkService {
         Stop-CmcpServiceProcess $p
     }
     # 等进程真正退出
-    for ($i = 0; $i -lt 20; $i++) {
-        if (!@(Get-ServiceProcesses).Count) { break }
-        Start-Sleep -Milliseconds 250
+    if ($all.Count -gt 0) {
+        for ($i = 0; $i -lt 100; $i++) {
+            if (!@(Get-ServiceProcesses).Count) { break }
+            Start-Sleep -Milliseconds 50
+        }
     }
     $remaining = Get-LinkStatus
     if ($remaining -and $remaining.pid -and (Get-Process -Id ([int]$remaining.pid) -ErrorAction SilentlyContinue)) {
@@ -770,6 +793,7 @@ function Unblock-Kit {
     $marked = $false
     try { $marked = [bool](Get-Item -LiteralPath (Join-Path $script:KitDir 'start.ps1') -Stream 'Zone.Identifier' -ErrorAction Stop) } catch {}
     if (!$marked) { return }
+    try { Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop } catch {}
     Get-ChildItem -LiteralPath $script:KitDir -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
 }
 

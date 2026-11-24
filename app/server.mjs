@@ -104,6 +104,7 @@ if (selfTest) {
   process.stdout.write(`SELFTEST-OK ${registry.list().tools.length} tools; node ${process.version}\n`);
   await registry.close();
   await blender.close();
+  try { stdio._process?.kill(); } catch {}
   await backend.close().catch(() => {});
   process.exit(0);
 }
@@ -270,6 +271,7 @@ async function stop(code = 0) {
   await toolHost?.close();
   await registry.close();
   await blender.close();
+  try { stdio._process?.kill(); } catch {}
   await backend.close().catch(() => {});
   staticAssets.clear();
   process.exit(code);
@@ -278,4 +280,6 @@ process.on('SIGINT', () => stop());
 process.on('SIGTERM', () => stop());
 // A non-elevated Start/Stop window can request shutdown of a service previously
 // started as administrator through this account's private state directory.
-setInterval(() => { if (fs.existsSync(path.join(stateDir, 'stopped.flag'))) stop(); }, 1000).unref();
+const checkStopFlag = () => { if (fs.existsSync(path.join(stateDir, 'stopped.flag'))) stop(); };
+try { fs.watch(stateDir, (_, name) => { if (!name || name === 'stopped.flag') checkStopFlag(); }).unref(); } catch {}
+setInterval(checkStopFlag, 150).unref();
