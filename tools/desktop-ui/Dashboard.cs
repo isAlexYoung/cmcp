@@ -38,6 +38,7 @@ namespace CMCP {
         internal Action<string> Trace;
         void Mark(string message){if(Trace!=null)Trace(message);}
         int editorScroll;
+        string revealDevice;
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         // The update button moved to About, so a new version is announced by a dot instead.
         readonly System.Windows.Forms.Timer updateCheck = new System.Windows.Forms.Timer{Interval=15000};
@@ -89,7 +90,7 @@ namespace CMCP {
             var heading = new Panel { Dock=DockStyle.Top, Height=66 };
             count.Bounds=new Rectangle(0,2,400,28);count.Font=new Font(Font.FontFamily,12F,FontStyle.Bold);heading.Controls.Add(count);
             status.Bounds=new Rectangle(0,34,850,24);status.Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top;heading.Controls.Add(status);
-            list.Dock=DockStyle.Fill;list.AutoScroll=true;list.Sorted+=MoveCard;
+            list.Dock=DockStyle.Fill;list.WheelStarted=FinishTransition;list.Sorted+=MoveCard;
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有设备\r\n点击右上角「添加设备」，保存后即可连接。";empty.Margin=new Padding(0,30,0,0);
             content.Controls.Add(list);content.Controls.Add(heading);Controls.Add(content);Controls.Add(toolbar);
             toolbar.Add.Click+=delegate{OpenAdd();};
@@ -99,7 +100,7 @@ namespace CMCP {
             updateCheck.Tick+=delegate{updateCheck.Interval=6*60*60*1000;updates.Check(false);};if(!isolated)updateCheck.Start();
             // Blender is off by default; once the window is on screen, offer it if Blender is installed.
             if(!isolated){bool offered=false;VisibleChanged+=delegate{if(Visible&&!offered){offered=true;BlenderOffer.Check(this,new CliToolBackend(kit,stateDirectory));}};}
-            list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{RefreshState();};timer.Start();
+            list.SizeChanged+=delegate{Arrange();};timer.Interval=2000;timer.Tick+=delegate{if(!list.Gliding)RefreshState();};timer.Start();
             Deactivate+=delegate{foreach(var card in Cards.Values)card.ClearPointer();};
             ResizeBegin+=delegate{list.Resizing=true;};ResizeEnd+=delegate{list.Resizing=false;Arrange();list.Refresh();};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exiting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;if(Options.closeToTray&&!ExitPending)HideToTray();else ExitApplication();}};
@@ -300,10 +301,10 @@ namespace CMCP {
                 notice="";RefreshState();
             }catch{Error("操作未能启动，请确认便携包完整且 Windows PowerShell 可用。");}
         }
-        void ConnectCard(TargetCard card){Select(card);if(card.SshActive){OpenTerminal(card);return;}if(card.CloudActive&&card.Connection.State=="stopped"&&AutoChannel(card.Ssh)&&card.SshState==""&&StartChannel!=null)StartChannel(card.Ssh);bool active=card.Connection.State=="connected"||card.BusyConnect||card.Connection.State=="connecting"||card.Connection.State=="configuring"||card.Connection.State=="waiting-login"||card.Connection.State=="recovering"||card.Connection.State=="unstable";if(active)StopCard(card);else Launch("connect",card,"");}
+        void ConnectCard(TargetCard card){Select(card);if(card.SshActive){OpenTerminal(card);return;}bool active=card.Connection.State=="connected"||card.BusyConnect||card.Connection.State=="connecting"||card.Connection.State=="configuring"||card.Connection.State=="waiting-login"||card.Connection.State=="recovering"||card.Connection.State=="unstable";if(active)StopCard(card);else Launch("connect",card,"");}
         // On for a self-hosted CloudCLI unless the user turned it off; other devices only when asked.
         internal bool AutoChannel(SshLogin login){string kind;return login!=null&&(login.sshAutoStart.HasValue?login.sshAutoStart.Value:Kinds.TryGetValue(login.name,out kind)&&CloudCliKinds.UsesSshTools(kind));}
-        internal int StartAutoChannels(){if(!preview)Kinds=CloudCliKinds.Load(stateDirectory);int started=0;foreach(var login in Ssh.logins.ToArray())if(AutoChannel(login)&&ReadSshState(stateDirectory,login.name)==""&&StartChannel(login))started++;return started;}
+        internal int StartAutoChannels(){if(!preview)Kinds=CloudCliKinds.Load(stateDirectory);int started=0;foreach(var login in Ssh.logins.ToArray())if(Preferences.Get(login.name).loginMode=="ssh"&&AutoChannel(login)&&ReadSshState(stateDirectory,login.name)==""&&StartChannel(login))started++;return started;}
         // Over the saved SSH: check the VPS, ask once, add only what is missing, then offer to open CloudCLI.
         internal void SetupCloudCli(TargetCard card){
             Select(card);string name=card.Target.Name;
@@ -338,7 +339,7 @@ namespace CMCP {
             var login=Ssh.Get(name);if(login==null||save==null)throw new InvalidDataException();
             string user=LocalState.Text(LocalState.Get(save,"cloudcliUser"));int port=Convert.ToInt32(LocalState.Get(save,"cloudcliPort"));bool tunnel=Object.Equals(LocalState.Get(save,"cloudcliTunnel"),true);
             if(!SshLogin.ValidAccount(user)||port<1||port>65535)throw new InvalidDataException();
-            var next=login.Copy();next.cloudcliUser=user;next.cloudcliPort=port;next.cloudcliTunnel=tunnel;next.sshAutoStart=true;
+            var next=login.Copy();next.cloudcliUser=user;next.cloudcliPort=port;next.cloudcliTunnel=tunnel;next.sshAutoStart=Object.Equals(LocalState.Get(save,"sshAutoStart"),true);
             object web=LocalState.Get(save,"webPort");if(web!=null)next.webPort=Convert.ToInt32(web);if(next.webPort==next.cloudcliPort)throw new InvalidDataException();
             Ssh.Put(next);try{SaveSsh();}catch{Ssh.Put(login);throw;}
             TargetCard card;if(tunnel&&Cloud.Get(name)==null&&Cards.TryGetValue(name,out card)){var p=Preferences.Get(name);p.loginMode="cloudcli";p.cloudcliRoute="ssh";Preferences.Set(name,p.label,p.icon,targets,p.note);Preferences.Get(name).loginMode="cloudcli";Preferences.Get(name).cloudcliRoute="ssh";try{SavePreferences();}catch{}card.Ssh=next;card.UpdatePreference(Preferences.Get(name));}
@@ -448,6 +449,7 @@ namespace CMCP {
                 Preferences.Set(name,editor.DisplayName,editor.IconData,WithSshOnly(targets),editor.Note,editor.HideAddress.Checked);if(card==null){var first=Preferences.Get(name);if(editor.HasCloud)first.loginMode="cloudcli";else if(editor.WebTunnel.Checked){first.loginMode="web";first.webRoute="ssh";}else if(editor.CloudTunnel.Checked){first.loginMode="cloudcli";first.cloudcliRoute="ssh";}}SavePreferences();
                 if(card!=null){card.Ssh=login;card.UpdatePreference(Preferences.Get(name));}
             }catch{editor.ShowError("无法保存 SSH 信息，未更改其他内容。");return false;}
+            if(card==null)revealDevice=name;
             CloseEditor();RefreshState();return true;
         }
         void SaveCloud(CloudCliLogin login,string name){
@@ -530,6 +532,7 @@ namespace CMCP {
                             var saved=LocalState.Load(stateDirectory).Targets;
                             if(!saved.Any(t=>t.Name==name)){pending.Failed=true;continue;}
                             ApplySshAfterSave(pending,name);Preferences.Set(name,pending.Label,pending.Icon,WithSshOnly(saved),pending.Note,pending.HideAddress);Preferences.Get(name).loginMode=pending.LoginMode;
+                            if(pending.Action=="add"&&pending.SshFrom.Length==0)revealDevice=name;
                             try{SavePreferences();pending.Saved=true;TargetCard card;if(Cards.TryGetValue(name,out card)){card.Ssh=Ssh.Get(name);card.UpdatePreference(Preferences.Get(name));}}
                             catch{Error("地址已保存，但备注或图标保存失败，请稍后编辑。");pending.Saved=true;}
                         }
@@ -592,17 +595,23 @@ namespace CMCP {
                 if(target.AutoLogin&&(target.State=="password"||target.State=="locked"||target.State=="expired"))target.Detail=LocalState.Detail(target.State);
                 card.RefreshTarget(target);card.Edit.Enabled=card.Delete.Enabled=!IsBusy(target.Name);
             }
-            toolbar.Add.Enabled=!ExitPending&&!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove")&&!deferred.Any(d=>d.Action=="add"||d.Action=="edit"||d.Action=="remove");Arrange();ApplyTheme();SyncTray();
+            toolbar.Add.Enabled=!ExitPending&&!children.Any(p=>p.Action=="add"||p.Action=="edit"||p.Action=="remove")&&!deferred.Any(d=>d.Action=="add"||d.Action=="edit"||d.Action=="remove");Arrange();RevealAddedDevice();ApplyTheme();SyncTray();
         }
         void Arrange(){Arrange(false);}
         void Arrange(bool animate){if(arranging||IsDisposed)return;arranging=true;try{
-            if(Cards.Count==0){if(!list.Controls.Contains(empty))list.Controls.Add(empty);empty.Visible=true;empty.Width=Math.Max(100,list.ClientSize.Width-22);}
+            if(Cards.Count==0){list.Place(new TargetCard[0],false);if(!list.Controls.Contains(empty))list.Controls.Add(empty);empty.Visible=true;empty.Width=Math.Max(100,list.ClientSize.Width-22);}
             else{list.Controls.Remove(empty);list.Place(Preferences.Sort(targets).Where(t=>Cards.ContainsKey(t.Name)&&Cards[t.Name].Parent==list).Select(t=>Cards[t.Name]).ToList(),animate);}
         }finally{arranging=false;}}
 
+        void RevealAddedDevice(){
+            TargetCard card;
+            if(revealDevice==null||Editor!=null||Settings!=null||!Cards.TryGetValue(revealDevice,out card))return;
+            revealDevice=null;
+            list.Reveal(card);
+        }
         internal bool TestIndependentButtons(){if(Cards.Count!=2)return false;var cards=Cards.Values.ToArray();var process=Process.GetCurrentProcess();var pending=new PendingAction{Process=process,Name=cards[0].Target.Name,Action="connect"};try{children.Add(pending);RefreshState();return cards[0].BusyConnect&&cards[0].Details.Stop.Enabled&&!cards[0].Edit.Enabled&&!cards[1].BusyConnect&&cards[1].Edit.Enabled&&cards[1].Details.Open.Enabled;}finally{children.Remove(pending);process.Dispose();RefreshState();}}
         internal bool LayoutFits(){return (Editor==null||Editor.LayoutFits)&&Cards.Values.All(c=>c.Right<=list.ClientSize.Width&&c.Connect.Left>=40&&c.Delete.Right<c.Width&&c.Details.Open.Right<c.Details.Width&&c.Details.Logs.Right<c.Details.Width)&&toolbar.Add.Right<=toolbar.ClientSize.Width&&toolbar.Add.Left>toolbar.Settings.Right;}
-        internal int ScrollOffset { get { return -list.AutoScrollPosition.Y; } set { list.AutoScrollPosition=new Point(0,value); } }
+        internal int ScrollOffset { get { return list.ScrollOffset; } set { list.ScrollOffset=value; } }
         internal static Snapshot Demo(){var s=new Snapshot{Running=true};s.Targets.Add(new Target{Name="preview-a",Url="https://desktop1.example.com",Mode="网页桌面登录",State="connected",DesktopClient=true,CliClient=false,Detail=LocalState.Detail("connected")});s.Targets.Add(new Target{Name="preview-b",Url="https://desktop2.example.com",Mode="网页桌面登录",State="stopped",Detail=LocalState.Detail("stopped")});return s;}
     }
 }

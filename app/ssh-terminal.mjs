@@ -10,6 +10,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startSshMcp,sshArguments,validRunAs} from './ssh-mcp.mjs';
 import {createSshDispatcher} from './ssh-local-tools.mjs';
+import {readTargetControls} from './target-connections.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -121,6 +122,12 @@ export async function runWorker({directory,id,owner,ssh='ssh',createDispatcher=c
 }
 
 export async function ensureSshWorker({directory,id,owner,ssh='ssh',timeout=180000,launch=spawn,env=process.env,progress=message=>process.stdout.write(message+'\n')}) {
+  // An interactive terminal may coexist with ClaudeWeb, but its preflight must
+  // not start a competing MCP relay while the device connection owns routing.
+  const controls=readTargetControls(path.join(directory,'target-controls.json'));
+  if (controls.get('cloudcli:'+id)?.enabled || controls.get('tunnel:cloudcli:'+id)?.enabled) {
+    throw Error('ClaudeWeb 已管理这台设备的本机工具，终端不会另开 MCP 通道');
+  }
   const paths=workerPaths(directory,id),revision=profileRevision(readSshLogin(directory,id));
   let state;try{state=await queryWorker(paths);}catch{}
   if(state&&(state.revision!==revision||state.owner!==owner||state.state==='failed')){
@@ -167,6 +174,10 @@ export async function stopSshWorker(directory,id) {
   await queryWorker(paths,'stop');
   for(let i=0;i<100;i++){await delay(100);try{await queryWorker(paths);}catch{return;}}
   throw Error('SSH MCP 后台仍在停止，请稍后重试');
+}
+
+export async function stopStandaloneSsh(directory,id) {
+  if (sshWorkerState(directory,id)) await stopSshWorker(directory,id);
 }
 
 export async function stopSshWorkers(directory) {

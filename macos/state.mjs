@@ -5,7 +5,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {atomicWrite, privateDir, safeFile, readConfig, normalizeUrl, STATE} from './platform.mjs';
 import {sshProblem} from './ssh.mjs';
-import {cloudcliName,cloudcliTargets,cloudcliOrigin,readCloudcliKinds,usesSshTools,CLAUDEWEB} from '../app/cloudcli.mjs';
+import {cloudcliName,cloudcliTargets,cloudcliOrigin,readCloudcliKinds,usesSshTools} from '../app/cloudcli.mjs';
 import {validRunAs} from '../app/ssh-mcp.mjs';
 import {proxySettings} from './ui/network-settings.js';
 
@@ -26,7 +26,7 @@ export class ManagerState {
   validateControls(){if(this.controls.schema!==1||!Array.isArray(this.controls.targets)||this.controls.targets.length>400)throw Error('Invalid controls');const seen=new Set();for(const t of this.controls.targets){if(typeof t.name!=='string'||seen.has(t.name)||typeof t.enabled!=='boolean'||typeof t.revision!=='string')throw Error('Invalid controls');seen.add(t.name);}}
   validatePreferences(p){proxySettings(p);if(p.schema!==1||!['zh-CN','en'].includes(p.language)||!['light','dark','system'].includes(p.theme)||!['tray','exit'].includes(p.closeAction)||typeof p.autoStart!=='boolean'||typeof p.shortcutPrompt!=='boolean'||(p.terminal!==undefined&&(typeof p.terminal!=='string'||p.terminal.length>32))||(p.browser!==undefined&&(typeof p.browser!=='string'||p.browser.length>32))||(p.closeWeb!==undefined&&typeof p.closeWeb!=='boolean')||(p.cloudcliBrowser!==undefined&&(typeof p.cloudcliBrowser!=='string'||p.cloudcliBrowser.length>32))||(p.closeCloudcli!==undefined&&typeof p.closeCloudcli!=='boolean')||(p.closeTerminal!==undefined&&typeof p.closeTerminal!=='boolean'))throw Error('设置格式无效');}
   // SSH details stay out of web targets; the independent SSH MCP worker reads them.
-  validateSsh(){const s=this.ssh;if(s.routes!==undefined&&(!s.routes||typeof s.routes!=='object'||Array.isArray(s.routes)||Object.keys(s.routes).length>100||Object.values(s.routes).some(r=>!r||typeof r!=='object'||Object.keys(r).some(app=>!['web','cloudcli'].includes(app))||Object.values(r).some(v=>!['url','ssh'].includes(v)))))throw Error('Invalid SSH routes');if(s.schema!==1||!Array.isArray(s.logins)||!Array.isArray(s.order)||s.logins.length>100)throw Error('本地设置损坏，原文件已保留');if([...this.targets,...s.logins].some(t=>!t||(t.hideAddress!==undefined&&typeof t.hideAddress!=="boolean")))throw Error("本地设置损坏，原文件已保留");if(s.modes!==undefined&&(!s.modes||typeof s.modes!=="object"||Array.isArray(s.modes)||Object.keys(s.modes).length>100||Object.entries(s.modes).some(([id,mode])=>!/^[a-f0-9-]{36}$/.test(id)||!["web","cloudcli","ssh"].includes(mode))))throw Error("本地设置损坏，原文件已保留");const seen=new Set();for(const l of s.logins){if(!l||!/^[a-f0-9-]{36}$/.test(l.id)||seen.has(l.id)||sshProblem(l)||(l.credentialId!==undefined&&!/^[a-f0-9-]{36}$/.test(l.credentialId))||(l.cloudcliUser!==undefined&&l.cloudcliUser!==''&&!validRunAs(l.cloudcliUser))||(l.sshAutoStart!==undefined&&l.sshAutoStart!==null&&typeof l.sshAutoStart!=='boolean'))throw Error('本地设置损坏，原文件已保留');seen.add(l.id);}}
+  validateSsh(){const s=this.ssh;if(s.routes!==undefined&&(!s.routes||typeof s.routes!=='object'||Array.isArray(s.routes)||Object.keys(s.routes).length>100||Object.values(s.routes).some(r=>!r||typeof r!=='object'||Object.keys(r).some(app=>!['web','cloudcli'].includes(app))||Object.values(r).some(v=>!['url','ssh'].includes(v)))))throw Error('Invalid SSH routes');if(s.schema!==1||!Array.isArray(s.logins)||!Array.isArray(s.order)||s.logins.length>100)throw Error('本地设置损坏，原文件已保留');if([...this.targets,...s.logins].some(t=>!t||(t.hideAddress!==undefined&&typeof t.hideAddress!=="boolean")))throw Error("本地设置损坏，原文件已保留");if(s.modes!==undefined&&(!s.modes||typeof s.modes!=="object"||Array.isArray(s.modes)||Object.keys(s.modes).length>100||Object.entries(s.modes).some(([id,mode])=>!/^[a-f0-9-]{36}$/.test(id)||!["web","cloudcli","ssh"].includes(mode))))throw Error("本地设置损坏，原文件已保留");const seen=new Set();for(const l of s.logins){if(!l||!/^[a-f0-9-]{36}$/.test(l.id)||seen.has(l.id)||sshProblem(l)||(l.credentialId!==undefined&&!/^[a-f0-9-]{36}$/.test(l.credentialId))||(l.cloudcliUser!==undefined&&l.cloudcliUser!==''&&!validRunAs(l.cloudcliUser))||(l.dualConnection!==undefined&&typeof l.dualConnection!=='boolean')||(l.sshAutoStart!==undefined&&l.sshAutoStart!==null&&typeof l.sshAutoStart!=='boolean'))throw Error('本地设置损坏，原文件已保留');seen.add(l.id);}}
   loginMode(id){return this.ssh.modes?.[id]||(this.sshFor(id)?.active?'ssh':this.targets.some(t=>t.id===id)?'web':this.sshFor(id)?'ssh':this.cloudcliFor(id)?'cloudcli':'web');}
   route(id,app=this.loginMode(id)){return app==='ssh'?'ssh':this.ssh.routes?.[id]?.[app]||'url';}
   connectionName(id){const app=this.loginMode(id);return app!=='ssh'&&this.route(id,app)==='ssh'?tunnelName(id,app):app==='cloudcli'?cloudcliName(id):id;}
@@ -43,13 +43,13 @@ export class ManagerState {
   applyCloudcliSetup(id,save){
     const login=this.sshFor(id);if(!login)throw Error('还没有填写 SSH 信息，请编辑设备后再连接。');
     if(!save||(save.cloudcliUser!==''&&!validRunAs(save.cloudcliUser))||!Number.isInteger(save.cloudcliPort)||save.cloudcliPort<1||save.cloudcliPort>65535||typeof save.cloudcliTunnel!=='boolean'||(save.webPort!==undefined&&(!Number.isInteger(save.webPort)||save.webPort===save.cloudcliPort)))throw Error('ClaudeWeb 设置无效');
-    const next={...login,cloudcliUser:save.cloudcliUser,cloudcliPort:save.cloudcliPort,cloudcliTunnel:save.cloudcliTunnel,sshAutoStart:true,...save.webPort!==undefined?{webPort:save.webPort}:{}};
+    const next={...login,cloudcliUser:save.cloudcliUser,cloudcliPort:save.cloudcliPort,cloudcliTunnel:save.cloudcliTunnel,sshAutoStart:save.sshAutoStart===true,...save.webPort!==undefined?{webPort:save.webPort}:{}};
     if(!save.cloudcliUser)delete next.cloudcliUser;
     const ssh={...this.ssh,logins:this.ssh.logins.map(l=>l===login?next:l)};this.write('ssh-logins.json',ssh);this.ssh=ssh;
     if(!this.cloudcliFor(id)&&save.cloudcliTunnel){this.setLogin(id,'cloudcli');this.setRoute(id,'ssh');}
   }
   get sshOnly(){return this.ssh.logins.filter(l=>!this.targets.some(t=>t.id===l.id));}
-  sshView(login){if(!login)return null;return {host:login.host,port:login.port,username:login.username,method:login.method,keyPath:login.keyPath||'',hasSecret:!!login.credentialId,active:this.loginMode(login.id)==='ssh',address:login.username+'@'+login.host+':'+login.port,webTunnel:login.webTunnel===true,cloudcliTunnel:login.cloudcliTunnel===true,webPort:login.webPort??3000,cloudcliPort:login.cloudcliPort??3001,webAutoLogin:login.webAutoLogin===true,cloudcliAutoLogin:login.cloudcliAutoLogin===true,webHasPassword:!!login.webCredentialId,cloudcliHasPassword:!!login.cloudcliCredentialId,cloudcliUser:login.cloudcliUser||'',sshAutoStart:this.autoChannel(login.id),command:'ssh -p '+login.port+(login.method==='key'?' -i "'+login.keyPath+'"':'')+' '+login.username+'@'+login.host};}
+  sshView(login){if(!login)return null;return {host:login.host,port:login.port,username:login.username,method:login.method,keyPath:login.keyPath||'',hasSecret:!!login.credentialId,active:this.loginMode(login.id)==='ssh',address:login.username+'@'+login.host+':'+login.port,webTunnel:login.webTunnel===true,cloudcliTunnel:login.cloudcliTunnel===true,webPort:login.webPort??3000,cloudcliPort:login.cloudcliPort??3001,webAutoLogin:login.webAutoLogin===true,cloudcliAutoLogin:login.cloudcliAutoLogin===true,webHasPassword:!!login.webCredentialId,cloudcliHasPassword:!!login.cloudcliCredentialId,cloudcliUser:login.cloudcliUser||'',sshAutoStart:this.autoChannel(login.id),dualConnection:login.dualConnection===true,command:'ssh -p '+login.port+(login.method==='key'?' -i "'+login.keyPath+'"':'')+' '+login.username+'@'+login.host};}
   ordered(list){const rank=new Map(this.ssh.order.map((id,i)=>[id,i])),at=item=>rank.has(item.id)?rank.get(item.id):Infinity;return list.map((item,i)=>[item,i]).sort(([a,i],[b,j])=>at(a)===at(b)?i-j:at(a)-at(b)).map(([item])=>item);}
   get targets(){return this.config.targets;}
   controlMap(){return new Map(this.controls.targets.map(t=>[t.name,t]));}
@@ -65,7 +65,18 @@ export class ManagerState {
   setEnabled(id,enabled,mode=this.loginMode(id)){
     const name=id===null?null:mode===this.loginMode(id)?this.connectionName(id):mode==='cloudcli'?cloudcliName(id):id,known=this.linkTargets();
     if(name!==null&&!known.some(t=>t.name===name))throw Error(this.route(id,mode)==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':mode==='cloudcli'?'还没有填写 ClaudeWeb 地址，请编辑设备后再连接。':this.sshFor(id)||this.cloudcliFor(id)?'还没有填写网页桌面地址，请编辑设备后再连接。':'连接不存在');
-    const before=this.controlMap();this.controls={schema:1,targets:known.map(t=>{const previous=before.get(t.name),selected=id===null||t.name===name;return {name:t.name,enabled:selected?enabled:previous?.enabled===true,revision:selected?randomUUID():previous?.revision||randomUUID(),requestTime:String(Date.now())};})};this.write('target-controls.json',this.controls);
+    const before=this.controlMap();
+    const cloudPair=[cloudcliName(id),tunnelName(id,'cloudcli')];
+    const time=String(Date.now());
+    this.controls={schema:1,targets:known.map(t=>{
+      const previous=before.get(t.name);
+      const selected=id===null||t.name===name;
+      const sibling=!selected&&cloudPair.includes(name)&&cloudPair.includes(t.name);
+      return {name:t.name,enabled:selected?enabled:sibling?false:previous?.enabled===true,
+        revision:selected||sibling?randomUUID():previous?.revision||randomUUID(),
+        requestTime:selected||sibling?time:previous?.requestTime||time};
+    })};
+    this.write('target-controls.json',this.controls);
   }
   sshDraft(value){
     if(!value||typeof value!=='object'||(value.secret!==undefined&&(typeof value.secret!=='string'||value.secret.length>256)))throw Error('请输入正确的主机地址（域名或 IP）。');
@@ -97,7 +108,6 @@ export class ManagerState {
     if(!old&&!oldLogin&&!oldCloud&&this.view().targets.length>=100)throw Error('最多保存 100 台设备。');
     const id=old?.id||oldLogin?.id||oldCloud?.id||randomUUID(),draft=sshGiven&&input.ssh?this.sshDraft(input.ssh):null;
     if(!wantsWeb&&old&&this.controlMap().get(id)?.enabled)throw Error('请先停止此连接，再删除网页桌面登录。');
-    if(usesSshTools(this.cloudcliKind(id))&&(cloudGiven?input.cloudcli:oldCloud||oldLogin?.cloudcliTunnel)&&!(sshGiven?draft:oldLogin))throw Error((this.cloudcliKind(id)===CLAUDEWEB?'ClaudeWeb 独立版':'自行安装的 CloudCLI ')+'需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。');
     if(wantsWeb)await this.saveWeb(input,old,id,label,icon,note,detectShared);
     else if(old)await this.dropWeb(old);
     if(sshGiven)await this.saveSsh(id,input,draft,oldLogin,wantsWeb,label,icon,note);
@@ -117,7 +127,7 @@ export class ManagerState {
       if(input.ssh.secret){created=randomUUID();await this.secrets('set',created,input.ssh.secret);credentialId=created;}
     }
     const logins=this.ssh.logins.filter(l=>l.id!==id);
-    if(draft){const keepsAccount=old&&old.host===draft.host&&old.port===draft.port&&old.username===draft.username;const login={id,...draft,...keepsAccount&&old.cloudcliUser?{cloudcliUser:old.cloudcliUser}:{},...typeof input.ssh.sshAutoStart==='boolean'?{sshAutoStart:input.ssh.sshAutoStart}:typeof old?.sshAutoStart==='boolean'?{sshAutoStart:old.sshAutoStart}:{},active:(this.ssh.modes?.[id]||(typeof input.preferSsh==='boolean'?(input.preferSsh?'ssh':'web'):old?(old.active?'ssh':'web'):hasWeb?'web':'ssh'))==='ssh'};if(credentialId)login.credentialId=credentialId;
+    if(draft){const dualConnection=(input.cloudcli===undefined?!!this.cloudcliFor(id):!!input.cloudcli?.url)&&(input.ssh.dualConnection===undefined?old?.dualConnection===true:input.ssh.dualConnection===true);const keepsAccount=old&&old.host===draft.host&&old.port===draft.port&&old.username===draft.username;const login={id,...draft,dualConnection,...keepsAccount&&old.cloudcliUser?{cloudcliUser:old.cloudcliUser}:{},...typeof input.ssh.sshAutoStart==='boolean'?{sshAutoStart:input.ssh.sshAutoStart}:typeof old?.sshAutoStart==='boolean'?{sshAutoStart:old.sshAutoStart}:{},active:(this.ssh.modes?.[id]||(typeof input.preferSsh==='boolean'?(input.preferSsh?'ssh':'web'):old?(old.active?'ssh':'web'):hasWeb?'web':'ssh'))==='ssh'};if(credentialId)login.credentialId=credentialId;
       for(const app of ['web','cloudcli']){const enabled=input.ssh[app+'Tunnel']===true,port=Number(input.ssh[app+'Port']??old?.[app+'Port']??(app==='web'?3000:3001)),auto=input.ssh[app+'AutoLogin']===true,typed=input.ssh[app+'Password']||'';if(!Number.isInteger(port)||port<1||port>65535||typeof typed!=='string'||typed.length>256)throw Error('网页服务端口或密码无效');
         const same=old&&old.host===draft.host&&old.port===draft.port&&old.username===draft.username&&(old[app+'Port']??(app==='web'?3000:3001))===port;let ref=auto&&same?old[app+'CredentialId']:undefined;if(auto&&typed){ref=randomUUID();await this.secrets('set',ref,typed);}if(enabled&&auto&&!ref)throw Error('请填写自动登录的网页访问密码；更换服务器或端口时需要重新填写。');
         Object.assign(login,{[app+'Tunnel']:enabled,[app+'Port']:port,[app+'AutoLogin']:auto,...ref?{[app+'CredentialId']:ref}:{}});if(old?.[app+'CredentialId']&&old[app+'CredentialId']!==ref)await this.secrets('delete',old[app+'CredentialId']);

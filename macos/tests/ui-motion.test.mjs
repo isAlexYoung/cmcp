@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {markChosen,MENU_MS,menuKey,menuPlace,pageDirection,revealGuard,REVEAL_MS,turn} from '../ui/motion.js';
+import {markChosen,MENU_MS,menuKey,menuPlace,pageDirection,revealGuard,REVEAL_MS,turn,wheelScroll} from '../ui/motion.js';
 
 const css=fs.readFileSync(new URL('../ui/style.css',import.meta.url),'utf8');
 const app=fs.readFileSync(new URL('../ui/app.js',import.meta.url),'utf8');
@@ -69,6 +69,43 @@ test('a card slide holds back list rebuilds only for as long as it lasts',()=>{
   assert.equal(guard.active(),true);
   clock+=1;
   assert.equal(guard.active(),false);
+});
+
+function scrollFixture(max=600){
+  let position=0,time=0,frame;
+  const scroller=wheelScroll({
+    read:()=>position,write:value=>{position=value;},limit:()=>max,now:()=>time,
+    requestFrame:callback=>{frame=callback;return 1;},cancelFrame:()=>{frame=null;},
+  });
+  return {scroller,read:()=>position,jump:value=>{position=value;},advance(ms){time+=ms;const callback=frame;frame=null;callback?.(time);}};
+}
+const wheel=(deltaY,extra={})=>({deltaY,deltaX:0,deltaMode:0,...extra});
+
+test('wheel notches accumulate through the animation and stop at the last card',()=>{
+  const {scroller,advance,read}=scrollFixture(280);
+  assert.equal(scroller.wheel(wheel(100),500),true);
+  advance(16);
+  assert.ok(read()>0&&read()<100);
+  for(let i=0;i<4;i++)scroller.wheel(wheel(100),500);
+  advance(180);
+  assert.equal(read(),280);
+  assert.equal(scroller.active(),false);
+});
+
+test('trackpad deltas stay native and an external scroll cancels pending wheel motion',()=>{
+  const {scroller,advance,read,jump}=scrollFixture();
+  assert.equal(scroller.wheel(wheel(8.25),500),false);
+  assert.equal(scroller.wheel(wheel(100,{ctrlKey:true}),500),false);
+  assert.equal(scroller.wheel(wheel(3,{deltaMode:1}),500),true);
+  advance(16);
+  assert.ok(read()>0);
+  jump(350);
+  advance(30);
+  assert.equal(read(),350);
+  assert.equal(scroller.active(),false);
+  assert.equal(scroller.wheel(wheel(-100),500),true);
+  assert.equal(scroller.wheel(wheel(-4),500),false);
+  assert.equal(scroller.active(),false);
 });
 
 test('style sheet timing matches the Windows interface',()=>{

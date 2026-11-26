@@ -108,6 +108,7 @@ namespace CMCP {
             control.MouseDown+=delegate{keyboardFocus=false;if(hoverTransition!=null)hoverTransition.Finish();};
             control.Enter+=delegate{
                 if(changingHover)return;
+                var list=Parent as CardList;if(list!=null&&keyboardFocus)list.Reveal(control);
                 if(SelectedCard!=null)SelectedCard(this);
                 SyncPointer();
             };
@@ -177,7 +178,7 @@ namespace CMCP {
             Details.Open.Text=SshActive?"打开终端":CloudActive?"打开 ClaudeWeb":"打开云电脑";Details.Open.Glyph=SshActive?"terminal":CloudActive?"web":"monitor";
             Details.Stop.Visible=true;Details.Logs.Visible=Connection.Url.Length>0;
             bool setup=SetupOffered;if(Details.SetupShown!=setup){Details.SetupShown=setup;if(Expanded){Height=FinalHeight;PerformLayout();}}Details.Setup.Enabled=!SetupRunning&&!BusyStop;
-            Details.Channel=SelfHostedCloud?(Ssh==null?"需要 SSH 信息":SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":SshState.Length>0?"连接中":"已停止"):null;
+            Details.Channel=SelfHostedCloud&&SshState.Length>0?(SshState=="ready"?"已连接":SshState=="failed"?"连接异常":SshState=="recovering"?"正在恢复":"连接中"):null;
             tips.SetToolTip(Copy,SshActive?"复制 IP":"复制设备地址");Copy.AccessibleName=L.Text(SshActive?"复制 IP":"复制设备地址");
             if(SshActive){
                 Connect.Text="打开终端";Connect.Glyph="terminal";Connect.Primary=false;Connect.Neutral=true;Connect.Enabled=true;
@@ -202,7 +203,8 @@ namespace CMCP {
             if(hovered==value&&StatusText.Visible==!value&&AppChoice.Visible==value&&RouteChoice.Visible==value&&Connect.Visible==value&&Edit.Visible==value&&Copy.Visible==value&&Delete.Visible==value)return;
             changingHover=true;
             Rectangle area=Compact?Rectangle.FromLTRB(20,96,Width-20,148):Rectangle.FromLTRB(110,20,Width-64,96);
-            bool animate=Motion.Enabled&&IsHandleCreated&&Visible&&area.Width>0&&area.Height>0;
+            var list=Parent as CardList;
+            bool animate=(list==null||!list.Gliding)&&Motion.Enabled&&IsHandleCreated&&Visible&&area.Width>0&&area.Height>0;
             Bitmap before=null;
             if(animate&&hoverTransition!=null&&hoverTransition.Bounds==area)before=hoverTransition.CurrentPicture();
             if(hoverTransition!=null)hoverTransition.Finish();
@@ -225,10 +227,12 @@ namespace CMCP {
         }
         Bitmap HoverPicture(Rectangle area){using(var picture=SnapshotOverlay.Snapshot(this))return picture.Clone(area,System.Drawing.Imaging.PixelFormat.Format32bppRgb);}
 
+        internal void FinishHoverMotion(){if(hoverTransition!=null)hoverTransition.Finish();}
         internal void TestHover(bool value) { SetHover(value); }
         protected override void OnGotFocus(EventArgs e) {
             base.OnGotFocus(e);
             if(changingHover)return;
+            var list=Parent as CardList;if(list!=null&&keyboardFocus)list.Reveal(this);
             if(SelectedCard!=null)SelectedCard(this);
             SyncPointer();
         }

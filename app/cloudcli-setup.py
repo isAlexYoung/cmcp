@@ -21,7 +21,7 @@ UNIT_DIRS = ('/etc/systemd/system', '/lib/systemd/system', '/usr/lib/systemd/sys
 DEFAULT_PORT = 3001
 SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 PACKAGE = '@anthropic-ai/claude-code'
-NAME = re.compile(r'^cmcp-ssh-[0-9a-f]{16}$')
+NAME = re.compile(r'^cmcp-(?:pc|ssh)-[0-9a-f]{16}$')
 ACCOUNT = re.compile(r'^[a-z_][a-z0-9_-]{0,31}$')
 
 
@@ -291,9 +291,14 @@ def mcp_state(user, name):
         servers = json.loads(text).get('mcpServers', {})
     except (ValueError, AttributeError):
         return {'config': config, 'readable': True, 'present': False, 'invalid': True}
-    entry = servers.get(name) if isinstance(servers, dict) else None
-    args = entry.get('args') if isinstance(entry, dict) else None
-    present = isinstance(args, list) and len(args) > 1 and isinstance(args[1], str) and os.path.isfile(args[1])
+    names = (name, name.replace('cmcp-pc-', 'cmcp-ssh-', 1)) if name.startswith('cmcp-pc-') else (name,)
+    present = False
+    for candidate in names:
+        entry = servers.get(candidate) if isinstance(servers, dict) else None
+        args = entry.get('args') if isinstance(entry, dict) else None
+        if isinstance(args, list) and len(args) > 1 and isinstance(args[1], str) and os.path.isfile(args[1]):
+            present = True
+            break
     return {'config': config, 'readable': True, 'present': present}
 
 

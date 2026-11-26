@@ -29,7 +29,9 @@ jobs:
       - name: Linux and shared protocol tests
         run: node --test app/tests/claudeweb-mcp.test.mjs linux/tests/*.test.mjs macos/tests/*.test.mjs app/tests/ssh-mcp.test.mjs app/tests/mcp-tools.test.mjs app/tests/mcp-host.test.mjs app/tests/mcp-market.test.mjs
       - name: Python connector and package tests
-        run: python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+        run: |
+          python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s app/tests -p test_managed_connector.py -v
       - name: Build verified Linux packages
         run: python3 tools/package-linux.py --output build-results/linux --release --commit "$GITHUB_SHA"
       - name: Install and exercise the real GTK host as a normal user

@@ -152,19 +152,19 @@ namespace CMCP {
                 form.Show();Pump();
                 foreach(var name in new[]{"self","desk"}){var p=form.Preferences.Get(name);p.loginMode="cloudcli";form.Cards[name].UpdatePreference(p);}
                 form.RefreshState();Pump();
-                check(form.StartAutoChannels()==1&&started.SequenceEqual(new[]{"self"}),"at start CMCP connects the SSH channel only for the self-hosted CloudCLI");
+                check(form.StartAutoChannels()==0&&started.Count==0,"ClaudeWeb cards do not start a separate SSH worker");
                 var self=form.Cards["self"];var desk=form.Cards["desk"];
                 check(self.SetupOffered&&self.Details.SetupShown&&!desk.SetupOffered&&!desk.Details.SetupShown,"only a ClaudeWeb that is not WebDesktop's offers the setup action");
-                check(self.Details.Channel=="已停止"&&desk.Details.Channel==null,"a self-hosted CloudCLI shows its local tools channel in the details");
+                check(self.Details.Channel==null&&desk.Details.Channel==null,"stopped cards do not show a separate local tools worker");
                 self.SetExpanded(true,false);Pump();check(self.Details.Setup.Visible&&self.Details.Setup.Bottom<=self.Details.Open.Top&&self.Details.Setup.Right<=self.Details.Width&&form.LayoutFits(),"the setup button sits above the other detail buttons and fits");
                 form.OpenEditor("self");Pump();var editor=form.Editor;
-                check(editor!=null&&editor.AutoChannel.Checked,"the editor shows the channel switch on for a self-hosted CloudCLI");
-                editor.ShowSsh();editor.HostInput.Box.Clear();editor.UserInput.Box.Clear();check(!editor.ValidateFields(),"a self-hosted CloudCLI cannot be saved without SSH details");
-                editor.HostInput.Box.Text="203.0.113.5";editor.UserInput.Box.Text="root";check(editor.ValidateFields()&&editor.BuildSsh("self").sshAutoStart==null,"an untouched switch keeps following the ClaudeWeb kind");
-                editor.AutoChannel.Checked=false;check(editor.BuildSsh("self").sshAutoStart==false,"turning the switch off is saved for this device");
+                check(editor!=null&&!editor.AutoChannel.Checked,"dual transport is off by default");
+                editor.ShowSsh();editor.HostInput.Box.Clear();editor.UserInput.Box.Clear();check(editor.ValidateFields()&&editor.BuildSsh("self")==null,"a URL-only ClaudeWeb card does not need SSH details");
+                editor.HostInput.Box.Text="203.0.113.5";editor.UserInput.Box.Text="root";check(editor.ValidateFields()&&!editor.BuildSsh("self").dualConnection,"a saved SSH profile does not opt in");
+                editor.AutoChannel.Checked=true;check(editor.BuildSsh("self").dualConnection,"the editor opts this device into dual transport");
                 editor.Save.PerformClick();Pump();
-                check(form.Editor==null&&SshStore.Load(state).Get("self").sshAutoStart==false,"the device keeps the user's channel choice");
-                started.Clear();check(form.StartAutoChannels()==0&&started.Count==0,"a channel the user turned off does not start with CMCP");
+                check(form.Editor==null&&SshStore.Load(state).Get("self").dualConnection,"the device keeps its dual transport setting");
+                started.Clear();check(form.StartAutoChannels()==0&&started.Count==0,"dual transport starts with the ClaudeWeb connection");
                 form.OpenEditor("desk");Pump();check(form.Editor!=null&&!form.Editor.AutoChannel.Checked,"WebDesktop ClaudeWeb devices keep the channel off by default");form.CloseEditor();Pump();
             }
         }

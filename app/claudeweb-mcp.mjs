@@ -1,9 +1,11 @@
 // Standalone ClaudeWeb's authenticated web bridge. Reuses the connector's framing,
 // request recovery and local tool dispatcher without an SSH account or TCP listener.
 import {EventEmitter} from 'node:events';
+import {setTimeout as delay} from 'node:timers/promises';
 import WebSocket from 'ws';
 import {requestBuffered} from './desktop-auth.mjs';
 import {bootstrapPayload,startSshMcp} from './ssh-mcp.mjs';
+import {platformConnector} from './connection-policy.mjs';
 import {finishSocketRequest} from './connection-transport.mjs';
 
 class WebPipe extends EventEmitter {
@@ -34,8 +36,8 @@ class WebPipe extends EventEmitter {
 
 // Used by managedTargetFactory when discovery advertises webMcp. The token stays
 // in memory, and stop signs out only this connection's own session.
-export function startClaudewebMcp({url,agent,passwordFor,machine,catalog,forward,signal,status,device=''}){
-  const controller=new AbortController();let token=null,stopping=false;
+export function startClaudewebMcp({url,agent,passwordFor,machine,catalog,forward,signal,status,device='',policy}){
+  const controller=new AbortController();let token=null,stopping;
   let authenticated;
   const authentication=new Promise(resolve=>{authenticated=resolve;});
   const request=async(path,body,authenticated=false,requestSignal=controller.signal)=>{
@@ -53,20 +55,32 @@ export function startClaudewebMcp({url,agent,passwordFor,machine,catalog,forward
     try{
       password=await Promise.race([passwordFor(),new Promise((_,reject)=>{abortPassword=()=>reject(Error('Stopped'));controller.signal.addEventListener('abort',abortPassword,{once:true});})]);
     }finally{controller.signal.removeEventListener('abort',abortPassword);}
-    const code=await request('/api/auth/cmcp/code',{password});password=undefined;
+    let code;
+    try {
+      // A standby URL can be temporarily unreachable while SSH is already
+      // working. Retry only getting a code, never a rejected credential or
+      // a redeem whose result may have been lost.
+      for (let attempt=0;;attempt++) {
+        try { code=await request('/api/auth/cmcp/code',{password}); break; }
+        catch(error) {
+          if (!policy?.dual || controller.signal.aborted || (error.status && error.status<500)) throw error;
+          await delay(Math.min(30000,3000*2**Math.min(attempt,4)),undefined,{signal:controller.signal});
+        }
+      }
+    } finally { password=undefined; }
     const session=await request('/api/auth/cmcp/redeem',{code:code.code,mode:'join'});
     if(typeof session?.token!=='string')throw Error('Missing ClaudeWeb session');
     token=session.token;
     authenticated(true);
-    const platform=process.platform==='darwin'?'mac-pc-files':process.platform==='linux'?'linux-pc-files':'windows-pc-files';
-    await startSshMcp({key:machine,catalog:catalog.list(device),changes:catalog,device,forward,signal:controller.signal,status:ready,
-      transport:()=>new WebPipe({url,agent,token,payload:{...bootstrapPayload(machine,catalog.list(device)),name:platform},signal:controller.signal})});
+    const key=policy?.key || machine;
+    await startSshMcp({key,catalog:catalog.list(device),changes:catalog,device,forward,signal:controller.signal,status:ready,
+      transport:()=>new WebPipe({url,agent,token,payload:{...bootstrapPayload(key,catalog.list(device),process.platform,policy),name:platformConnector()},signal:controller.signal})});
   })().catch(()=>{authenticated(false);if(!controller.signal.aborted)ready('failed');});
-  const stop=async()=>{
-    if(stopping)return;stopping=true;controller.abort();await running;
+  const stop=()=>stopping??=(async()=>{
+    controller.abort();await running;
     if(token){try{await request('/api/auth/logout',{},true,AbortSignal.timeout(5000));}catch{}token=null;}
     signal.removeEventListener('abort',stop);
-  };
+  })();
   signal.addEventListener('abort',stop,{once:true});
   if(signal.aborted)void stop();
   return {stop,async browserCode(){await authentication;if(!token)return null;return (await request('/api/auth/cmcp/session-code',{},true)).code;}};

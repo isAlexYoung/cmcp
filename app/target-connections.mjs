@@ -24,15 +24,26 @@ export const targetRevision = (target, controls) => controls?.get(target.name)?.
 export function createTargetConnections({readTargets, readControls, readNetworkRevision = () => '', create, status, onChange = () => {}, interval = 250, retryMs = 10000}) {
   const slots = new Map();
   let closed = false;
-  const signature = (t, revision, network) => JSON.stringify([t.url, t.stamp, t.authMode, t.autoLogin===true, revision, t.tunnel ? '' : network]);
+  const signature = (t, revision, network) => JSON.stringify([t.url, t.stamp, t.authMode, t.autoLogin===true, revision, t.tunnel && !t.policy?.dual ? '' : network]);
   const snapshot = () => {
     const controls = readControls(), desired = new Map(), network = readNetworkRevision();
+    const groups = new Map();
     for (const t of readTargets().slice(0, 400)) {
       if (!t?.name || !t?.url || desired.has(t.name)) continue;
       const revision = targetRevision(t, controls);
-      if (revision !== null) desired.set(t.name, {target:t, revision, signature:signature(t, revision, network)});
+      if (revision !== null) {
+        const next={target:t, revision, signature:signature(t, revision, network)};
+        const key=t.policy?.key;
+        if (!key) desired.set(t.name,next);
+        else {
+          const previous=groups.get(key);
+          const time=item=>Number(controls.get(item.target.name)?.requestTime)||0;
+          if (!previous||time(next)>time(previous)||(time(next)===time(previous)&&!t.tunnel)) groups.set(key,next);
+        }
+      }
       else status.set(t.name, 'stopped', '此云电脑已停止；其他云电脑不受影响', controls?.get(t.name)?.revision);
     }
+    for (const entry of groups.values()) desired.set(entry.target.name,entry);
     return desired;
   };
   function retire(slot) {
@@ -58,7 +69,9 @@ export function createTargetConnections({readTargets, readControls, readNetworkR
         continue;
       }
       if (slots.size >= 400) continue;
-      const slot = {name, signature:d.signature, controller:new AbortController(), value:null};
+      const group=d.target.policy?.key;
+      if (group && [...slots.values()].some(slot=>slot.group===group)) continue;
+      const slot = {name, group, signature:d.signature, controller:new AbortController(), value:null};
       slots.set(name, slot);
       const current = () => !closed && !slot.controller.signal.aborted && slots.get(name) === slot && snapshot().get(name)?.signature === slot.signature;
       const guardedStatus = {set:(name, state, message) => { if (current()) status.set(name, state, message, d.revision); },clients:(name, value) => { if (current()) status.clients?.(name, value); }};

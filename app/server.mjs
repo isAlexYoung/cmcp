@@ -1,5 +1,6 @@
 import {readTunnelTargets,acquireWebTunnel} from './ssh-web.mjs';
-import {readSshLogin} from './ssh-terminal.mjs';
+import {readSshLogin,stopStandaloneSsh} from './ssh-terminal.mjs';
+import {configureClaudewebTargets} from './connection-policy.mjs';
 import {networkRevision} from './network-policy.mjs';
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
@@ -196,7 +197,7 @@ function writeBrowserEntries() {
   } catch { log('cannot save browser entries; will retry'); }
 }
 const dialogs = new Map();
-const readTargets = () => {let targets=[];try{const list=readJson(targetsFile);targets=Array.isArray(list)?list:[list];}catch{}try{return [...targets,...cloudcliTargets(readCloudcliLogins(stateDir)),...readTunnelTargets(stateDir)];}catch{return targets;}};
+const readTargets = () => {let targets=[];try{const list=readJson(targetsFile);targets=Array.isArray(list)?list:[list];}catch{}try{return configureClaudewebTargets(stateDir,[...targets,...cloudcliTargets(readCloudcliLogins(stateDir)),...readTunnelTargets(stateDir)],readSshLogin);}catch{return targets;}};
 
 const powershellExe = process.env.CLOUDPC_POWERSHELL || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 
@@ -249,6 +250,8 @@ function startLinks() {
     status, onChange:writeBrowserEntries,
     create:managedTargetFactory({openTunnel:async(t,signal)=>acquireWebTunnel({directory:stateDir,id:t.tunnel.id,login:readSshLogin(stateDir,t.tunnel.id),signal,env:{...process.env,CMCP_STATE_DIR:stateDir,CMCP_SSH_ASKPASS:t.tunnel.id,SSH_ASKPASS:path.resolve(here,"../CMCP.exe"),SSH_ASKPASS_REQUIRE:"force",DISPLAY:"cmcp"}}),proxyFor, machine:machineId(stateDir), version:bridgeVersion,
       forward, catalog: registry, askPassword, notify, log, session:sessionMode, onReplaced:sessionMode ? () => stop(4) : undefined,
+      sshOptions:id=>({login:readSshLogin(stateDir,id),env:{...process.env,CMCP_STATE_DIR:stateDir,CMCP_SSH_ASKPASS:id,SSH_ASKPASS:path.resolve(here,'../CMCP.exe'),SSH_ASKPASS_REQUIRE:'force',DISPLAY:'cmcp'}}),
+      stopStandaloneSsh:id=>stopStandaloneSsh(stateDir,id),
       onCloudcliKind:(id,kind) => recordCloudcliKind(stateDir,id,kind),
       passwordFor:async (name,signal) => {
         const r = await powershell('get-password.ps1', ['-Name', name], {capture:true, timeoutMs:45000,signal});

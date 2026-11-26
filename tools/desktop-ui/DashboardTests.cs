@@ -199,8 +199,28 @@ namespace CMCP {
                 form.ClientSize=new Size(660,500);form.Show();Pump();
                 check(form.Cards.Count==30&&form.LayoutFits(),"30 real saved cards stay within narrow list without horizontal overflow");
                 form.ScrollOffset=700;Pump();int before=form.ScrollOffset;form.RefreshState();Pump();check(before>0&&form.ScrollOffset==before,"periodic status refresh preserves vertical scroll position");
+                form.ScrollOffset=0;
+                form.OpenAdd();Pump();form.Editor.ShowSsh();form.Editor.NameInput.Box.Text="Last device";
+                form.Editor.HostInput.Box.Text="192.0.2.101";form.Editor.UserInput.Box.Text="fixture";
+                form.Editor.Save.PerformClick();Pump();
+                var added=form.Cards.Values.SingleOrDefault(card=>card.Caption=="Last device");
+                check(form.Editor==null&&added!=null&&added.Bottom<=form.list.ClientSize.Height&&added.Top>=0&&form.Cards.Count==31,
+                    "saving the 31st device immediately reveals its collapsed card");
+                if(added!=null){
+                    form.ScrollOffset=0;
+                    bool forced=Motion.Forced;Motion.Forced=true;
+                    try{
+                        for(int i=0;i<36;i++)SettingsTests.NativeWheel(form.list,-240,false);
+                        var clock=System.Diagnostics.Stopwatch.StartNew();
+                        while(form.list.Gliding&&clock.ElapsedMilliseconds<2000){Pump();System.Threading.Thread.Sleep(5);}
+                    }finally{Motion.Forced=forced;}
+                    check(!form.list.Gliding&&form.ScrollOffset==form.list.MaxScrollOffset&&added.Bottom<=form.list.ClientSize.Height
+                        &&form.Cards.Values.All(card=>!card.Expanded),"fast wheel input reaches the last card without changing any expansion");
+                    check(!GetUpdateRect(added.Handle,IntPtr.Zero,false)&&!GetUpdateRect(added.IconNote.Handle,IntPtr.Zero,false),
+                        "the last wheel frame repaints the visible card and its child window");
+                }
             }
-            File.Delete(manyFile);
+            File.Delete(manyFile);File.Delete(SshStore.PathFor(directory));
             string command=Actions.Command("C:\\app","edit","a'b","https://example.com/'");check(command.Contains("-TargetName 'a''b'")&&command.Contains("-InitialUrl 'https://example.com/'''"),"edit keeps stable ID and escapes both arguments literally");
             bool missing=false;try{Actions.Command("C:\\app","remove","");}catch(ArgumentException){missing=true;}check(missing,"delete cannot dispatch without an explicit target");
             if(File.Exists(UiPreferences.PathFor(directory)))File.Delete(UiPreferences.PathFor(directory));Directory.Delete(directory,false);

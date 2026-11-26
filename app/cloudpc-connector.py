@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 
-VERSION = "4.24.3"
+VERSION = "4.25.0"
 MAX_MESSAGE = 8 * 1024 * 1024
 MAX_RESPONSE = 40 * 1024 * 1024
 LINK_DIR = Path.home() / ".local" / "share" / "cloudpc-link"
@@ -208,6 +208,7 @@ class Link:
         self.poll = poll
         # Set by the server: shows a tool's question (elicitation) to Claude and returns the answer.
         self.on_ask = None
+        self.fallback_on_not_sent = False
 
     def manually_stopped(self):
         try:
@@ -304,6 +305,8 @@ class Link:
                 timeout = min(5, max(0.1, gap_deadline - time.monotonic())) if querying else min(200, max(1, overall_deadline - time.monotonic()))
                 reply = self._exchange(request, timeout)
             except NotSent:
+                if self.fallback_on_not_sent and not querying:
+                    raise Offline(OFFLINE_TEXT) from None
                 if time.monotonic() >= gap_deadline:
                     if querying:
                         raise OutcomeUnknown(UNCERTAIN_TEXT)
@@ -331,6 +334,8 @@ class Link:
                 time.sleep(self.poll)
                 continue
             if (reply.get('code') == 'offline' and reply.get('delivery') == 'not_sent') or phase == 'not_sent':
+                if self.fallback_on_not_sent and not querying:
+                    raise Offline(OFFLINE_TEXT)
                 if time.monotonic() >= gap_deadline:
                     if querying:
                         raise OutcomeUnknown(UNCERTAIN_TEXT)
@@ -482,8 +487,12 @@ def report_client(client_name):
     threading.Thread(target=beat, daemon=True).start()
 
 
+# CMCP_MANAGED_CONNECTOR
+
+
 def run_server(private):
-    link = Link()
+    managed = globals().get("MANAGED_POLICY")
+    link = ManagedLink(private) if managed else Link()
     cache_file = private / "tools-cache.json"
     try:
         catalog = read_json(cache_file)
@@ -607,7 +616,7 @@ def run_server(private):
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
                 sock.settimeout(60)
-                sock.connect(str(LINK_SOCKET))
+                sock.connect(link.watch_socket() if managed else str(LINK_SOCKET))
                 sock.sendall((json.dumps({"id": 1, "op": "watch", "since": state["catalog"].get("revision")}) + "\n").encode())
                 stream = sock.makefile("rb")
                 first = json.loads(stream.readline(4096) or b"null")
@@ -812,6 +821,12 @@ def install(args):
 
 
 def apply_install(private, targets, catalog, name):
+    if globals().get("MANAGED_POLICY"):
+        return managed_install(private, targets, catalog, name)
+    return install_connector(private, targets, catalog, name)
+
+
+def install_connector(private, targets, catalog, name, policy=None):
     """Write the connector and point every Claude config at it. Returns (configs changed, connector updated)."""
     # Parse every target before changing any configuration.
     documents = {}
@@ -841,6 +856,8 @@ def apply_install(private, targets, catalog, name):
     except FileExistsError:
         # A crashed installer leaves the lock behind; it is stale after 10 minutes.
         if time.time() - lock_dir.stat().st_mtime < 600:
+            if policy:
+                raise ConfigRace(str(lock_dir)) from None
             raise ValueError("An installer is already running: " + str(lock_dir)) from None
     try:
         connector = private / "connector.py"
@@ -848,7 +865,7 @@ def apply_install(private, targets, catalog, name):
         updated = (connector.read_bytes() if connector.exists() else None) != code
         entry = {"command": str(Path(sys.executable).resolve()),
                  "args": ["-u", str(connector), "serve", "--name", name, "--home", str(private.parents[3])]}
-        if os.environ.get("CLOUDPC_LINK_SOCKET"):
+        if not policy and os.environ.get("CLOUDPC_LINK_SOCKET"):
             entry["env"] = {"CLOUDPC_LINK_SOCKET": str(LINK_SOCKET)}
         if CC_SHARED:
             entry["env"] = {"CLOUDPC_CC_SHARED": "1", "CLOUDPC_LINK_SOCKET": str(LINK_SOCKET)}
@@ -859,19 +876,25 @@ def apply_install(private, targets, catalog, name):
                   private / "tools-cache.json": encoded_json(catalog),
                   private / "server-entry.json": encoded_json(entry),
                   manifest_file: encoded_json({"version": VERSION, "name": name, "targets": known_targets})}
+        if policy:
+            writes[private / "connection-policy.json"] = encoded_json(policy)
         changed = 0
         for target, document in documents.items():
             current = target.read_bytes() if target.exists() else None
             if current != originals[target]:
                 raise ConfigRace(str(target))
-            if document.get("mcpServers", {}).get(name) == entry:
+            servers = document.setdefault("mcpServers", {})
+            before_servers = dict(servers)
+            if policy:
+                remove_managed_aliases(servers, private, entry, policy)
+            servers[name] = entry
+            if servers == before_servers:
                 continue
             if originals[target] is not None:
                 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
                 backup = target.with_name(target.name + ".mcp-backup-" + stamp)
                 atomic_write(backup, originals[target])
                 print("Backup: " + str(backup))
-            document.setdefault("mcpServers", {})[name] = entry
             writes[target] = encoded_json(document)
             changed += 1
         rollback = []

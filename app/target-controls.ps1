@@ -78,15 +78,17 @@ function Set-TargetConnection([string]$Name, [bool]$Enabled, [switch]$All, [long
         if ($targets.Count -gt 400) { throw '最多支持 100 个保存的云电脑。' }
         if (!$All -and !@($targets | Where-Object { $_.name -ceq $Name }).Count) { throw '所选云电脑已不存在，请刷新列表。' }
         $old = Get-TargetControls
+        $cloudDevice = if ($Name -cmatch '^(?:tunnel:)?cloudcli:(.+)$') { $Matches[1] } else { '' }
         $entries = @()
         foreach ($t in $targets) {
             $previous = @($old.targets | Where-Object { $_.name -ceq $t.name } | Select-Object -First 1)
             $enabledBefore = if ($previous.Count) { [bool]$previous[0].enabled } else { $false }
             $revision = if ($previous.Count) { [string]$previous[0].revision } else { 'legacy' }
             $selected = $All -or $t.name -ceq $Name
+            $sibling = !$All -and $cloudDevice -and !$selected -and $t.name -cin @("cloudcli:$cloudDevice", "tunnel:cloudcli:$cloudDevice")
             $previousTime = if ($previous.Count -and $previous[0].requestTime) { [long]$previous[0].requestTime } else { 0 }
-            if ($selected -and $RequestTime -lt $previousTime) { throw '此操作已被较新的启动或停止操作取代。' }
-            $enabledNow = if ($selected) { $Enabled } else { $enabledBefore }
+            if (($selected -or $sibling) -and $RequestTime -lt $previousTime) { throw '此操作已被较新的启动或停止操作取代。' }
+            $enabledNow = if ($selected) { $Enabled } elseif ($sibling) { $false } else { $enabledBefore }
             # Starting an already enabled target is idempotent: no re-login.
             $restart = $false
             if ($selected -and $Enabled -and $enabledBefore) {
@@ -94,8 +96,8 @@ function Set-TargetConnection([string]$Name, [bool]$Enabled, [switch]$All, [long
                 $entry = if ($status -and $status.targets) { $status.targets.($t.name) } else { $null }
                 $restart = $entry -and $entry.revision -eq $revision -and $entry.state -in @('replaced','error')
             }
-            if ($selected -and ($enabledBefore -ne $enabledNow -or $restart)) { $revision = [Guid]::NewGuid().ToString('N') }
-            $time = if ($selected) { [string]$RequestTime } else { [string]$previousTime }
+            if (($selected -or $sibling) -and ($enabledBefore -ne $enabledNow -or $restart)) { $revision = [Guid]::NewGuid().ToString('N') }
+            $time = if ($selected -or $sibling) { [string]$RequestTime } else { [string]$previousTime }
             $entries += [pscustomobject]@{ name = [string]$t.name; enabled = [bool]$enabledNow; revision = $revision; requestTime = $time }
         }
         $file = Join-Path $script:StateDir 'target-controls.json'

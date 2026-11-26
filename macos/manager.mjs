@@ -23,6 +23,7 @@ import {currentInstallation} from './uninstall.mjs';
 import {closeSessions,detectTerminals,openTerminal} from './ssh.mjs';
 import {closePages,detectBrowsers,openPage} from './browsers.mjs';
 import {stopSshWorker,sshWorkerState,stopSshWorkers,ensureSshWorker} from '../app/ssh-terminal.mjs';
+import {configureClaudewebTargets} from '../app/connection-policy.mjs';
 import {status as toolStatus,set as setTools,applySwitches,importText,remove as removeTool,signIn as toolSignIn} from '../app/mcp-tools-cli.mjs';
 import {requestRefresh,toolsRoot,toolLogFile,ID} from '../app/mcp-tools.mjs';
 import {marketView,installPreset,updatePreset} from '../app/mcp-market.mjs';
@@ -55,9 +56,11 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
       fs.appendFileSync(file,new Date().toISOString()+' '+event+(close?' close='+close[1]:'')+'\n',{mode:0o600});
     }catch{}
   };
-  const connections=createTargetConnections({readTargets:()=>store.linkTargets(),readControls:()=>store.controlMap(),readNetworkRevision:()=>proxyKey(store.preferences),status,
+  const connections=createTargetConnections({readTargets:()=>configureClaudewebTargets(directory,store.linkTargets(),(_directory,id)=>store.sshFor(id)),readControls:()=>store.controlMap(),readNetworkRevision:()=>proxyKey(store.preferences),status,
     create:managedTargetFactory({openTunnel:async(t,signal)=>{const login=store.sshFor(t.tunnel.id);return acquireWebTunnel({directory,id:t.tunnel.id,login,signal,env:tunnelEnvironment(login,directory)});},proxyFor:networkProxy,machine,deviceName:os.hostname(),recoveryOptions:{limit:16384},version,forward:dispatcher.forward,catalog:dispatcher.registry,
       askPassword:async()=>false,notify:()=>{},log,passwordFor:id=>store.password(id),onCloudcliKind:(id,kind)=>recordCloudcliKind(directory,id,kind),
+      sshOptions:id=>{const login=store.sshFor(id);return {login,ssh:'/usr/bin/ssh',env:tunnelEnvironment(login,directory)};},
+      stopStandaloneSsh:async id=>{if(channelState(directory,id))await stopChannel(directory,id);},
       install:install||((target,auth,agent,signal,preparation)=>new Cloud(target.url,auth,agent,signal,preparation).install())})});
   // The device's background SSH channel, as a terminal would start it, but with no window.
   const ensureChannel=startChannel||(login=>ensureSshWorker({directory,id:login.id,owner:process.pid,ssh:'/usr/bin/ssh',env:tunnelEnvironment(login,directory),progress:()=>{}}));
@@ -120,7 +123,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
       return {...row,state,enabled:!!channel,connectable:!!t.ssh};
     }),language:store.preferences.language,updating}),
     '/api/targets/save':input=>store.serial(async()=>({id:await store.save(input,protocol)})),
-    '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');verifyMode(input);store.setEnabled(input.id,true);connections.tick();if(store.loginMode(input.id)==='cloudcli'&&store.autoChannel(input.id))channel(input.id);return {started:true};}),
+    '/api/targets/start':input=>store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');verifyMode(input);store.setEnabled(input.id,true);connections.tick();return {started:true};}),
     // The page window closes after the stop is saved; that never holds up the reply.
     '/api/targets/stop':async input=>{const result=await store.serial(()=>{if(typeof input.id!=='string')throw Error('请选择连接');verifyMode(input);store.setEnabled(input.id,false);connections.tick();return {stopped:true};});closeBrowserPages(browserPreferences(input.id),directory,connectionName(input.id)).catch(()=>{});return result;},
     '/api/targets/delete':input=>store.serial(async()=>{await store.remove(input.id);connections.tick();return {deleted:true};}),
@@ -211,7 +214,7 @@ export async function createManager({directory=STATE,secrets=keychain,proxy=prox
     if(attempt>=9)throw Error('无法分配浏览器可用的本机管理端口');
   }
   origin='http://127.0.0.1:'+server.address().port;
-  for(const login of store.ssh.logins)if(store.autoChannel(login.id))channel(login.id);
+  for(const login of store.ssh.logins)if(store.loginMode(login.id)==='ssh'&&store.autoChannel(login.id))channel(login.id);
   const publish=setInterval(()=>{try{atomicWrite(path.join(directory,'status.json'),JSON.stringify({pid:process.pid,at:new Date().toISOString(),targets:states}));}catch{}},2000);publish.unref();
   return {origin,token,url:origin+'/#'+token,store,connections,snapshot,close};
 }

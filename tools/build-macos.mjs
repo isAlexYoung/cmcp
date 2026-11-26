@@ -26,7 +26,7 @@ shared.push('ssh-host-key.mjs');
 shared.push('posix-connector.mjs');
 shared.push('blender-tools.mjs');
 shared.push('cloudcli-setup.mjs','cloudcli-setup.py');
-shared.push('claudeweb-mcp.mjs');
+shared.push('claudeweb-mcp.mjs','connection-policy.mjs','managed-connector.py');
 shared.push('tool-registry.mjs','mcp-tools.mjs','mcp-proxy.mjs','mcp-tools-cli.mjs','mcp-market.mjs','tool-host.mjs','mcp-oauth.mjs');
 for(const name of shared)fs.copyFileSync(path.join(root,'app',name),path.join(resources,'app',name));
 // AGENT.md, the manifest schema and examples copied into the user's mcp-tools folder.

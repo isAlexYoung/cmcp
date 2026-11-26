@@ -142,7 +142,7 @@ test('the plan refuses other systems, foreign accounts and missing rights before
 test('the plan lists only what is missing and what CMCP will save',()=>{
   const plan=(r,l=login,o={})=>planSetup(r,{login:l,connector:'cmcp-ssh-0123456789abcdef',...o});
   const root=plan(report({claude:{found:false},mcp:{readable:true,present:false}}));
-  assert.equal(root.blocker,undefined);assert.equal(root.save.cloudcliUser,'ubuntu');assert.equal(root.save.sshAutoStart,true);assert.equal(root.save.cloudcliTunnel,true);
+  assert.equal(root.blocker,undefined);assert.equal(root.save.cloudcliUser,'ubuntu');assert.equal(root.save.sshAutoStart,false);assert.equal(root.save.cloudcliTunnel,true);
   assert.deepEqual(root.install,{account:'ubuntu',mode:'root',node:'/usr/bin/node'});assert.equal(root.needsPassword,false);
   assert.ok(root.steps.some(s=>s.includes('安装 Claude CLI')));assert.ok(root.steps.some(s=>s.includes('~/.claude.json')));assert.ok(root.steps.some(s=>s.includes('以 ubuntu')));
   const sudo=plan(report({me:{uid:1000,user:'ubuntu',home:'/home/ubuntu'},privilege:'sudo-password',claude:{found:false}}),{...login,username:'ubuntu'});

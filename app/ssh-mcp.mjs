@@ -10,6 +10,7 @@ import {TerminalLink} from './terminal-link.mjs';
 import {RequestRecovery} from './request-recovery.mjs';
 import {spawnSshWithRecovery,HOST_KEY_RECOVERY_ERROR} from './ssh-host-key.mjs';
 import {connectorSource as linuxConnectorSource} from './posix-connector.mjs';
+import {managedConnectorSource} from './connection-policy.mjs';
 
 export const sshConnectorName = key => 'cmcp-ssh-'+createHash('sha256').update(key).digest('hex').slice(0,16);
 const quote = value => "'"+String(value).replace(/'/g,"'\\''")+"'";
@@ -31,12 +32,13 @@ export function sshArguments(login, {background=false}={}) {
 // On a WebDesktop VPS whose `claude` joins one shared session, Claude runs as the terminal
 // user (wdterm), so root hands the connector to that user: its config and relay must be ones
 // that Claude can read from inside the terminal sandbox.
-export const sharedSessionHandoff='if [ "$(id -u)" = 0 ] && [ -e /etc/systemd/system/wd-claude-session.service ]; then '
-  +'exec /usr/sbin/runuser -u wdterm -g wdguest -- env -i HOME=/home/wdguest PATH=/usr/bin:/bin LANG=C.UTF-8 CMCP_SHARED_SESSION=1 "$@"; fi; '
-  +'if [ "$(id -u)" = 0 ] && [ -f /etc/systemd/system/claudeweb.service ] && [ -d /opt/claudeweb ] '
+const standaloneHandoff='if [ "$(id -u)" = 0 ] && [ -f /etc/systemd/system/claudeweb.service ] && [ -d /opt/claudeweb ] '
   +'&& [ "$(systemctl show --property=User --value claudeweb.service 2>/dev/null)" = claudeweb ]; then '
   +'cmcp_home=$(getent passwd claudeweb | cut -d: -f6); [ -n "$cmcp_home" ] || { echo "ClaudeWeb account missing" >&2; exit 70; }; '
   +'exec /usr/sbin/runuser -u claudeweb -- env -i HOME="$cmcp_home" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 "$@"; fi; exec "$@"';
+export const sharedSessionHandoff='if [ "$(id -u)" = 0 ] && [ -e /etc/systemd/system/wd-claude-session.service ]; then '
+  +'exec /usr/sbin/runuser -u wdterm -g wdguest -- env -i HOME=/home/wdguest PATH=/usr/bin:/bin LANG=C.UTF-8 CMCP_SHARED_SESSION=1 "$@"; fi; '
+  +standaloneHandoff;
 // A self-hosted CloudCLI that runs as another account than root's SSH login: the setup action
 // saved that account (cloudcliUser), and root hands the connector to it the same way, so the
 // MCP entry lands in the Claude config that CloudCLI reads. Without root nothing is handed over.
@@ -44,12 +46,13 @@ export const validRunAs=value=>typeof value==='string'&&/^[a-z_][a-z0-9_-]{0,31}
 export const runAsHandoff=user=>{if(!validRunAs(user))throw Error('Invalid ClaudeWeb account');
   return 'if [ "$(id -u)" = 0 ]; then cmcp_home=$(getent passwd '+user+' | cut -d: -f6); [ -n "$cmcp_home" ] || { echo "ClaudeWeb account missing" >&2; exit 70; }; '
     +'exec /usr/sbin/runuser -u '+user+' -- env -i HOME="$cmcp_home" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 "$@"; fi; exec "$@"';};
-export const remoteCommand=(bootstrap,runAs)=>'sh -c '+quote(runAs?runAsHandoff(runAs):sharedSessionHandoff)+' sh python3 -I -B -u -c '+quote(bootstrap);
+export const remoteCommand=(bootstrap,runAs,managed=false)=>'sh -c '+quote(runAs?runAsHandoff(runAs):managed?standaloneHandoff:sharedSessionHandoff)+' sh python3 -I -B -u -c '+quote(bootstrap);
 
-export function bootstrapPayload(key, catalog,platform=process.platform) {
-  return {name:sshConnectorName(key), catalog,
+export function bootstrapPayload(key, catalog,platform=process.platform,policy) {
+  const source = platform==='linux' ? linuxConnectorSource() : fs.readFileSync(new URL(platform==='darwin'?'../macos/cloudpc-connector.py':'./cloudpc-connector.py',import.meta.url),'utf8');
+  return {name:sshConnectorName(key), catalog, ...(policy?{managed:true}:{}),
     relay:fs.readFileSync(new URL('./cloudpc-relay.py',import.meta.url),'utf8'),
-    connector:platform==='linux'?linuxConnectorSource():fs.readFileSync(new URL(platform==='darwin'?'../macos/cloudpc-connector.py':'./cloudpc-connector.py',import.meta.url),'utf8')};
+    connector:managedConnectorSource(source,policy)};
 }
 
 export function sshExitCode(stderr) {
@@ -64,7 +67,7 @@ export class SshPipe extends EventEmitter {
     super();this.readyState=1;this.bufferedAmount=0;
     const bootstrap=fs.readFileSync(new URL('./ssh-bootstrap.py',import.meta.url),'utf8');
     // No credentials or user paths enter the remote shell command.
-    this.child=spawnSshWithRecovery(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap,login.cloudcliUser||undefined)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']},{login,spawnProcess,knownHostsFile,input:JSON.stringify(payload)+'\n'});
+    this.child=spawnSshWithRecovery(ssh,[...sshArguments(login,{background:true}),remoteCommand(bootstrap,login.cloudcliUser||undefined,payload.managed===true)],{env,windowsHide:true,stdio:['pipe','pipe','pipe']},{login,spawnProcess,knownHostsFile,input:JSON.stringify(payload)+'\n'});
     let stderr='';
     this.child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString()).slice(-16384);});
     this.child.stdout.on('data',chunk=>this.emit('message',chunk,true));
@@ -87,7 +90,7 @@ export class SshPipe extends EventEmitter {
   terminate(){this.close();}
 }
 
-export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,device=null,signal,status=()=>{},transport, retryDelay, heartbeatMs=5000, silenceMs=45000}) {
+export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,device=null,signal,status=()=>{},transport,policy,retryDelay, heartbeatMs=5000, silenceMs=45000}) {
   const recovery=new RequestRecovery({limit:16384});
   let active=null,attempt=0,closed=false;
   const close=()=>{
@@ -99,7 +102,7 @@ export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,dev
   try {
     while(!signal.aborted&&!closed) {
       status('connecting','正在通过 SSH 配置 Claude Code 的本机工具');
-      const pipe=transport ? transport() : new SshPipe({ssh,login,env,payload:bootstrapPayload(key,catalog)});
+      const pipe=transport ? transport() : new SshPipe({ssh,login,env,payload:bootstrapPayload(key,catalog,process.platform,policy)});
       const link=active=new TerminalLink(null,{transport:pipe,startupTimeout:180000,relayErrorCode:'SSH_SETUP'});
       const failure=await new Promise(resolve=>{
         let error,pending=0,lastPong=Date.now(),heartbeat,unsubscribe;

@@ -26,6 +26,7 @@ namespace CMCP {
         // hands the SSH channel to it, and whether CMCP starts that channel by itself (null: by kind).
         public string cloudcliUser="";
         public bool? sshAutoStart;
+        public bool dualConnection;
         internal bool UsesKey{get{return method=="key";}}
         internal static bool ValidAccount(string value){return value!=null&&(value.Length==0||value!="root"&&Regex.IsMatch(value,@"\A[a-z_][a-z0-9_-]{0,31}\z"));}
         internal string Address{get{return username+"@"+host+":"+port;}}

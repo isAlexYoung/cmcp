@@ -26,29 +26,61 @@ namespace CMCP {
         // (focus into view, restored offset, layout clamp) cancels the glide.
         const double GlideMilliseconds=170,GlideFrame=16;
         readonly Timer glide=new Timer{Interval=8};
+        readonly bool displayPaced;
+        FrameClock wheelFrames;
         readonly System.Diagnostics.Stopwatch glideClock=new System.Diagnostics.Stopwatch();
         int glideFrom,glideTarget,glideApplied;
         bool fineTimer;
-        internal bool Gliding {get{return glide.Enabled;}}
-        internal EditorViewport(){glide.Tick+=delegate{if(-AutoScrollPosition.Y!=glideApplied)StopGlide();else{GlideStep();Update();}};}
+        internal bool Gliding {get{return wheelFrames!=null||glide.Enabled;}}
+        protected virtual int WheelOffset { get { return -AutoScrollPosition.Y; } }
+        protected virtual int WheelLimit { get { return Math.Max(0,DisplayRectangle.Height-ClientSize.Height); } }
+        protected virtual bool AnimateWheel { get { return true; } }
+        protected virtual bool CoalesceWheelInput { get { return false; } }
+        protected virtual void BeginWheel() {}
+        protected virtual void ScrollWheelTo(int value){AutoScrollPosition=new Point(-AutoScrollPosition.X,value);HideBars();Update();}
+        internal EditorViewport(bool displayPaced=false){
+            this.displayPaced=displayPaced;
+            glide.Tick+=delegate{TickGlide();};
+        }
+        void TickGlide(){if(WheelOffset!=glideApplied)StopGlide();else GlideStep();}
+        void StartGlide(){
+            if(displayPaced){
+                if(wheelFrames==null){wheelFrames=new FrameClock(this,TickGlide);wheelFrames.Start();}
+            }else{
+                // A 15.6 ms system tick would limit the editor glide on high-refresh screens.
+                if(!fineTimer){fineTimer=true;try{timeBeginPeriod(1);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}
+                glide.Start();
+            }
+        }
         bool GlideWheel(int delta){
-            int max=Math.Max(0,DisplayRectangle.Height-ClientSize.Height),current=-AutoScrollPosition.Y;
+            int max=WheelLimit,current=WheelOffset;
             if(delta==0||max==0)return false;
-            if(!glide.Enabled)glideTarget=current;
-            glideTarget=Math.Max(0,Math.Min(max,glideTarget-delta));
+            if(!AnimateWheel){
+                StopGlide();
+                int next=Math.Max(0,Math.Min(max,current-delta));
+                if(next!=current){BeginWheel();ScrollWheelTo(next);}
+                return true;
+            }
+            bool first=!Gliding;
+            glideTarget=Math.Max(0,Math.Min(max,(first?current:glideTarget)-delta));
+            if(glideTarget==current){StopGlide();return true;}
+            if(first)BeginWheel();
             glideFrom=current;glideClock.Restart();
-            // The default 15.6 ms system tick would cap the glide near 64 frames per second.
-            if(!fineTimer){fineTimer=true;try{timeBeginPeriod(1);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}
-            glide.Start();GlideStep();
+            StartGlide();if(first||!CoalesceWheelInput)GlideStep();
             return true;
         }
         void GlideStep(){
             double t=Math.Min(1,(glideClock.Elapsed.TotalMilliseconds+GlideFrame)/GlideMilliseconds);
-            int next=glideFrom+(int)Math.Round((glideTarget-glideFrom)*(1-Math.Pow(1-t,3)));
-            AutoScrollPosition=new Point(-AutoScrollPosition.X,next);glideApplied=-AutoScrollPosition.Y;HideBars();
-            if(t>=1)StopGlide();
+            int next=glideFrom+(int)Math.Round((glideTarget-glideFrom)*Motion.EaseOut(t));
+            if(next!=WheelOffset)ScrollWheelTo(next);
+            glideApplied=WheelOffset;
+            if(t>=1||glideApplied==glideTarget)StopGlide();
         }
-        void StopGlide(){glide.Stop();if(fineTimer){fineTimer=false;try{timeEndPeriod(1);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}}
+        protected void StopGlide(){
+            if(wheelFrames!=null){wheelFrames.Stop();wheelFrames=null;}
+            glide.Stop();
+            if(fineTimer){fineTimer=false;try{timeEndPeriod(1);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}
+        }
         protected override CreateParams CreateParams { get { var value=base.CreateParams;value.Style&=~0x00300000;return value; } }
         void HideBars(){if(hiding||!IsHandleCreated)return;hiding=true;try{ShowScrollBar(Handle,3,false);}finally{hiding=false;}}
         protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);HideBars();}
@@ -68,7 +100,7 @@ namespace CMCP {
         internal readonly System.Collections.Generic.List<int> ClientWidthsSeen=new System.Collections.Generic.List<int>();
         internal bool TraceClientWidth;
         protected override void OnClientSizeChanged(EventArgs e){if(TraceClientWidth)ClientWidthsSeen.Add(ClientSize.Width);base.OnClientSizeChanged(e);}
-        internal void Wheel(int delta){StopGlide();base.OnMouseWheel(new MouseEventArgs(MouseButtons.None,0,20,20,delta));HideBars();}
+        internal void Wheel(int delta){StopGlide();ScrollWheelTo(Math.Max(0,Math.Min(WheelLimit,WheelOffset-delta)));}
         protected override void Dispose(bool disposing){if(disposing){StopGlide();glide.Dispose();}base.Dispose(disposing);}
     }
     internal sealed class RoundedSheet : ResizePanel {
@@ -116,7 +148,6 @@ namespace CMCP {
         // Starts the device's SSH channel with CMCP. A self-hosted CloudCLI needs it for local tools.
         internal readonly ToggleSwitch AutoChannel=new ToggleSwitch{Size=new Size(48,30)};
         readonly string cloudKind;
-        bool AutoChannelDefault {get{return CloudCliKinds.UsesSshTools(cloudKind);}}
         internal readonly ToggleSwitch Remember = new ToggleSwitch{Size=new Size(48,30)}, HideAddress = new ToggleSwitch{Size=new Size(48,30)};
         internal readonly DropdownField MethodField = new DropdownField(new[]{new KeyValuePair<string,string>("password","密码"),new KeyValuePair<string,string>("key","公钥")}){Height=38,Value="password"};
         internal bool AutoLogin {get{return Remember.Checked;}}
@@ -155,7 +186,7 @@ namespace CMCP {
 
         internal TargetEditorPage(Target target, CardPreference preference, Palette palette, SshLogin login = null,CloudCliLogin cloudLogin=null,string cloudcliKind="") {
             savedCloud=cloudLogin;cloudKind=cloudcliKind??"";
-            AutoChannel.Checked=login!=null&&login.sshAutoStart.HasValue?login.sshAutoStart.Value:AutoChannelDefault;AutoChannel.AccessibleName=L.Text("启动时连接本机工具");
+            AutoChannel.Checked=login!=null&&login.dualConnection;AutoChannel.AccessibleName=L.Text("启用 SSH 与网址双通道连接");
             WebPortInput.Box.Text=Convert.ToString(login==null?3000:login.webPort);CloudPortInput.Box.Text=Convert.ToString(login==null?3001:login.cloudcliPort);
             WebTunnel.Checked=login!=null&&login.webTunnel;CloudTunnel.Checked=login!=null&&login.cloudcliTunnel;
             WebTunnelRemember.Checked=login!=null&&login.webAutoLogin;CloudTunnelRemember.Checked=login!=null&&login.cloudcliAutoLogin;
@@ -254,7 +285,7 @@ namespace CMCP {
             secretRow=AddRow(login,"密码",SshSecretInput,0,forget);
             keyRow=AddRow(login,"私钥",KeyInput,0,browse);
             var wt=AddSection(ssh,"WebDesktop","服务端口是 VPS 本机的网页端口；访问密码与 SSH 密码不同。");AddRow(wt,"启用 SSH 隧道",WebTunnel,48);AddRow(wt,"服务端口",WebPortInput,96);AddRow(wt,"访问密码",WebTunnelPassword);AddRow(wt,"自动登录",WebTunnelRemember,48);
-            var ct=AddSection(ssh,"ClaudeWeb","ClaudeWeb 使用独立的网页端口。WebDesktop 内置的 ClaudeWeb 经 WebDesktop 连接 MCP；ClaudeWeb 独立版和自行安装的 CloudCLI 经此设备的 SSH 后台通道使用本机工具。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);AddRow(ct,"启动时连接本机工具",AutoChannel,48);
+            var ct=AddSection(ssh,"ClaudeWeb","同时填写同一台 VPS 的 ClaudeWeb 网址和 SSH 信息时生效。启用后，本机工具可在两条通道间切换，Claude 只显示一个本机连接器。");AddRow(ct,"启用 SSH 隧道",CloudTunnel,48);AddRow(ct,"服务端口",CloudPortInput,96);AddRow(ct,"访问密码",CloudTunnelPassword);AddRow(ct,"自动登录",CloudTunnelRemember,48);AddRow(ct,"启用 SSH 与网址双通道连接",AutoChannel,48);
             AddSection(ssh,"Terminal","使用上方的 SSH 凭据打开终端；终端程序可在设置的连接页面选择。");
         }
         bool SecretStillUsable { get {
@@ -400,7 +431,6 @@ namespace CMCP {
                 if(!Uri.TryCreate(Url,UriKind.Absolute,out parsed)||parsed.Scheme!="https"||parsed.UserInfo.Length>0||parsed.AbsolutePath!="/"||parsed.Query.Length>0||parsed.Fragment.Length>0)return Fail(web,"请输入完整的 HTTPS 网页地址，不含路径或登录信息。");
                 if(AutoLogin&&Password.Length==0&&(!storedAutoPassword||!String.Equals(Url.TrimEnd('/'),initialUrl.TrimEnd('/'),StringComparison.OrdinalIgnoreCase)))return Fail(web,"请填写自动登录密码；更换地址时需要重新填写。");
             }
-            if(CloudCliKinds.UsesSshTools(cloudKind)&&(HasCloud||CloudTunnel.Checked)&&!HasSsh)return Fail(ssh,cloudKind==CloudCliKinds.ClaudeWeb?"ClaudeWeb 独立版需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。":"自行安装的 CloudCLI 需要 SSH 信息：本机工具经此设备的 SSH 后台通道连接，请在“SSH 登录”中填写。");
             if(HasSsh||WebTunnel.Checked||CloudTunnel.Checked){
                 int wp,cp;if(!HasSsh)return Fail(ssh,"请先填写共用的 SSH 主机和用户名。");
                 if(!Int32.TryParse(WebPortInput.Box.Text,out wp)||wp<1||wp>65535||!Int32.TryParse(CloudPortInput.Box.Text,out cp)||cp<1||cp>65535||wp==cp)return Fail(ssh,"WebDesktop 和 ClaudeWeb 的服务端口必须有效且不同。");
@@ -423,7 +453,9 @@ namespace CMCP {
             l.cloudcliSecret=!l.cloudcliAutoLogin?"":CloudTunnelPassword.Box.Text.Length>0?CloudCliLogin.Protect(CloudTunnelPassword.Box.Text):same&&savedSsh.cloudcliPort==l.cloudcliPort?savedSsh.cloudcliSecret:"";
             // The CloudCLI account belongs to this server only; an untouched switch keeps following the kind.
             l.cloudcliUser=same?savedSsh.cloudcliUser??"":"";
-            l.sshAutoStart=savedSsh!=null&&savedSsh.sshAutoStart.HasValue||AutoChannel.Checked!=AutoChannelDefault?(bool?)AutoChannel.Checked:null;return l;}
+            l.sshAutoStart=same?savedSsh.sshAutoStart:null;
+            l.dualConnection=HasCloud&&AutoChannel.Checked;
+            return l;}
         SshLogin BuildSshBase(string name){
             if(!HasSsh)return null;
             var login=new SshLogin{name=name,host=HostInput.Box.Text.Trim(),port=Int32.Parse(PortInput.Box.Text.Trim()),username=UserInput.Box.Text.Trim(),method=MethodField.Value,keyPath=UsesKey?KeyInput.Box.Text.Trim():""};

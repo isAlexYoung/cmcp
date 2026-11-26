@@ -2,47 +2,95 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace CMCP {
     // Explicit vertical layout avoids FlowLayoutPanel's partial resize paints.
     // Sorting uses short eased translations; preferences change only on drop.
     internal sealed class CardList : EditorViewport {
-        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window,IntPtr update,IntPtr region,uint flags);
+        [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window,IntPtr update,IntPtr region,uint flags);
+        [DllImport("user32.dll")] static extern IntPtr BeginDeferWindowPos(int count);
+        [DllImport("user32.dll")] static extern IntPtr DeferWindowPos(IntPtr batch,IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
+        [DllImport("user32.dll")] static extern bool EndDeferWindowPos(IntPtr batch);
+        const uint MoveWithoutCopy=0x011D; // NOSIZE | NOZORDER | NOREDRAW | NOACTIVATE | NOCOPYBITS
         readonly Timer motion=new Timer{Interval=15};
         readonly Dictionary<Control,int> destinations=new Dictionary<Control,int>();
         List<TargetCard> order, original;
         Dictionary<TargetCard,int> centers;
         TargetCard dragging;
-        int offset;
+        int dragOffset,scrollOffset,contentHeight;
+        internal Action WheelStarted;
         internal event Action<string,string> Sorted;
         internal bool Sorting { get { return dragging!=null; } }
         internal bool Resizing;
         internal bool Moving { get { return motion.Enabled; } }
-        internal CardList(){AutoScroll=true;DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);motion.Tick+=delegate{Advance();};}
-        protected override void OnSizeChanged(EventArgs e){motion.Stop();destinations.Clear();base.OnSizeChanged(e);Invalidate(true);}
+        internal CardList():base(true){motion.Tick+=delegate{Advance();};}
+        internal int MaxScrollOffset { get { return Math.Max(0,contentHeight-ClientSize.Height); } }
+        internal int ScrollOffset { get { return scrollOffset; } set { StopGlide();MoveViewport(value); } }
+        protected override int WheelOffset { get { return scrollOffset; } }
+        protected override int WheelLimit { get { return Sorting?0:MaxScrollOffset; } }
+        protected override bool AnimateWheel { get { return Motion.Enabled; } }
+        protected override bool CoalesceWheelInput { get { return true; } }
+        protected override void BeginWheel(){
+            if(WheelStarted!=null)WheelStarted();
+            foreach(var card in destinations.Keys.OfType<TargetCard>())card.FinishHoverMotion();
+        }
+        protected override void ScrollWheelTo(int value){MoveViewport(value);}
+        protected override void OnSizeChanged(EventArgs e){StopGlide();motion.Stop();base.OnSizeChanged(e);}
+        protected override void OnVisibleChanged(EventArgs e){if(!Visible)StopGlide();base.OnVisibleChanged(e);}
+        internal void Reveal(Control control){
+            if(!Visible||control.IsDisposed)return;
+            var bounds=RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
+            int delta=bounds.Top<0?bounds.Top:Math.Max(0,bounds.Top+Math.Min(bounds.Height,ClientSize.Height)-ClientSize.Height);
+            if(delta!=0)ScrollOffset=scrollOffset+delta;
+        }
+        void MoveViewport(int value){
+            value=Math.Max(0,Math.Min(MaxScrollOffset,value));
+            int delta=value-scrollOffset;if(delta==0)return;
+            scrollOffset=value;
+            var cards=destinations.Keys.Where(card=>card.Parent==this).ToArray();
+            var tops=cards.Select(card=>card.Top-delta).ToArray();
+            // Default WinForms scrolling copies old pixels before its child HWNDs move.
+            // Move the whole list in one batch, then paint the viewport and its children.
+            IntPtr batch=IsHandleCreated&&Visible&&cards.All(card=>card.IsHandleCreated)?BeginDeferWindowPos(cards.Length):IntPtr.Zero;
+            for(int i=0;batch!=IntPtr.Zero&&i<cards.Length;i++)
+                batch=DeferWindowPos(batch,cards[i].Handle,IntPtr.Zero,cards[i].Left,tops[i],0,0,MoveWithoutCopy);
+            if(batch==IntPtr.Zero||!EndDeferWindowPos(batch))
+                for(int i=0;i<cards.Length;i++)cards[i].Top=tops[i];
+            PaintPositions();
+        }
         internal void Place(IList<TargetCard> cards,bool animate){
             if(Sorting)cards=order;
-            int y=0,scroll=AutoScrollPosition.Y,width=Math.Max(420,ClientSize.Width-2);
+            int y=0,width=Math.Max(420,ClientSize.Width-2);
             if(!animate&&motion.Enabled){
                 int expected=0;bool same=cards.Count==destinations.Count;
                 foreach(var card in cards){int goal;same&=destinations.TryGetValue(card,out goal)&&goal==expected&&card.Width==width;expected+=card.Height+Palette.Gap;}
                 if(same)return;
             }
+            bool changed=false;
             destinations.Clear();SuspendLayout();
-            try{foreach(var card in cards){
-                card.Width=width;card.PerformLayout();
-                destinations[card]=y;
-                if(card!=dragging&&(!animate||Resizing||!Visible))card.Location=new Point(0,y+scroll);
-                y+=card.Height+Palette.Gap;
-            }
-            AutoScrollMinSize=new Size(0,y);
+            try{
+                foreach(var card in cards){
+                    if(card.Width!=width){card.Width=width;changed=true;}
+                    destinations[card]=y;
+                    y+=card.Height+Palette.Gap;
+                }
+                contentHeight=y;
+                if(scrollOffset>MaxScrollOffset){StopGlide();scrollOffset=MaxScrollOffset;animate=false;}
+                if(animate&&!Resizing&&Visible)motion.Start();
+                else{
+                    motion.Stop();
+                    foreach(var pair in destinations){
+                        int top=pair.Value-scrollOffset;
+                        if(pair.Key!=dragging&&pair.Key.Top!=top){pair.Key.Top=top;changed=true;}
+                    }
+                }
             }finally{ResumeLayout(false);}
-            if(animate&&!Resizing&&Visible)motion.Start();else motion.Stop();
-            Invalidate(true);
+            if(changed)Invalidate(true);
         }
         void Advance(){
-            bool more=false;int scroll=AutoScrollPosition.Y;
+            bool more=false;int scroll=-scrollOffset;
             SuspendLayout();try{foreach(var pair in destinations.ToArray()){
                 if(pair.Key.IsDisposed||pair.Key.Parent!=this||pair.Key==dragging)continue;
                 int goal=pair.Value+scroll,delta=goal-pair.Key.Top;
@@ -59,14 +107,14 @@ namespace CMCP {
         }
         internal void FinishMotion(){while(motion.Enabled)Advance();}
         internal void BeginSort(TargetCard card,int pointerY){
-            FinishMotion();original=Controls.OfType<TargetCard>().OrderBy(c=>c.Top).ToList();order=original.ToList();
-            centers=original.ToDictionary(c=>c,c=>c.Top-AutoScrollPosition.Y+c.Height/2);
-            dragging=card;offset=pointerY-card.Top;card.BringToFront();
+            StopGlide();FinishMotion();original=Controls.OfType<TargetCard>().OrderBy(c=>c.Top).ToList();order=original.ToList();
+            centers=original.ToDictionary(c=>c,c=>c.Top+scrollOffset+c.Height/2);
+            dragging=card;dragOffset=pointerY-card.Top;card.BringToFront();
         }
         internal void MoveSort(int pointerY){
             if(!Sorting)return;
-            int top=Math.Max(AutoScrollPosition.Y,Math.Min(AutoScrollMinSize.Height-dragging.Height+AutoScrollPosition.Y,pointerY-offset));
-            int center=top-AutoScrollPosition.Y+dragging.Height/2;
+            int top=Math.Max(-scrollOffset,Math.Min(contentHeight-dragging.Height-scrollOffset,pointerY-dragOffset));
+            int center=top+scrollOffset+dragging.Height/2;
             var next=original.Where(c=>c!=dragging).ToList();int index=next.Count(c=>centers[c]<center);
             next.Insert(index,dragging);
             if(!next.SequenceEqual(order)){order=next;Place(order,true);}

@@ -13,6 +13,7 @@ import {createTargetConnections, readTargetControls} from '../target-connections
 import {managedTargetFactory} from '../managed-target.mjs';
 import {requestBuffered} from '../desktop-auth.mjs';
 import {Cloud} from '../cloud-connector.mjs';
+import {configureClaudewebTargets} from '../connection-policy.mjs';
 
 async function until(check, timeout=10000) {
   const end=Date.now()+timeout;
@@ -20,6 +21,76 @@ async function until(check, timeout=10000) {
 }
 function board() { return {data:new Map(), set(name,state,message,revision) { this.data.set(name,{state,message,revision}); }}; }
 function controls(...names) { return new Map(names.map(name=>[name,{name,enabled:true,revision:name+'-1'}])); }
+
+test('a device defaults to one route and a switched route waits for the previous lease to close',async t=>{
+  const direct={name:'cloudcli:device',url:'https://example.test',authMode:'cloudcli'};
+  const ssh={name:'tunnel:cloudcli:device',url:'http://127.0.0.1:3001',authMode:'cloudcli',tunnel:{id:'device',app:'cloudcli'}};
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'cmcp-policy-'));
+  t.after(()=>fs.rmdirSync(directory));
+  const targets=configureClaudewebTargets(directory,[direct,ssh],()=>({sshAutoStart:true}));
+  assert.deepEqual(targets.map(x=>[x.policy.primary,x.policy.dual]),[['url',false],['ssh',false]]);
+  const dual=configureClaudewebTargets(directory,[direct,ssh],()=>({dualConnection:true}));
+  assert.deepEqual(dual.map(x=>x.policy.dual),[true,true]);
+  assert.equal(dual[0].policy.name,dual[1].policy.name);
+  let records=controls(direct.name,ssh.name),release;
+  const stopped=new Promise(resolve=>{release=resolve;});
+  const starts=[];
+  const c=createTargetConnections({readTargets:()=>dual,readControls:()=>records,status:board(),interval:10,
+    create:async target=>{starts.push(target.name);return {stop:()=>target.name===direct.name?stopped:null};}});
+  t.after(async()=>{release();await c.close();});
+  await until(()=>starts.length===1);
+  assert.deepEqual(starts,[direct.name]);
+  records=controls(ssh.name);
+  c.tick();
+  await delay(35);
+  assert.deepEqual(starts,[direct.name]);
+  release();
+  await until(()=>starts.length===2);
+  assert.deepEqual(starts,[direct.name,ssh.name]);
+});
+
+test('ClaudeWeb starts only its selected route by default and stops both routes in dual mode',async t=>{
+  const server=http.createServer((_req,res)=>{
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({protocol:'claudeweb-cmcp',version:1,capabilities:{webMcp:1}}));
+  });
+  server.listen(0,'127.0.0.1');
+  await once(server,'listening');
+  t.after(()=>{server.closeAllConnections();server.close();});
+  const url='http://127.0.0.1:'+server.address().port;
+  const direct={name:'cloudcli:device',url,authMode:'cloudcli'};
+  const tunnel={...direct,name:'tunnel:cloudcli:device',tunnel:{id:'device',app:'cloudcli'}};
+  const calls=[],ended=[];
+  let proxyDown=false,tunnelDown=false;
+  const factory=managedTargetFactory({
+    proxyFor:async()=>{if(proxyDown)throw Error('Proxy unavailable');return '';}, machine:'local',catalog:{list:()=>({tools:[]})},log(){},passwordFor(){},
+    openTunnel:async()=>{if(tunnelDown)throw Error('SSH down');return {cloudcli:url,close:async()=>{},getIssue:()=>null};},
+    sshOptions:()=>({login:{}}),
+    startSshBridge:({signal,status})=>new Promise(resolve=>{
+      calls.push('ssh');status(tunnelDown?'failed':'ready');
+      signal.addEventListener('abort',()=>{ended.push('ssh');resolve();},{once:true});
+    }),
+    startWebBridge:({status})=>{
+      calls.push('url');status(tunnelDown?'connected':'config-error');
+      return {stop:async()=>{ended.push('url');}};
+    },
+  });
+  for (const [entry,dual,expected,brokenProxy,brokenTunnel] of [[direct,false,['url']],[tunnel,false,['ssh']],[direct,true,['ssh','url']],[tunnel,true,['ssh','url']],
+    [direct,true,['ssh'],true],[tunnel,true,['ssh'],true],[tunnel,true,['ssh','url'],false,true]]) {
+    calls.length=0;ended.length=0;
+    const [route]=configureClaudewebTargets(os.tmpdir(),entry===direct?[entry]:[entry,direct],()=>({dualConnection:dual}));
+    proxyDown=Boolean(brokenProxy);
+    tunnelDown=Boolean(brokenTunnel);
+    const controller=new AbortController(),status=board();
+    const value=await factory(route,{signal:controller.signal,current:()=>!controller.signal.aborted,status});
+    await until(()=>calls.length===expected.length);
+    assert.deepEqual([...calls].sort(),expected);
+    if(expected.includes('ssh')) assert.equal(status.data.get(route.name).state,'connected');
+    controller.abort();
+    await value.stop();
+    assert.deepEqual([...ended].sort(),expected);
+  }
+});
 
 test('proxy changes reconnect enabled web targets while preserving SSH tunnels and disabled targets',async t=>{
   let network='auto';const starts=[],stops=[];

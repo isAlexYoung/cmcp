@@ -1,8 +1,8 @@
 // "初始化／修复 ClaudeWeb 连接" for standalone ClaudeWeb or a CloudCLI installed without WebDesktop
 // (Ubuntu/Debian only). Over the device's saved SSH it checks the system, finds ClaudeWeb (the
 // claudeweb service) or CloudCLI, its account and port, the
-// Claude CLI and the CMCP MCP entry, then lists what it would add and asks once. It adds only the
-// missing Claude CLI and the MCP entry (written by the SSH background channel); it never touches
+// Claude CLI and the CMCP MCP entry, then lists what it would change and asks once. It can install
+// the missing Claude CLI and save the connection details for the next connection. It never touches
 // CloudCLI itself, its service, nginx, Caddy or firewalls. A sudo password is used for this run
 // only and travels through stdin, never through arguments or the environment.
 import fs from 'node:fs';
@@ -10,9 +10,10 @@ import path from 'node:path';
 import readline from 'node:readline';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-import {sshArguments,sshConnectorName,sshExitCode} from './ssh-mcp.mjs';
-import {workerPaths,readSshLogin,ensureSshWorker} from './ssh-terminal.mjs';
+import {sshArguments,sshExitCode} from './ssh-mcp.mjs';
+import {readSshLogin} from './ssh-terminal.mjs';
 import {recordCloudcliKind,SELF_HOSTED,CLAUDEWEB} from './cloudcli.mjs';
+import {connectorPolicy} from './connection-policy.mjs';
 import {spawnSshWithRecovery,HOST_KEY_RECOVERY_ERROR} from './ssh-host-key.mjs';
 
 const quote=value=>"'"+String(value).replace(/'/g,"'\\''")+"'";
@@ -76,19 +77,18 @@ export function planSetup(report,{login,connector,hasDirectUrl=false,directUrl='
     install={account:user,mode,node:chosen.node||null};needsPassword=mode==='root'&&report.privilege==='sudo-password';
     steps.push(`为 ${user} 安装 Claude CLI（npm install -g @anthropic-ai/claude-code${mode==='root'?'，以 root 身份':''}）`);
   }
-  if(!report.mcp?.present)steps.push(`在 ${user} 的 ~/.claude.json 中加入 CMCP 的 MCP 条目 ${connector}（由 SSH 后台通道写入，原文件先备份）`);
-  const save={cloudcliUser:runAs,cloudcliPort:port,cloudcliTunnel:hasDirectUrl?login.cloudcliTunnel===true:true,sshAutoStart:true};
+  if(!report.mcp?.present)steps.push(`下次连接时在 ${user} 的 ~/.claude.json 中注册 CMCP 的本机连接器（原文件先备份）`);
+  const save={cloudcliUser:runAs,cloudcliPort:port,cloudcliTunnel:hasDirectUrl?login.cloudcliTunnel===true:true,sshAutoStart:false};
   if(port===(login.webPort??3000)){if(login.webTunnel)return {...stop(`ClaudeWeb 的端口 ${port} 与这台设备的 WebDesktop 隧道端口相同，请先在编辑页调整。未做任何修改。`),summary};save.webPort=port===3000?3002:3000;}
   if(port!==(login.cloudcliPort??3001))steps.push(`记录 ClaudeWeb 端口 ${port}`);
   if(!hasDirectUrl&&login.cloudcliTunnel!==true)steps.push(`启用 ClaudeWeb 的 SSH 隧道（VPS 本机端口 ${port}）`);
-  if(login.sshAutoStart!==true)steps.push('CMCP 启动时自动连接这台设备的本机工具通道');
   return {summary,steps,save,install,needsPassword,account:user,port,url:hasDirectUrl?directUrl:'',kind:standalone?CLAUDEWEB:SELF_HOSTED,
     clean:!install&&report.mcp?.present===true};
 }
 
 const installFailure={SUDO:'sudo 密码不正确，或这个用户不能使用 sudo。未完成安装。',NPM:'没有找到 npm，未完成安装。',NPM_FAILED:'npm 安装 Claude CLI 失败，请在 VPS 上查看 npm 的输出。',TIMEOUT:'安装超过 10 分钟仍未完成，未确认结果。',ACCOUNT:'找不到 ClaudeWeb 的运行用户。',START:'无法在 VPS 上启动安装命令。'};
-export async function runSetup({directory,id,login=readSshLogin(directory,id),owner,ssh='ssh',env=process.env,directUrl='',confirm,save=async()=>{},progress=()=>{},remote=runRemote,ensure=ensureSshWorker}){
-  const connector=sshConnectorName(workerPaths(directory,id).key),options={ssh,env};
+export async function runSetup({directory,id,login=readSshLogin(directory,id),ssh='ssh',env=process.env,directUrl='',confirm,save=async()=>{},progress=()=>{},remote=runRemote}){
+  const connector=connectorPolicy(directory,id,'ssh',false).name,options={ssh,env};
   progress('正在通过 SSH 检查 VPS（只读）…');
   const plan=planSetup(await remote(login,{action:'inspect',connector,port:login.cloudcliPort??null},options),{login,connector,hasDirectUrl:!!directUrl,directUrl});
   if(plan.blocker)return {ok:false,message:plan.blocker,summary:plan.summary};
@@ -104,14 +104,11 @@ export async function runSetup({directory,id,login=readSshLogin(directory,id),ow
       if(!result?.ok)return {ok:false,message:installFailure[result?.code]||'Claude CLI 未能安装。',summary:plan.summary};
     }
   }finally{password=undefined;answer.password=undefined;}
-  progress('正在启动本机工具的 SSH 后台通道…');
-  try{await ensure({directory,id,owner,ssh,env,progress});}
-  catch(error){return {ok:false,message:'SSH 后台通道未能就绪：'+error.message,summary:plan.summary};}
   progress('正在确认 VPS 上的结果…');
   const after=await remote(login,{action:'inspect',connector,port:plan.port},options);
-  const missing=[!after.claude?.found&&'Claude CLI',!after.mcp?.present&&'CMCP 的 MCP 条目'].filter(Boolean);
+  const missing=[!after.claude?.found&&'Claude CLI'].filter(Boolean);
   if(missing.length)return {ok:false,message:'仍缺少：'+missing.join('、')+'。可稍后再运行一次初始化／修复。',summary:plan.summary};
-  return {ok:true,message:`ClaudeWeb 连接已就绪：${plan.account} 的 Claude 可以使用本机工具。新加入的 MCP 条目要在 ClaudeWeb 里开始新的会话后生效。`,url:plan.url,summary:plan.summary};
+  return {ok:true,message:`已保存 ${plan.account} 的连接配置。连接设备后，CMCP 会按所选方式启动本机工具。请在 ClaudeWeb 中开始新会话核对。`,url:plan.url,summary:plan.summary};
 }
 
 // Windows: the manager window runs this and answers on stdin. Each line out is one JSON event:

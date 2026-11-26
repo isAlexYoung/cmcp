@@ -11,7 +11,7 @@ namespace CMCP {
         [DllImport("user32.dll")]static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wParam,IntPtr lParam);
         // Options live inside their rounded groups.
         static ModernButton Option(Control sheet,string text){return sheet.Controls.OfType<RoundedSheet>().SelectMany(group=>group.Controls.OfType<ModernButton>()).Single(b=>b.Text==text);}
-        static void NativeWheel(Control target,int delta){var point=target.PointToScreen(new Point(10,10));SendMessage(target.Handle,0x20a,new IntPtr(delta<<16),new IntPtr((point.Y<<16)|(point.X&0xffff)));Application.DoEvents();}
+        internal static void NativeWheel(Control target,int delta,bool pump=true){var point=target.PointToScreen(new Point(10,10));SendMessage(target.Handle,0x20a,new IntPtr(delta<<16),new IntPtr((point.Y<<16)|(point.X&0xffff)));if(pump)Application.DoEvents();}
         internal static void Run(string directory,Action<bool,string> check){
             NetworkTests(directory,check);
             ToggleScrollTests(check);
@@ -56,8 +56,10 @@ namespace CMCP {
                 {
                     // A real wheel notch glides: it moves at once but only part way, keeps animating, then settles on the whole notch.
                     var probe=form.Cards.Values.First();form.ScrollOffset=0;Application.DoEvents();
-                    int start=form.ScrollOffset,max=form.list.DisplayRectangle.Height-form.list.ClientSize.Height,goal=Math.Min(start+120,max);
-                    NativeWheel(probe,-120);int first=form.ScrollOffset;bool gliding=form.list.Gliding;
+                    int start=form.ScrollOffset,goal=Math.Min(start+120,form.list.MaxScrollOffset);
+                    bool forced=Motion.Forced;Motion.Forced=true;
+                    try{NativeWheel(probe,-120,false);}finally{Motion.Forced=forced;}
+                    int first=form.ScrollOffset;bool gliding=form.list.Gliding;
                     var clock=System.Diagnostics.Stopwatch.StartNew();while(form.list.Gliding&&clock.ElapsedMilliseconds<2000){Application.DoEvents();System.Threading.Thread.Sleep(5);}
                     int settled=form.ScrollOffset;
                     check(goal>start&&gliding&&first>start&&first<goal&&settled==goal&&!form.list.Gliding&&!form.list.NativeBarsVisible,
