@@ -15,6 +15,7 @@ import signal
 import socket
 import socketserver
 import stat
+import struct
 import sys
 import termios
 import threading
@@ -74,14 +75,77 @@ class Relay:
             sys.stdout.buffer.write(PREFIX + base64.b64encode(data) + b"\n")
             sys.stdout.buffer.flush()
 
-    def replace_existing(self, machine):
-        with socket.socket(socket.AF_UNIX) as probe:
-            probe.settimeout(2)
-            probe.connect(str(self.path))
-            probe.sendall((json.dumps({"id": 1, "op": "replace", "machine": machine}) + "\n").encode())
-            reply = json.loads(probe.recv(4096))
-            if not reply.get("ok"):
-                raise RuntimeError("云电脑已有直连服务，请重新连接")
+    def relay_request(self, probe, op, **fields):
+        probe.sendall((json.dumps({"id": 1, "op": op, **fields}) + "\n").encode())
+        with probe.makefile("rb") as response:
+            return json.loads(response.readline(4096))
+
+    def wait_for_lock(self, seconds):
+        deadline = time.monotonic() + seconds
+        while not self.stop.is_set():
+            try:
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.1)
+        return False
+
+    def retire_stuck_url_relay(self, machine, legacy_machine):
+        # Only a stable Linux process handle, the private socket's peer identity and
+        # the kernel's record for this precise lock may authorize retiring an old relay.
+        if self.stop.is_set() or not (isinstance(legacy_machine, str) and legacy_machine and hasattr(socket, "SO_PEERCRED")
+                and hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")):
+            return False
+        pidfd = None
+        try:
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(1)
+                probe.connect(str(self.path))
+                pid, uid, _ = struct.unpack("iII", probe.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                if uid != os.geteuid() or pid <= 1 or pid == os.getpid():
+                    return False
+                pidfd = os.pidfd_open(pid)
+                reply = self.relay_request(probe, "status")
+                if not reply.get("ok") or (reply.get("pc") or {}).get("machine") not in (machine, legacy_machine):
+                    return False
+            lock = os.fstat(self.lock.fileno())
+            for sig, wait in ((signal.SIGTERM, 1), (signal.SIGKILL, 4)):
+                with open("/proc/locks", encoding="ascii") as locks:
+                    owner = any(
+                        parts[1:5] == ["FLOCK", "ADVISORY", "WRITE", str(pid)]
+                        and tuple(int(value, base) for value, base in zip(parts[5].split(":"), (16, 16, 10)))
+                        == (os.major(lock.st_dev), os.minor(lock.st_dev), lock.st_ino)
+                        for parts in (line.split() for line in locks) if len(parts) >= 6
+                    )
+                if not owner or self.stop.is_set():
+                    break
+                signal.pidfd_send_signal(pidfd, sig)
+                if self.wait_for_lock(wait):
+                    return True
+        except (OSError, ValueError, AttributeError):
+            pass
+        finally:
+            if pidfd is not None:
+                os.close(pidfd)
+        return self.wait_for_lock(0)
+
+    def replace_existing(self, machine, legacy_machine):
+        if self.stop.is_set():
+            return
+        try:
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(2)
+                probe.connect(str(self.path))
+                if not self.relay_request(probe, "replace", machine=machine).get("ok"):
+                    raise RuntimeError("云电脑已有直连服务，请重新连接")
+        except (socket.timeout, TimeoutError, FileNotFoundError, ConnectionRefusedError, json.JSONDecodeError):
+            wait = 0.5
+        else:
+            wait = 4
+        if not self.wait_for_lock(wait) and not self.retire_stuck_url_relay(machine, legacy_machine) and not self.stop.is_set():
+            raise RuntimeError("旧的兼容连接未能结束，请稍后重试")
 
     def start(self, hello):
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -91,18 +155,10 @@ class Relay:
         if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid():os.close(fd);raise RuntimeError('Unsafe relay lock')
         self.lock=os.fdopen(fd,'a+')
         os.fchmod(self.lock.fileno(),0o660 if CC_SHARED else 0o600)
-        try:
-            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            self.replace_existing(str(hello.get("machine", "")))
-            for attempt in range(40):
-                try:
-                    fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    time.sleep(0.1)
-            else:
-                raise RuntimeError("旧的兼容连接未能结束，请稍后重试")
+        if not self.wait_for_lock(0):
+            self.replace_existing(str(hello.get("machine", "")), hello.get("legacyMachine"))
+            if self.stop.is_set():
+                return
         if self.path.exists() or self.path.is_symlink():
             if self.path.is_symlink() or not stat.S_ISSOCK(self.path.stat().st_mode):
                 raise RuntimeError("云电脑的连接套接字异常")
@@ -142,6 +198,12 @@ class Relay:
                             self.wfile.flush()
                     reply = relay.exchange(request, interim)
                     self.wfile.write((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
+                    if request.get("op") == "replace":
+                        reason = "reconnected" if request.get("machine") == relay.pc["machine"] else "replaced"
+                        try:
+                            relay.emit({"t": "close", "code": 4002, "reason": reason})
+                        finally:
+                            relay.stop.set()
                 except (OSError, ValueError):
                     pass
 
@@ -195,9 +257,6 @@ class Relay:
         if op == "status":
             return dict(reply, connected=not self.stop.is_set(), pc=self.pc, recovery=self.recovery)
         if op == "replace":
-            reason = "reconnected" if request.get("machine") == self.pc["machine"] else "replaced"
-            self.emit({"t": "close", "code": 4002, "reason": reason})
-            self.stop.set()
             return reply
         if op not in ("call", "result"):
             return dict(reply, ok=False, code="error", error="unknown op")

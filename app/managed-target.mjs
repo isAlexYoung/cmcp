@@ -36,7 +36,7 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
     const preparationCache={};
     const policy=t.policy, device=cloudcliDevice(t.name);
     const sshController=new AbortController();
-    let sshState, webState, sshTask, tunnelFailed=false;
+    let sshState, webState, sshTask, pageDown, tunnelFailed=false;
     const confirmStandaloneOverSsh=async()=>{
       if (t.knownStandalone) return true;
       if (policy?.primary!=='url' || !openTunnel || !device) return false;
@@ -57,8 +57,12 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
       const parts=[];
       if (policy.primary==='url'||policy.dual) parts.push('网址 MCP：'+(webLabel[webState]||'不可用'));
       if (policy.primary==='ssh'||policy.dual) parts.push('SSH MCP：'+(sshLabel[sshState]||'不可用'));
-      if (tunnelFailed) parts.push('网页 SSH 隧道不可用');
-      status.set(t.name,ready?'connected':pending?'connecting':'config-error',parts.join(' · '));
+      const tunnelIssue=record.tunnel?.getIssue();
+      if (tunnelFailed || (t.tunnel && (pageDown || tunnelIssue))) parts.push('网页 SSH 隧道不可用');
+      else if (pageDown) parts.push('ClaudeWeb 网页不可用');
+      const state=tunnelIssue?'error':pageDown?'recovering':pageDown===undefined?'connecting':
+        ready?'connected':sshState==='recovering'?'recovering':pending?'connecting':'config-error';
+      status.set(t.name,state,parts.join(' · '));
     };
     const startSsh=()=>{
       if (sshTask || !policy || !t.sshAvailable || !sshOptions) return;
@@ -128,7 +132,8 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
         const openPage=async(kind,webMcp=false)=>{
           const claudeweb=kind===CLAUDEWEB,ready=claudeweb?CLAUDEWEB_READY:SELF_HOSTED_READY,down=claudeweb?CLAUDEWEB_DOWN:SELF_HOSTED_DOWN;
           if(device)try{onCloudcliKind(device,kind);}catch{}
-          let up=true,issue=null,bridgeState=null;
+          let issue=null,bridgeState=null,probing=false;
+          pageDown=directUnavailable;
           const reportChannels=policy&&(policy.primary==='ssh'||webMcp||policy.dual&&claudeweb);
           if (policy?.primary==='ssh' || (policy?.dual && claudeweb)) startSsh();
           const useWeb=!directUnavailable&&claudeweb&&webMcp&&(!policy||policy.primary==='url'||policy.dual);
@@ -154,21 +159,29 @@ export function managedTargetFactory({proxyFor, machine, version, forward, catal
             let password;try{password=await passwordFor(t.name,signal);}catch{}
             if(typeof password!=='string'||!password){issue=CLAUDEWEB_PASSWORD;}
             else{
-              try{const result=await claudewebCode({url:t.url,agent:record.agent,password,signal});issue=result.issue||null;if(result.code){publish(t.name,'connected',ready);return result.code;}}
+              try{
+                const result=await claudewebCode({url:t.url,agent:record.agent,password,signal});issue=result.issue||null;
+                if(result.code){if(!reportChannels)publish(t.name,'connected',ready);return result.code;}
+              }
               catch{issue=null;}
               finally{password=undefined;}
             }
-            if(issue){log(`[${t.name}] claudeweb-sign-in ${issue===CLAUDEWEB_LOCKED?'locked':'refused'}`);if(current()&&!signal.aborted)publish(t.name,'connected',issue);}
+            if(issue){
+              log(`[${t.name}] claudeweb-sign-in ${issue===CLAUDEWEB_LOCKED?'locked':'refused'}`);
+              if(!reportChannels&&current()&&!signal.aborted)publish(t.name,'connected',issue);
+            }
             return null;
           }:undefined;
           record.selfHosted=true;record.claudeweb=claudeweb;record.gateway=await createLaunchPage({url:t.url,signIn});
           if(!current()){await record.gateway.close();throw Error('Target stopped');}
           if(reportChannels)publishChannels();else if(!webMcp)publish(t.name,'connected',ready);
           const probe=setInterval(async()=>{
-            if(!current()||signal.aborted||directUnavailable)return;
-            try{const r=await requestBuffered(new URL('/',t.url),{agent:record.agent,signal,timeout:10000,limit:262144});up=r.status<500;}catch{up=false;}
+            if(!current()||signal.aborted||directUnavailable||probing)return;
+            probing=true;
+            try{const r=await requestBuffered(new URL('/',t.url),{agent:record.agent,signal,timeout:10000,limit:262144});pageDown=r.status>=500;}catch{pageDown=true;}
+            finally{probing=false;}
             if(reportChannels)publishChannels();
-            else if(current()&&!signal.aborted)publish(t.name,up?(bridgeState?.state||'connected'):'offline',up?(bridgeState?.message||issue||ready):down);
+            else if(current()&&!signal.aborted)publish(t.name,pageDown?'offline':bridgeState?.state||'connected',pageDown?down:bridgeState?.message||issue||ready);
           },selfHostedProbeMs);probe.unref?.();
           signal.addEventListener('abort',()=>clearInterval(probe),{once:true});
           return record;

@@ -90,7 +90,7 @@ export class SshPipe extends EventEmitter {
   terminate(){this.close();}
 }
 
-export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,device=null,signal,status=()=>{},transport,policy,retryDelay, heartbeatMs=5000, silenceMs=45000}) {
+export async function startSshMcp({key,legacyMachine,login,ssh,env,forward,catalog,changes,device=null,signal,status=()=>{},transport,policy,retryDelay, heartbeatMs=5000, silenceMs=45000}) {
   const recovery=new RequestRecovery({limit:16384});
   let active=null,attempt=0,closed=false;
   const close=()=>{
@@ -111,7 +111,7 @@ export async function startSshMcp({key,login,ssh,env,forward,catalog,changes,dev
         const finish=()=>{clearInterval(heartbeat);unsubscribe?.();for(const waiting of questions.values())waiting.reject(Error('Connection closed'));questions.clear();resolve(error);};
         link.on('error',e=>{error=e;});
         link.once('close',code=>{if(code===4002)error=Object.assign(Error('SSH connection replaced'),{code:'SSH_REPLACED'});finish();});
-        link.once('open',()=>link.send(JSON.stringify({t:'hello',machine:key,name:os.hostname(),version:'ssh-1',recovery:{protocol:1,epoch:recovery.epoch}})));
+        link.once('open',()=>link.send(JSON.stringify({t:'hello',machine:key,...(legacyMachine?{legacyMachine}:{}),name:os.hostname(),version:'ssh-1',recovery:{protocol:1,epoch:recovery.epoch}})));
         link.on('pong',()=>{lastPong=Date.now();});
         link.on('message',async data=>{
           let message;try{message=JSON.parse(data);}catch{return;}

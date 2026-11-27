@@ -120,7 +120,21 @@ async function refresh(){
   try{const next=await api('state');if(request===refreshRequest)applyState(next);}
   catch(error){if(token&&request===refreshRequest)toast(error.message);}
 }
-function progress(target){if(data.preferences.language!=='en'&&target.message)return target.message;return t(target.state==='connected'?'已连接，可以使用本机工具。':target.state==='waiting-login'?'请在打开的网页桌面中完成登录。':!target.enabled?'已停止连接。':'正在等待连接恢复。');}
+const channelText={
+  '网址 MCP':'URL MCP','SSH MCP':'SSH MCP','已连接':'Connected','正在恢复':'Reconnecting',
+  '连接中':'Connecting','连接异常':'Connection failed','不可用':'Unavailable',
+  '网页 SSH 隧道不可用':'SSH web tunnel unavailable','ClaudeWeb 网页不可用':'ClaudeWeb page unavailable',
+};
+function progress(target){
+  if(target.message){
+    if(data.preferences.language!=='en')return target.message;
+    const parts=target.message.split(' · ').map(part=>part.split('：'));
+    if(parts.every(part=>part.length<=2&&part.every(value=>Object.hasOwn(channelText,value)))){
+      return parts.map(part=>part.map(value=>channelText[value]).join(': ')).join(' · ');
+    }
+  }
+  return t(target.state==='connected'?'已连接，可以使用本机工具。':target.state==='waiting-login'?'请在打开的网页桌面中完成登录。':!target.enabled?'已停止连接。':'正在等待连接恢复。');
+}
 async function connect(target){target=connectionFor(target);if(!target.url)return toast(target.route==='ssh'?'还没有配置此打开对象的 SSH 隧道，请编辑设备后再连接。':usesCloudcli(target)?'还没有填写 ClaudeWeb 地址，请编辑设备后再连接。':'还没有填写网页桌面地址，请编辑设备后再连接。');if(busy.has(target.id)&&!target.enabled)return;busy.add(target.id);selected=target.id;render();const opening=[...root.querySelectorAll('.card')].find(node=>node.dataset.id===target.id);if(opening&&!expanded.has(target.id)){void opening.offsetHeight;setExpanded(opening,true);}try{if(target.enabled){await api('targets/stop',{id:target.id});}else{await api('targets/start',{id:target.id});await refresh();const value=await api('targets/open',{id:target.id});if(!value.opened)await native('open',{url:value.url});}}finally{busy.delete(target.id);await refresh();}}
 function clientState(target,running){if(!target.enabled)return '已断开';if(['connected','configuring','config-error'].includes(target.state))return running?'已连接':'未运行';if(['recovering','unstable','connecting','offline','waiting-login'].includes(target.state))return running?'正在重连':'未运行';return '已断开';}
 function sshStateName(value){return ({ready:'已连接',failed:'连接异常',recovering:'正在恢复',connecting:'连接中'})[value]||'已停止';}

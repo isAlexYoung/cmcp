@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("CMCP")]
 [assembly: System.Reflection.AssemblyProduct("CMCP")]
-[assembly: System.Reflection.AssemblyVersion("4.25.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("4.25.0.0")]
+[assembly: System.Reflection.AssemblyVersion("4.25.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("4.25.1.0")]
 
 namespace CMCP {
     internal sealed class Target {
@@ -92,8 +92,8 @@ namespace CMCP {
         internal const string ClaudeWebReady="ClaudeWeb 独立版：网页可以打开。网址不支持 MCP 时，请选择 SSH。",ClaudeWebDown="ClaudeWeb 独立版暂时无法访问，正在重试。",
             ClaudeWebPassword="ClaudeWeb 独立版：保存的密码无法自动登录，请在网页输入密码，或在 CMCP 中修改密码。",ClaudeWebLocked="ClaudeWeb 独立版：密码错误次数过多，登录暂时受限，请稍后重试。";
         internal static string PreparationDetail(string state, string message) {
-            const string channels=@"^(?:(?:网址|SSH) MCP：(已连接|正在恢复|连接中|连接异常|不可用))(?: · SSH MCP：(已连接|正在恢复|连接中|连接异常|不可用))?(?: · 网页 SSH 隧道不可用)?$";
-            if((state=="connected"||state=="connecting"||state=="config-error")&&message!=null&&System.Text.RegularExpressions.Regex.IsMatch(message,channels))return message;
+            const string channels=@"^(?:(?:网址|SSH) MCP：(已连接|正在恢复|连接中|连接异常|不可用))(?: · SSH MCP：(已连接|正在恢复|连接中|连接异常|不可用))?(?: · (?:网页 SSH 隧道不可用|ClaudeWeb 网页不可用))?$";
+            if((state=="connected"||state=="connecting"||state=="recovering"||state=="config-error"||state=="error")&&message!=null&&System.Text.RegularExpressions.Regex.IsMatch(message,channels))return message;
             if(state=="error"&&new[]{"SSH 认证失败，请检查密码或密钥。","SSH 主机指纹校验失败，请核对服务器指纹。","SSH 主机指纹自动恢复失败，请检查服务器及本机 known_hosts 文件权限。","无法启动 SSH 客户端，请检查系统的 OpenSSH 安装。"}.Contains(message))return message;
             if(state=="offline"&&message=="ClaudeWeb 尚未提供 CMCP 登录接口，请升级 VPS 上的 WebDesktop 或 ClaudeWeb。")return message;
             // A self-hosted CloudCLI or standalone ClaudeWeb (app/managed-target.mjs): fixed texts only.

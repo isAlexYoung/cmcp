@@ -73,7 +73,7 @@ export function startClaudewebMcp({url,agent,passwordFor,machine,catalog,forward
     token=session.token;
     authenticated(true);
     const key=policy?.key || machine;
-    await startSshMcp({key,catalog:catalog.list(device),changes:catalog,device,forward,signal:controller.signal,status:ready,
+    await startSshMcp({key,legacyMachine:machine,catalog:catalog.list(device),changes:catalog,device,forward,signal:controller.signal,status:ready,
       transport:()=>new WebPipe({url,agent,token,payload:{...bootstrapPayload(key,catalog.list(device),process.platform,policy),name:platformConnector()},signal:controller.signal})});
   })().catch(()=>{authenticated(false);if(!controller.signal.aborted)ready('failed');});
   const stop=()=>stopping??=(async()=>{

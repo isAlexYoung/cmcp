@@ -85,7 +85,7 @@ test('ClaudeWeb starts only its selected route by default and stops both routes 
     const value=await factory(route,{signal:controller.signal,current:()=>!controller.signal.aborted,status});
     await until(()=>calls.length===expected.length);
     assert.deepEqual([...calls].sort(),expected);
-    if(expected.includes('ssh')) assert.equal(status.data.get(route.name).state,'connected');
+    if(expected.includes('ssh')) assert.equal(status.data.get(route.name).state,brokenProxy&&entry===direct?'recovering':'connected');
     controller.abort();
     await value.stop();
     assert.deepEqual([...ended].sort(),expected);
