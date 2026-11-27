@@ -70,7 +70,7 @@ def drive(prepared_file):
 
 
 def main(package):
-    with tempfile.TemporaryDirectory(prefix='cmcp-gtk-update-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='cmcp GTK update ') as temporary:
         state = u.private(Path(temporary))
         folder = u.private(state / ('update-' + str(uuid.uuid4())))
         with zipfile.ZipFile(package) as original:

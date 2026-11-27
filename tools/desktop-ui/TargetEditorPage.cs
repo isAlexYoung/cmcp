@@ -196,7 +196,7 @@ namespace CMCP {
             TargetName=target.Name;IconData=preference.icon;Dock=DockStyle.Fill;Font=UiFont.Points(11F);colors=palette;
             initialUrl=target.Url;storedAutoPassword=target.AutoLogin&&target.HasSavedPassword;savedSsh=login;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw|ControlStyles.AllPaintingInWmPaint,true);
-            side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);pageTitle.Font=new Font(UiFont.Points(13F),FontStyle.Bold);
+            side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);pageTitle.Font=UiFont.Points(13F,FontStyle.Bold);
             NameInput.Box.MaxLength=80;NameInput.Box.Text=preference.label;
             NoteInput.Box.Multiline=true;NoteInput.Box.MaxLength=200;NoteInput.Box.Text=preference.note??"";
             UrlInput.Box.MaxLength=300;UrlInput.Box.Text=target.Url;UrlInput.Cue="https://";

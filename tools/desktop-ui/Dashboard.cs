@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -83,12 +84,12 @@ namespace CMCP {
             Options=demo?new AppSettings():AppSettings.Load(isolated?stateDirectory:PortableState.PreferencesPath,!isolated&&StartupRegistration.Enabled());L.Set(Options.language);Preferences.dark=Options.IsDark(Preferences.dark);if(Options.theme.Length==0)Options.theme=Preferences.dark?"dark":"light";
             colors=Palette.Create(Preferences.dark);Text="CMCP";
             Icon=System.Drawing.Icon.ExtractAssociatedIcon(Program.ExecutablePath);
-            Font=new Font("Microsoft YaHei UI",11F);AutoScaleMode=AutoScaleMode.Dpi;
+            Font=UiFont.Points(11F);AutoScaleMode=AutoScaleMode.None;
             DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw,true);
             ClientSize=new Size(1100,720);MinimumSize=new Size(660,500);StartPosition=FormStartPosition.CenterScreen;
             content.Dock=DockStyle.Fill;content.Padding=new Padding(28,10,28,0);
             var heading = new Panel { Dock=DockStyle.Top, Height=66 };
-            count.Bounds=new Rectangle(0,2,400,28);count.Font=new Font(Font.FontFamily,12F,FontStyle.Bold);heading.Controls.Add(count);
+            count.Bounds=new Rectangle(0,2,400,28);count.Font=UiFont.Points(12F,FontStyle.Bold);heading.Controls.Add(count);
             status.Bounds=new Rectangle(0,34,850,24);status.Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top;heading.Controls.Add(status);
             list.Dock=DockStyle.Fill;list.WheelStarted=FinishTransition;list.Sorted+=MoveCard;
             empty.AutoSize=false;empty.Size=new Size(600,150);empty.TextAlign=ContentAlignment.MiddleCenter;empty.Text="还没有设备\r\n点击右上角「添加设备」，保存后即可连接。";empty.Margin=new Padding(0,30,0,0);
@@ -137,16 +138,6 @@ namespace CMCP {
             Invalidate(true);
         }
         protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);if(colors!=null)NativeFrame.Apply(Handle,colors);}
-        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
-        float fontScale=1;
-        protected override void OnLoad(EventArgs e){try{FollowMonitor((int)GetDpiForWindow(Handle));}catch(EntryPointNotFoundException){}base.OnLoad(e);}
-        internal void FollowMonitor(int dpi){
-            float next=UiFont.ScaleFor(dpi);UiFont.Scale=next;
-            if(Math.Abs(next-fontScale)<0.001f)return;
-            float factor=next/fontScale;fontScale=next;
-            SuspendLayout();try{UiFont.Rescale(this,factor);}finally{ResumeLayout(false);}
-            Arrange();PerformLayout();Invalidate(true);
-        }
         protected override bool ProcessCmdKey(ref Message m,Keys keys){
             if(keys==Keys.Tab||keys==(Keys.Shift|Keys.Tab))foreach(var card in Cards.Values)card.BeginKeyboardNavigation();
             return base.ProcessCmdKey(ref m,keys);
@@ -269,7 +260,30 @@ namespace CMCP {
         internal bool LayoutHeld;
         void HoldLayout(){if(!LayoutHeld&&IsIconic(Handle)){LayoutHeld=true;SuspendLayout();}}
         void ReleaseLayout(){if(LayoutHeld&&!IsIconic(Handle)){LayoutHeld=false;ResumeLayout(true);RedrawWindow(Handle,IntPtr.Zero,IntPtr.Zero,0x185);}}
-        protected override void WndProc(ref Message message){if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}if(ManagerSignal.ExitMessage!=0&&message.Msg==ManagerSignal.ExitMessage){ExitApplication();return;}if(message.Msg==0x2e0)FollowMonitor((int)((long)message.WParam&0xffff));if(message.Msg==0x47)HoldLayout();base.WndProc(ref message);if(message.Msg==0x47)ReleaseLayout();if(message.Msg==0x1a){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}}
+        protected override void WndProc(ref Message message){
+            if(ManagerSignal.Message!=0&&message.Msg==ManagerSignal.Message){RestoreManager();return;}
+            if(ManagerSignal.ExitMessage!=0&&message.Msg==ManagerSignal.ExitMessage){ExitApplication();return;}
+            const int dpiChanged=0x02e0, getDpiScaledSize=0x02e4, windowPosChanged=0x0047, settingChange=0x001a;
+            if(message.Msg==getDpiScaledSize&&WindowState==FormWindowState.Normal&&message.LParam!=IntPtr.Zero){
+                // The in/out SIZE already holds the pending size before DPI scaling.
+                // Keep it so Windows can compute the correct drag position for this size.
+                message.Result=new IntPtr(1);
+                return;
+            }
+            if(message.Msg==dpiChanged&&WindowState==FormWindowState.Normal&&message.LParam!=IntPtr.Zero){
+                FinishTransition();
+                SetBounds(Marshal.ReadInt32(message.LParam),Marshal.ReadInt32(message.LParam,4),Width,Height);
+                PerformLayout();
+                Arrange();
+                Invalidate(true);
+                message.Result=IntPtr.Zero;
+                return;
+            }
+            if(message.Msg==windowPosChanged)HoldLayout();
+            base.WndProc(ref message);
+            if(message.Msg==windowPosChanged)ReleaseLayout();
+            if(message.Msg==settingChange){if(TrayCommands!=null)TrayCommands.ApplySystemTheme();if(Options!=null&&Options.theme=="system"){Preferences.dark=Options.IsDark(Preferences.dark);colors=Palette.Create(Preferences.dark);ApplyTheme();}}
+        }
         protected override void Dispose(bool disposing){if(disposing){TrayVisible=false;if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}if(TrayCommands!=null){TrayCommands.Dispose();TrayCommands=null;}}base.Dispose(disposing);}
         void SavePreferences(){if(!preview)Preferences.Save(stateDirectory);}
         void Error(string text){notice=text;status.Text=L.Message(text);status.ForeColor=colors.Danger;}

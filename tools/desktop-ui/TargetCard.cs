@@ -294,7 +294,7 @@ namespace CMCP {
             PaintUi.Icon(g,"grip",new Rectangle(16,44,22,28),Colors.Muted);
             int right=Compact?Width-72:hovered?AppChoice.Left-14:StatusText.Left-14;
             string label=Caption;
-            using(var f=new Font(Font.FontFamily,Preference.hideAddress?Font.Size*1.18f:Font.Size,FontStyle.Bold))PaintUi.Text(g,label,f,new Rectangle(112,Preference.hideAddress?34:30,Math.Max(20,right-112),Preference.hideAddress?46:30),Colors.Text);
+            using(var f=new Font(Font.FontFamily,Preference.hideAddress?Font.Size*1.18f:Font.Size,FontStyle.Bold,Font.Unit))PaintUi.Text(g,label,f,new Rectangle(112,Preference.hideAddress?34:30,Math.Max(20,right-112),Preference.hideAddress?46:30),Colors.Text);
             if(!Preference.hideAddress)PaintUi.Text(g,Address,Font,new Rectangle(112,64,Math.Max(20,right-112),28),Colors.Blue);
             if(Expanded)using(var p=new Pen(Colors.Border))g.DrawLine(p,21,HeaderHeight-10,Width-21,HeaderHeight-10);
         }

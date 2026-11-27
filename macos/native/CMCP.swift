@@ -77,6 +77,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         if testing { configuration.userContentController.addUserScript(WKUserScript(source: "window.CMCP_TEST=true", injectionTime: .atDocumentStart, forMainFrameOnly: true)) }
         web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = self; web.setValue(false, forKey: "drawsBackground")
+        web.pageZoom = 1.0
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "CMCP"; window.minSize = NSSize(width: 660, height: 500); window.center(); window.delegate = self
         window.contentView = web; window.isReleasedWhenClosed = false; window.backgroundColor = App.pageColor
@@ -292,6 +293,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     @objc func restoreExistingWindow(_ notification: Notification) { DispatchQueue.main.async { self.show() } }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return false }
+    func windowDidChangeBackingProperties(_ notification: Notification) {
+        // AppKit sizes the window in points. Keep the viewport in those same
+        // units and let WebKit redraw at the target display's backing scale.
+        guard let content = web else { return }
+        if content.pageZoom != 1.0 { content.pageZoom = 1.0 }
+        content.needsDisplay = true
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if closeAction == "tray" { hideWindow() } else { quit() }
         return false
@@ -530,6 +538,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             finishTests(error: "The window behind the page must show the page colour, not WebKit's white: \(shade(.darkAqua)) \(shade(.aqua))"); return
         }
         testResults.append("unpainted moments show the page colour of the current theme instead of white")
+        let beforeScaleChange = window.frame.size
+        web.pageZoom = 1.5
+        windowDidChangeBackingProperties(Notification(name: NSWindow.didChangeBackingPropertiesNotification, object: window))
+        guard web.pageZoom == 1.0 && window.frame.size == beforeScaleChange else {
+            finishTests(error: "A backing-scale change must keep the window size and normal page zoom"); return
+        }
+        testResults.append("a backing-scale change keeps window points and page zoom stable")
         window.setContentSize(NSSize(width: 700, height: 580))
         let checks = ["document.querySelector('.card-head').click(); document.querySelector('.card').classList.contains('expanded')", "document.querySelector('.card-head').click(); !document.querySelector('.card').classList.contains('expanded')", "document.querySelectorAll('.card.selected').length === 1", "getComputedStyle(document.documentElement,'::-webkit-scrollbar').display === 'none'", "document.body.scrollWidth <= window.innerWidth", "document.querySelector('header h1').textContent === 'CMCP'", "document.querySelectorAll('.card').length === 2", "document.querySelectorAll('.state-label').length === 2", "window.cmcpTest.showSettings('dark','en'); document.documentElement.dataset.theme === 'dark'", "document.querySelector('header h2').textContent === 'General'", "window.cmcpTest.showEditor(); document.querySelectorAll('.settings-nav button').length === 3 && document.querySelectorAll('input[type=password]').length === 2 && !!document.querySelector('[data-focus-key=\"edit:cloudUrl\"]')", "document.querySelectorAll('header').length === 1"] + ["window.cmcpTest.showUpdate(); document.querySelector('.settings-side button').click(); !document.querySelector('.update-banner') && !document.querySelector('.update-ring').hidden && document.querySelector('.update-ring').getAttribute('aria-valuetext').includes('37%')", "window.cmcpTest.showUpdateFailed(); !document.querySelector('.update-ring').hidden && document.querySelector('.update-ring').classList.contains('failed')", "window.cmcpTest.showAbout(); document.querySelectorAll('button.uninstall').length === 1"]
         let trayChecks = ["window.cmcpTest.renameFirst() && document.activeElement === document.querySelector('input[type=text]')", "document.activeElement.selectionStart === 0 && document.activeElement.selectionEnd === document.activeElement.value.length"]

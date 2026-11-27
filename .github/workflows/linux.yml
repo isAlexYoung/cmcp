@@ -37,7 +37,11 @@ jobs:
       - name: Install and exercise the real GTK host as a normal user
         run: |
           sudo apt-get install -y ./build-results/linux/CMCP-*-linux-x64.deb
-          dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_smoke.py
+          spaced_root="$RUNNER_TEMP/AI ProgramFiles/CMCP"
+          mkdir -p "$spaced_root"
+          cp -a /opt/cmcp/. "$spaced_root/"
+          CMCP_SMOKE_ROOT="$spaced_root" dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_smoke.py
+          CMCP_SMOKE_ROOT="$spaced_root" GDK_SCALE=2 dbus-run-session -- xvfb-run -a -s '-screen 0 2560x1800x24' python3 -B linux/tests/native_smoke.py
           dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_tray_smoke.py
           XDG_SESSION_TYPE=x11 dbus-run-session -- xvfb-run -a node linux/tests/native_tools_smoke.mjs
           dbus-run-session -- xvfb-run -a python3 -B linux/tests/native_update_smoke.py build-results/linux/CMCP-*-linux-x64.zip

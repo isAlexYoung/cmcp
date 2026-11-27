@@ -10,7 +10,7 @@ $EvidenceDirectory=[IO.Path]::GetFullPath($EvidenceDirectory)
 $checks=New-Object Collections.Generic.List[string]
 function Check($ok,$name){if(!$ok){throw $name};$checks.Add($name)}
 function Put-File([string]$file,[string]$text){[void][IO.Directory]::CreateDirectory((Split-Path $file -Parent));[IO.File]::WriteAllText($file,$text,[Text.UTF8Encoding]::new($true))}
-$kit=Join-Path $temp 'kit'
+$kit=Join-Path $temp 'AI ProgramFiles'
 $state=Join-Path $temp 'state'
 [void][IO.Directory]::CreateDirectory($kit);[void][IO.Directory]::CreateDirectory($state)
 $node=Get-NodeExe

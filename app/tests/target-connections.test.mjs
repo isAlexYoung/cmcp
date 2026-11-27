@@ -4,6 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
 import {randomBytes} from 'node:crypto';
@@ -277,7 +278,7 @@ test('real server process honors target switches without changing backend PID or
   const enable=(aa,bb)=>write('target-controls.json',{schema:1,targets:[{name:'A',enabled:aa,revision:aa?'A-on':'A-off'},{name:'B',enabled:bb,revision:'B-on'}]});
   await enable(true,false);
   const env={...process.env,LOCALAPPDATA:dir,CMCP_STATE_DIR:state};for(const name of ['HTTPS_PROXY','https_proxy','ALL_PROXY','all_proxy']) delete env[name];
-  const child=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname.replace(/^\/(\w:)/,'$1')],{env,windowsHide:true,stdio:['ignore','ignore','pipe']});
+  const child=spawn(process.execPath,[fileURLToPath(new URL('../server.mjs',import.meta.url))],{env,windowsHide:true,stdio:['ignore','ignore','pipe']});
   let error='';child.stderr.on('data',c=>error+=c.toString().slice(0,2000));
   const read=name=>{try{return JSON.parse(fs.readFileSync(path.join(state,name)));}catch{return null;}};
   t.after(async()=>{

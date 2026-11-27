@@ -45,6 +45,11 @@ jobs:
           $package = Get-Content app/package.json -Raw | ConvertFrom-Json
           $lock = Get-Content app/package-lock.json -Raw | ConvertFrom-Json -AsHashtable
           if ($package.version -ne $lock['version'] -or $package.version -ne $lock['packages']['']['version']) { throw 'Version mismatch' }
+      - name: Run Windows startup self-test from a path with spaces
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File app/tests/spaced-install.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Node authentication, reconnect and independent-target tests
         shell: pwsh
         run: |

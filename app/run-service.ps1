@@ -13,12 +13,12 @@ try {
     $err = Join-Path $StateDir 'service-console.err.log'
     $history = Join-Path $StateDir 'service-crash.log'
     $server = Join-Path $KitDir 'server.mjs'
-    $extra = Get-SavedNodeArgs
+    $extra = @(Get-SavedNodeArgs)
     $delay = 3
     while (!(Test-Path -LiteralPath $StopFlag)) {
         $started = Get-Date
         # $extra 里可能有 --use-system-ca：使用 Windows 证书库，安全软件检查 HTTPS 时也能正常连接
-        $p = Start-Process -FilePath $node -ArgumentList (@($extra) + @('"' + $server + '"')) -WorkingDirectory $KitDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        $p = Start-Process -FilePath $node -ArgumentList (Join-WindowsArguments ($extra + @($server))) -WorkingDirectory $KitDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
         $null = $p.Handle  # 重定向输出时必须先取一次句柄，否则拿不到退出码（就分不出"已有一份在运行"的退出码 3）
         $p.WaitForExit()
         $code = $p.ExitCode

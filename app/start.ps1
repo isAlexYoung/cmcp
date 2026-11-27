@@ -39,8 +39,8 @@ function Test-Environment {
     # 前台实测一次：真正启动本机服务的核心部分（含文件后端），把任何真实错误显示出来，
     # 不让后台服务悄悄失败。配置文件要先准备好，服务才能读取。
     $null = Get-LocalConfig
-    $extra = Resolve-NodeArgs $node
-    $test = Invoke-Capture $node (@($extra) + @((Join-Path $KitDir 'server.mjs'), '--selftest')) 60 $KitDir
+    $extra = @(Resolve-NodeArgs $node)
+    $test = Invoke-Capture $node ($extra + @((Join-Path $KitDir 'server.mjs'), '--selftest')) 60 $KitDir
     if ($test.Out -match 'SELFTEST-OK') {
         Write-Ok '本机服务自检通过。'
     } else {

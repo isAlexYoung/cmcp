@@ -5,7 +5,7 @@ try { Add-Type -AssemblyName System.Security } catch {}
 # Windows PowerShell 5.1 在旧系统上默认可能不启用 TLS 1.2，云电脑地址需要它
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$script:KitVersion = '4.25.1'
+$script:KitVersion = '4.25.2'
 $script:KitDir = $PSScriptRoot
 $script:StateDir = if ($env:CMCP_STATE_DIR) { [IO.Path]::GetFullPath($env:CMCP_STATE_DIR) } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'user' }
 . (Join-Path $PSScriptRoot 'network-settings.ps1')
@@ -299,7 +299,7 @@ function Save-CloudTarget([string]$name, [string]$url, [string]$password, [strin
 
 function Get-CloudAuthMode([string]$url) {
     $node = Get-NodeExe
-    $argsForNode = @(Get-SavedNodeArgs) + @('"' + (Join-Path $KitDir 'detect-auth.mjs') + '"', '"' + $url + '"')
+    $argsForNode = @(Get-SavedNodeArgs) + @((Join-Path $KitDir 'detect-auth.mjs'), $url)
     $r = Invoke-Capture $node $argsForNode 120 $KitDir
     $mode = $r.Out.Trim()
     if ($r.Code -ne 0 -or $mode -notin @('shared-browser','legacy')) { throw '无法安全识别云电脑登录协议，请检查地址和网络后重试；程序没有提交密码。' }
@@ -549,12 +549,22 @@ function Invoke-Quiet([string]$exe, [string[]]$arguments) {
     finally { $ErrorActionPreference = $old }
 }
 
+# Start-Process flattens ArgumentList. Encode raw arguments at that boundary,
+# doubling backslashes before a literal quote or the argument's closing quote.
+function Join-WindowsArguments([string[]]$arguments) {
+    $quoted = foreach ($argument in $arguments) {
+        '"' + ($argument -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+    }
+    return ($quoted -join ' ')
+}
+
 # 运行一个程序并捕获标准输出、错误输出和退出码，超时自动结束。返回 @{ Code; Out; Err; TimedOut }
 function Invoke-Capture([string]$exe, [string[]]$arguments, [int]$timeoutSec = 60, [string]$workDir = $null) {
     $outFile = [IO.Path]::GetTempFileName()
     $errFile = [IO.Path]::GetTempFileName()
     try {
-        $params = @{ FilePath = $exe; ArgumentList = $arguments; PassThru = $true; RedirectStandardOutput = $outFile; RedirectStandardError = $errFile }
+        $params = @{ FilePath = $exe; PassThru = $true; RedirectStandardOutput = $outFile; RedirectStandardError = $errFile }
+        if ($arguments.Count) { $params.ArgumentList = Join-WindowsArguments $arguments }
         # -WindowStyle 在 Windows 上隐藏控制台窗口；PowerShell 7（非 Windows）不支持这个参数
         if ($PSVersionTable.PSEdition -ne 'Core' -or $IsWindows) { $params.WindowStyle = 'Hidden' }
         if ($workDir) { $params.WorkingDirectory = $workDir }

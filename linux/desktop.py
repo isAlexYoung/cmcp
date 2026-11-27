@@ -112,6 +112,8 @@ class Desktop(Gtk.Application):
         manager.connect("script-message-received::cmcp", self.native_message)
         self.web = WebKit2.WebView.new_with_user_content_manager(manager)
         self.web.get_settings().set_enable_developer_extras(False)
+        self.web.set_zoom_level(1.0)
+        self.web.connect("notify::scale-factor", self.display_scale_changed)
         self.web.connect("decide-policy", self.navigation)
         self.web.connect("permission-request", lambda *_: False)
         self.window.remove(self.window.get_child())
@@ -122,6 +124,13 @@ class Desktop(Gtk.Application):
         if self.update_request:
             GLib.timeout_add(300, self.acknowledge_update)
         return False
+
+    def display_scale_changed(self, web, _property):
+        # GTK sizes the window in logical pixels and WebKit handles their
+        # mapping to device pixels. Keep the page zoom separate from that scale.
+        if web.get_zoom_level() != 1.0:
+            web.set_zoom_level(1.0)
+        web.queue_draw()
 
     def start_tray(self):
         if self.tray is not None or self.exiting:

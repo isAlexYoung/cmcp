@@ -48,7 +48,7 @@ namespace CMCP {
         internal SettingsPage(AppSettings values,Palette palette,Action<AppSettings> changed,Action<string> invoked){
             Dock=DockStyle.Fill;Font=UiFont.Points(11F);settings=values;colors=palette;change=changed;action=invoked;
             side.Font=UiFont.Points(10.5F);sheet.Font=UiFont.Points(10.5F);group.Font=UiFont.Points(9F);version.Font=UiFont.Points(9F);
-            title.Font=new Font(UiFont.Points(13F),FontStyle.Bold);
+            title.Font=UiFont.Points(13F,FontStyle.Bold);
             version.Text="CMCP v"+currentVersion;
             side.Controls.AddRange(new Control[]{Back,group,GeneralTab,ConnectTab,ToolsTab,MarketTab,AboutTab,version});top.Controls.Add(title);Viewport.Controls.Add(sheet);
             Controls.Add(Viewport);Controls.Add(top);Controls.Add(side);

@@ -41,7 +41,7 @@ function Stop-SshMcpChannels([string]$Directory, [string]$NodeExe, [int]$Timeout
     }
     if ($fallback) {
         if (!$NodeExe) { return $false }
-        $res = Invoke-Capture $NodeExe @(('"' + (Join-Path $KitDir 'ssh-terminal.mjs') + '"'), '--stop-all', '--state', ('"' + $Directory + '"')) $TimeoutSeconds
+        $res = Invoke-Capture $NodeExe @((Join-Path $KitDir 'ssh-terminal.mjs'), '--stop-all', '--state', $Directory) $TimeoutSeconds
         return ($res.Code -eq 0)
     }
     if (!$active.Count) { return $true }

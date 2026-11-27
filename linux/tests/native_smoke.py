@@ -77,6 +77,11 @@ def inspected(web, task):
             assert "开机自启" not in text
             assert "CMCP" in text
             screenshot("home")
+            width, height = app.window.get_size()
+            assert app.web.get_scale_factor() == int(os.environ.get("GDK_SCALE", "1"))
+            app.web.set_zoom_level(1.5)
+            app.web.notify("scale-factor")
+            assert app.web.get_zoom_level() == 1.0 and app.window.get_size() == (width, height)
             # Exercise the actual WebKit -> GTK -> JavaScript bridge without
             # changing system preferences or launching external programs.
             stage = "bridge"

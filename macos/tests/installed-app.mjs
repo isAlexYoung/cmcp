@@ -15,7 +15,7 @@ const [packages,report]=process.argv.slice(2).map(value=>path.resolve(value));
 const arch=process.arch,app='/Applications/CMCP.app',state=path.join(os.homedir(),'Library/Application Support/CMCP');
 const packageTool=fileURLToPath(new URL('../../tools/package-macos.py',import.meta.url));
 // Not under os.tmpdir(): Foundation shortens /private/var to /var, so process paths would not match.
-const work=fs.realpathSync(fs.mkdtempSync(path.join(process.env.RUNNER_TEMP,'cmcp-installed-'))),mount=path.join(work,'mount');
+const work=fs.realpathSync(fs.mkdtempSync(path.join(process.env.RUNNER_TEMP,'cmcp installed '))),mount=path.join(work,'mount');
 const checks=[],check=(name,value,detail)=>{assert.ok(value,name+(detail===undefined?'':': '+JSON.stringify(detail)));checks.push(name);console.log('ok - '+name);};
 const run=(file,args)=>execFileSync(file,args,{encoding:'utf8',stdio:['ignore','pipe','inherit']});
 const sha256=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -75,11 +75,14 @@ try{
     fs.writeFileSync(path.join(copy,name),bad);manifest.files.find(file=>file.path===name).sha256=createHash('sha256').update(bad).digest('hex');
   });
 
-  // CMCP_STATE_DIR still wins. Started directly, because open does not pass the environment on.
-  const override=path.join(work,'override');
-  const direct=spawn(path.join(app,'Contents/MacOS/CMCP'),[],{env:{...process.env,CMCP_STATE_DIR:override},stdio:'ignore'});
+  // Exercise the native launcher with spaces in both the bundle and state paths.
+  // Start the executable directly because open does not pass the environment on.
+  const override=path.join(work,'user data'),spacedApp=path.join(work,'CMCP.app');
+  run('/usr/bin/ditto',[app,spacedApp]);
+  const direct=spawn(path.join(spacedApp,'Contents/MacOS/CMCP'),[],{env:{...process.env,CMCP_STATE_DIR:override},stdio:'ignore'});
   const overridden=await waitFor('backend using CMCP_STATE_DIR',()=>instanceIn(override));
   check('CMCP_STATE_DIR overrides the data folder',fs.existsSync(path.join(override,'machine-id'))&&!fs.existsSync(state));
+  check('native launcher starts the backend from a path with spaces',commandOf(overridden.pid).includes(spacedApp+'/Contents/Resources/runtime/node'));
   await stop(overridden);direct.unref();
 
   let instance=await open(app);

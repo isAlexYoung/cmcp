@@ -66,13 +66,27 @@ namespace CMCP {
                         "a wheel notch glides to the whole notch instead of jumping (start "+start+" first "+first+" settled "+settled+" goal "+goal+")");
                 }
                 {
-                    // Moving to another monitor changes text size only; layout pixels and the window size stay, and moving back restores the text.
-                    var card=form.Cards.Values.First();var size=form.Size;float body=card.Font.Size,tool=form.toolbar.Font.Size,start=UiFont.Scale;int home=(int)Math.Round(UiFont.SystemDpi*start);
-                    form.FollowMonitor(UiFont.SystemDpi*2);Application.DoEvents();float ratio=2/start;
-                    form.OpenSettings();Application.DoEvents();float page=form.Settings.Font.Size;form.CloseSettings();Application.DoEvents();
-                    bool scaled=Math.Abs(card.Font.Size-body*ratio)<0.01f&&Math.Abs(form.toolbar.Font.Size-tool*ratio)<0.01f&&Math.Abs(page-22F)<0.01f&&card.Connect.Height==40&&form.Size==size;
-                    form.FollowMonitor(home);Application.DoEvents();
-                    check(scaled&&Math.Abs(card.Font.Size-body)<0.01f&&Math.Abs(form.toolbar.Font.Size-tool)<0.01f&&UiFont.Scale==start,"text follows the monitor DPI while layout pixels stay fixed (body "+body+" page "+page+")");
+                    var card=form.Cards.Values.First();var bounds=form.Bounds;
+                    float body=card.Font.Size,tool=form.toolbar.Font.Size;
+                    bool unchanged=card.Font.Unit==GraphicsUnit.Pixel&&form.toolbar.Font.Unit==GraphicsUnit.Pixel;
+                    IntPtr values=Marshal.AllocHGlobal(16);
+                    try{
+                        foreach(int dpi in new[]{144,192,96}){
+                            Marshal.WriteInt32(values,bounds.Width);Marshal.WriteInt32(values,4,bounds.Height);
+                            unchanged&=SendMessage(form.Handle,0x02e4,new IntPtr(dpi),values)==new IntPtr(1)
+                                &&Marshal.ReadInt32(values)==bounds.Width&&Marshal.ReadInt32(values,4)==bounds.Height;
+                            Marshal.WriteInt32(values,bounds.Left);Marshal.WriteInt32(values,4,bounds.Top);
+                            Marshal.WriteInt32(values,8,bounds.Left+bounds.Width*dpi/96);
+                            Marshal.WriteInt32(values,12,bounds.Top+bounds.Height*dpi/96);
+                            SendMessage(form.Handle,0x02e0,new IntPtr(dpi|(dpi<<16)),values);
+                            Application.DoEvents();
+                            unchanged&=form.Bounds==bounds&&form.LayoutFits()&&card.Font.Size==body&&form.toolbar.Font.Size==tool;
+                        }
+                        form.OpenSettings();Application.DoEvents();
+                        unchanged&=form.Settings.Font.Unit==GraphicsUnit.Pixel&&form.Settings.Font.Size==body;
+                        form.CloseSettings();Application.DoEvents();
+                    } finally{Marshal.FreeHGlobal(values);}
+                    check(unchanged,"mixed-DPI moves keep window bounds, text and controls in the same layout");
                 }
                 int clicked=0;var button=form.Cards.Values.First().Toggle;button.Click+=delegate{clicked++;};button.AccessibilityObject.DoDefaultAction();check(clicked==1,"custom button provides a real accessible default action");
             }
